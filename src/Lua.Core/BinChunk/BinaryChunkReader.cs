@@ -4,64 +4,26 @@ namespace Lua.Core.BinChunk;
 
 public struct BinaryChunkReader
 {
-    private int _position;
+    private BinaryReader _reader;
 
-    public byte[] Data { get; set; }
+    public Stream Data
+    {
+        set => _reader = new BinaryReader(value);
+    }
 
     public byte ReadByte()
     {
-        if (_position >= Data.Length)
-        {
-            throw new IndexOutOfRangeException("No more data to read.");
-        }
-
-        return Data[_position++];
+        return _reader.ReadByte();
     }
 
     public uint ReadUInt32()
     {
-        if (_position + 4 > Data.Length)
-        {
-            throw new IndexOutOfRangeException("No more data to read.");
-        }
-
-        var result = BitConverter.ToUInt32(Data, _position);
-        _position += 4;
-
-        if (!BitConverter.IsLittleEndian)
-        {
-            result = (result >> 24) |
-                     ((result << 8) & 0x00FF0000) |
-                     ((result >> 8) & 0x0000FF00) |
-                     (result << 24);
-        }
-
-        return result;
+        return _reader.ReadUInt32();
     }
 
     public ulong ReadUInt64()
     {
-        if (_position + 8 > Data.Length)
-        {
-            throw new IndexOutOfRangeException("No more data to read.");
-        }
-
-        var result = BitConverter.ToUInt64(Data, _position);
-        _position += 8;
-
-        if (!BitConverter.IsLittleEndian)
-        {
-            result = (result >> 56) |
-                     ((result << 40) & 0x00FF000000000000) |
-                     ((result << 24) & 0x0000FF0000000000) |
-                     ((result << 8) & 0x000000FF00000000) |
-                     ((result >> 8) & 0x00000000FF000000) |
-                     ((result >> 24) & 0x0000000000FF0000) |
-                     ((result >> 40) & 0x000000000000FF00) |
-                     (result << 56);
-        }
-
-        return result;
+        return _reader.ReadUInt64();
     }
 
     public long ReadLuaInteger()
@@ -92,16 +54,7 @@ public struct BinaryChunkReader
 
     public byte[] ReadBytes(uint n)
     {
-        if (_position + n > Data.Length)
-        {
-            throw new IndexOutOfRangeException("No more data to read.");
-        }
-
-        var bytes = new byte[n];
-        Array.Copy(Data, _position, bytes, 0, n);
-        _position += (int)n;
-
-        return bytes;
+        return _reader.ReadBytes((int)n);
     }
 
     public uint[] ReadCode()
@@ -115,9 +68,9 @@ public struct BinaryChunkReader
         return code;
     }
 
-    public object[] ReadConstants()
+    public object?[] ReadConstants()
     {
-        var constants = new object[ReadUInt32()];
+        var constants = new object?[ReadUInt32()];
         for (var i = 0; i < constants.Length; i++)
         {
             constants[i] = ReadConstant();
@@ -126,19 +79,19 @@ public struct BinaryChunkReader
         return constants;
     }
 
-    private object ReadConstant()
+    private object? ReadConstant()
     {
-        switch (ReadByte())
+        return ReadByte() switch
         {
-            case BinaryChunkConstants.TagNil: return null;
-            case BinaryChunkConstants.TagFalse: return ReadByte() != 0;
-            case BinaryChunkConstants.TagTrue: return ReadByte() != 0;
-            case BinaryChunkConstants.TagInteger: return ReadLuaInteger();
-            case BinaryChunkConstants.TagNumber: return ReadLuaNumber();
-            case BinaryChunkConstants.TagShortStr: return ReadString();
-            case BinaryChunkConstants.TagLongStr: return ReadString();
-            default: throw new Exception("Corrupted!");
-        }
+            BinaryChunkConstants.TagNil => null,
+            BinaryChunkConstants.TagFalse => ReadByte() != 0,
+            BinaryChunkConstants.TagTrue => ReadByte() != 0,
+            BinaryChunkConstants.TagInteger => ReadLuaInteger(),
+            BinaryChunkConstants.TagNumber => ReadLuaNumber(),
+            BinaryChunkConstants.TagShortStr => ReadString(),
+            BinaryChunkConstants.TagLongStr => ReadString(),
+            _ => throw new Exception("Corrupted!")
+        };
     }
 
     public Prototype ReadProto(string parentSource)

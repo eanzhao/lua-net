@@ -25,7 +25,7 @@ public static class BinaryChunkExtensions
         }
 
         // Check LuacVersion
-        if (chunk.ReadByte().Equals(BinaryChunkConstants.LuacVersion))
+        if (!chunk.ReadByte().Equals(BinaryChunkConstants.LuacVersion))
         {
             return Result.Failure<BinaryChunkReader>("version mismatch");
         }

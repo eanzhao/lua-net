@@ -114,7 +114,7 @@ public struct Prototype
     /// <summary>
     /// Constants.
     /// </summary>
-    public object[] Constants { get; set; }
+    public object?[] Constants { get; set; }
 
     /// <summary>
     /// Upvalues.
