@@ -170,6 +170,125 @@ public class LuaVirtualMachineTests
         vm.State.Stack.Count.ShouldBe(0);
     }
 
+    [Fact]
+    public void Execute_ShouldHandleEqRegisterComparison()
+    {
+        var main = new LuaPrototype
+        {
+            LineDefined = 0,
+            LastLineDefined = 0,
+            NumberOfParameters = 0,
+            Flags = 0,
+            MaxStackSize = 3,
+            Code =
+            [
+                EncodeAsBx(LuaOpcode.LoadI, a: 0, sBx: 7),
+                EncodeAsBx(LuaOpcode.LoadI, a: 1, sBx: 7),
+                EncodeAbc(LuaOpcode.Eq, a: 0, b: 1, c: 0, k: 0),
+                EncodeSJ(LuaOpcode.Jmp, sJ: 2),
+                EncodeAsBx(LuaOpcode.LoadI, a: 2, sBx: 1),
+                EncodeAbc(LuaOpcode.Return1, a: 2, b: 0, c: 0),
+                EncodeAsBx(LuaOpcode.LoadI, a: 2, sBx: 0),
+                EncodeAbc(LuaOpcode.Return1, a: 2, b: 0, c: 0)
+            ],
+            Constants = [],
+            Upvalues = [],
+            NestedPrototypes = [],
+            Source = "eq_test.lua",
+            LineInfo = [0, 0, 0, 0, 0, 0, 0, 0],
+            AbsoluteLineInfo = [],
+            LocalVariables = []
+        };
+
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(CreateChunk(main));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(1);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleLeRegisterComparison()
+    {
+        var main = new LuaPrototype
+        {
+            LineDefined = 0,
+            LastLineDefined = 0,
+            NumberOfParameters = 0,
+            Flags = 0,
+            MaxStackSize = 3,
+            Code =
+            [
+                EncodeAsBx(LuaOpcode.LoadI, a: 0, sBx: 4),
+                EncodeAsBx(LuaOpcode.LoadI, a: 1, sBx: 4),
+                EncodeAbc(LuaOpcode.Le, a: 0, b: 1, c: 0, k: 0),
+                EncodeSJ(LuaOpcode.Jmp, sJ: 2),
+                EncodeAsBx(LuaOpcode.LoadI, a: 2, sBx: 1),
+                EncodeAbc(LuaOpcode.Return1, a: 2, b: 0, c: 0),
+                EncodeAsBx(LuaOpcode.LoadI, a: 2, sBx: 0),
+                EncodeAbc(LuaOpcode.Return1, a: 2, b: 0, c: 0)
+            ],
+            Constants = [],
+            Upvalues = [],
+            NestedPrototypes = [],
+            Source = "le_test.lua",
+            LineInfo = [0, 0, 0, 0, 0, 0, 0, 0],
+            AbsoluteLineInfo = [],
+            LocalVariables = []
+        };
+
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(CreateChunk(main));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(1);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleEqkChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "eqk_chunk.luac")), "eqk_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(1);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleLtChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "lt_chunk.luac")), "lt_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("lt");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleTestSetChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "testset_chunk.luac")), "testset_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("fallback");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
     private static string GetFixturePath(string folder, string fileName)
     {
         return Path.Combine(AppContext.BaseDirectory, "fixtures", "lua55", folder, fileName);

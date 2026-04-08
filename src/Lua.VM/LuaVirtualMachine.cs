@@ -104,6 +104,18 @@ public sealed class LuaVirtualMachine
                     case LuaOpcode.Jmp:
                         ExecuteJump(frame, instruction);
                         break;
+                    case LuaOpcode.Eq:
+                        ExecuteEqualityComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K);
+                        break;
+                    case LuaOpcode.Lt:
+                        ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison < 0);
+                        break;
+                    case LuaOpcode.Le:
+                        ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison <= 0);
+                        break;
+                    case LuaOpcode.EqK:
+                        ExecuteEqualityComparison(frame, GetRegister(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), instruction.K);
+                        break;
                     case LuaOpcode.EqI:
                         ExecuteImmediateComparison(frame, instruction, static (left, right) => left == right, allowNonNumericAsFalse: true);
                         break;
@@ -121,6 +133,9 @@ public sealed class LuaVirtualMachine
                         break;
                     case LuaOpcode.Test:
                         ExecuteConditionalJump(frame, IsTruthy(GetRegister(frame, instruction.A)), instruction.K);
+                        break;
+                    case LuaOpcode.TestSet:
+                        ExecuteTestSet(frame, instruction);
                         break;
                     case LuaOpcode.MmBin:
                     case LuaOpcode.MmBinI:
@@ -234,6 +249,26 @@ public sealed class LuaVirtualMachine
         frame.Advance(instruction.SJ);
     }
 
+    private void ExecuteEqualityComparison(CallFrame frame, LuaValue left, LuaValue right, int expected)
+    {
+        ExecuteConditionalJump(frame, AreEqual(left, right), expected);
+    }
+
+    private void ExecuteRegisterComparison(
+        CallFrame frame,
+        LuaValue left,
+        LuaValue right,
+        int expected,
+        Func<int, bool> accept)
+    {
+        if (!TryCompareOrdered(left, right, out var comparison))
+        {
+            throw new NotSupportedException("Comparison metamethod dispatch is not implemented yet.");
+        }
+
+        ExecuteConditionalJump(frame, accept(comparison), expected);
+    }
+
     private void ExecuteImmediateComparison(
         CallFrame frame,
         LuaInstruction instruction,
@@ -257,6 +292,20 @@ public sealed class LuaVirtualMachine
         ExecuteConditionalJump(frame, comparison(numericValue, immediate), instruction.K);
     }
 
+    private void ExecuteTestSet(CallFrame frame, LuaInstruction instruction)
+    {
+        var value = GetRegister(frame, instruction.B);
+
+        if (IsTruthy(value) != (instruction.K != 0))
+        {
+            frame.Advance();
+            return;
+        }
+
+        SetRegister(frame, instruction.A, value);
+        ExecuteNextJump(frame);
+    }
+
     private void ExecuteConditionalJump(CallFrame frame, bool condition, int expected)
     {
         if (condition != (expected != 0))
@@ -265,6 +314,11 @@ public sealed class LuaVirtualMachine
             return;
         }
 
+        ExecuteNextJump(frame);
+    }
+
+    private void ExecuteNextJump(CallFrame frame)
+    {
         if (frame.ProgramCounter >= GetCurrentPrototype(frame).Code.Length)
         {
             throw new InvalidOperationException("Conditional instruction is missing the following jump.");
@@ -389,6 +443,39 @@ public sealed class LuaVirtualMachine
         }
 
         return $"function@{prototype.LineDefined}";
+    }
+
+    private static bool AreEqual(LuaValue left, LuaValue right)
+    {
+        if (left.Kind == right.Kind)
+        {
+            return left == right;
+        }
+
+        if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
+        {
+            return leftNumber.Equals(rightNumber);
+        }
+
+        return false;
+    }
+
+    private static bool TryCompareOrdered(LuaValue left, LuaValue right, out int comparison)
+    {
+        if (left.Kind == LuaValueKind.String && right.Kind == LuaValueKind.String)
+        {
+            comparison = StringComparer.Ordinal.Compare(left.AsString(), right.AsString());
+            return true;
+        }
+
+        if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
+        {
+            comparison = leftNumber.CompareTo(rightNumber);
+            return true;
+        }
+
+        comparison = default;
+        return false;
     }
 
     private static bool IsTruthy(LuaValue value)

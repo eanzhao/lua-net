@@ -37,6 +37,7 @@
 - 建立 `Lua.VM.Tests`
 - 用真实 `nested_chunk.luac` 验证执行结果
 - 用真实 `branch_chunk.luac` 验证控制流执行结果
+- 用真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 验证比较与短路行为
 
 ## 设计原则
 
@@ -92,12 +93,17 @@ Lua 完整调用协议里有不少复杂点：
 - `LOADK`
 - `ADD`
 - `JMP`
+- `EQ`
+- `LT`
+- `LE`
+- `EQK`
 - `EQI`
 - `LTI`
 - `LEI`
 - `GTI`
 - `GEI`
 - `TEST`
+- `TESTSET`
 - `CALL`
 - `TAILCALL`
 - `RETURN`
@@ -111,7 +117,10 @@ Lua 完整调用协议里有不少复杂点：
 当前分支和比较也只先支持最小快速路径：
 
 - `TEST` 走 Lua 的真假值规则
+- `TESTSET` 走 Lua 的短路规则
 - 立即数比较先支持数值路径
+- `EQ` / `EQK` 先走原始比较快速路径
+- `LT` / `LE` 先支持数值和字符串顺序比较
 - 元方法与更复杂的比较行为放到后续阶段
 
 ## 模型说明
@@ -156,9 +165,11 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 实现第一版 `LuaVirtualMachine`
 - [x] 支持最小调用与返回协议
 - [x] 支持最小布尔加载与条件跳转
+- [x] 支持第一批比较与短路指令
 - [x] 建立 `Lua.VM.Tests`
 - [x] 用真实 `nested_chunk.luac` 验证执行结果
 - [x] 用真实 `branch_chunk.luac` 验证控制流结果
+- [x] 用真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 验证比较与短路结果
 
 ## 完成标准
 
@@ -178,5 +189,6 @@ Lua 完整调用协议里有不少复杂点：
 - 更完整的调用协议
 - 上值捕获
 - 更完整的跳转与条件分支
-- `TESTSET`、`EQK`、寄存器比较等更多条件指令
+- `EQI` / `LEI` / `GEI` 之外更多比较组合
+- `and` / `or` 之外更复杂的短路场景
 - 元方法调度
