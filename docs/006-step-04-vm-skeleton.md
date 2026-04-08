@@ -255,6 +255,7 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `upvalue_chunk.luac` 验证共享上值捕获结果
 - [x] 用真实 `close_chunk.luac` 验证块作用域关闭上值结果
 - [x] 用真实 `tbc_nil_chunk.luac`、`tbc_false_chunk.luac` 验证 `TBC` 最小快速路径结果
+- [x] 用真实 `tbc_close_chunk.luac` 验证 `__close`、`CLOSE` 与函数退出关闭结果
 
 ## 完成标准
 
@@ -276,10 +277,10 @@ Lua 完整调用协议里有不少复杂点：
 - 共享上值 cell 与 `GETUPVAL` / `SETUPVAL` 已经拆到 `docs/010-step-05-upvalue-cells.md`
 - `CLOSE` 与块作用域上值关闭已经拆到 `docs/011-step-05-close.md`
 - `TBC` 的 `nil/false` 快速路径已经拆到 `docs/012-step-05-tbc.md`
+- `__close` 与 to-be-closed 生命周期第一版已经拆到 `docs/013-step-05-close-metamethod.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
 - `and` / `or` 之外更复杂的短路场景
-- `__close` 方法调用与更完整的 to-be-closed 生命周期路径
 - `LOADF`、`LOADKX`、`EXTRAARG` 等其余加载路径
 - 元方法调度

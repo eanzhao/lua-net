@@ -103,6 +103,7 @@
 接下来继续往下补：
 
 - `TBC` 的 `nil/false` 快速路径已经拆到 `docs/012-step-05-tbc.md`
+- `__close` 与 to-be-closed 生命周期第一版已经拆到 `docs/013-step-05-close-metamethod.md`
 - 更完整的调用协议
 - `LOADF`、`LOADKX`、`EXTRAARG` 的剩余路径
 - 元方法调度

@@ -39,4 +39,17 @@ public class LuaTableTests
 
         table.GetValue(LuaValue.FromString("answer")).IsNil.ShouldBeTrue();
     }
+
+    [Fact]
+    public void SetMetatable_ShouldExposeMetamethodLookup()
+    {
+        var table = new LuaTable();
+        var metatable = new LuaTable();
+
+        metatable.SetValue(LuaValue.FromString("__close"), LuaValue.FromString("handler"));
+        table.SetMetatable(metatable);
+
+        table.TryGetMetamethod("__close", out var handler).ShouldBeTrue();
+        handler.AsString().ShouldBe("handler");
+    }
 }

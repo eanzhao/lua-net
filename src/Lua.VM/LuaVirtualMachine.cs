@@ -30,8 +30,14 @@ public sealed class LuaVirtualMachine
     {
         ArgumentNullException.ThrowIfNull(closure);
 
-        var body = GetBytecodeBody(closure);
-        return ExecuteClosure(closure, body.Prototype, arguments ?? Array.Empty<LuaValue>());
+        var actualArguments = arguments ?? Array.Empty<LuaValue>();
+        return closure.Body switch
+        {
+            LuaBytecodeClosureBody body => ExecuteClosure(closure, body.Prototype, actualArguments),
+            LuaNativeClosureBody body => body.Function(State, closure, actualArguments),
+            null => throw new InvalidOperationException("The closure does not contain an executable body."),
+            _ => throw new InvalidOperationException($"Unsupported closure body type '{closure.Body.GetType().Name}'.")
+        };
     }
 
     public LuaClosure CreateClosure(LuaPrototype prototype, string? debugName = null)
@@ -212,7 +218,7 @@ public sealed class LuaVirtualMachine
                         ExecuteConcat(frame, instruction);
                         break;
                     case LuaOpcode.Close:
-                        frame.CloseOpenUpvaluesFrom(State, instruction.A);
+                        CloseResourcesFrom(frame, instruction.A);
                         break;
                     case LuaOpcode.Tbc:
                         ExecuteToBeClosed(frame, instruction);
@@ -282,9 +288,15 @@ public sealed class LuaVirtualMachine
         }
         finally
         {
-            frame.CloseOpenUpvalues(State);
-            State.PopFrame();
-            State.Stack.SetTop(baseIndex);
+            try
+            {
+                CloseResourcesFrom(frame, 0);
+            }
+            finally
+            {
+                State.PopFrame();
+                State.Stack.SetTop(baseIndex);
+            }
         }
     }
 
@@ -410,7 +422,8 @@ public sealed class LuaVirtualMachine
             return;
         }
 
-        throw new NotSupportedException("To-be-closed values with close methods are not implemented yet.");
+        EnsureCloseMethodExists(value);
+        frame.RegisterToBeClosed(instruction.A);
     }
 
     private void ExecuteConcat(CallFrame frame, LuaInstruction instruction)
@@ -617,6 +630,47 @@ public sealed class LuaVirtualMachine
         }
     }
 
+    private void CloseResourcesFrom(CallFrame frame, int registerIndex)
+    {
+        try
+        {
+            foreach (var trackedRegister in frame.ConsumeToBeClosedRegistersFrom(registerIndex))
+            {
+                CloseToBeClosedValue(frame, trackedRegister, LuaValue.Nil);
+            }
+        }
+        finally
+        {
+            frame.CloseOpenUpvaluesFrom(State, registerIndex);
+        }
+    }
+
+    private void CloseToBeClosedValue(CallFrame frame, int registerIndex, LuaValue errorObject)
+    {
+        var value = GetRegister(frame, registerIndex);
+        if (value.IsNil || (value.Kind == LuaValueKind.Boolean && !value.AsBoolean()))
+        {
+            return;
+        }
+
+        var closeMethod = GetCloseMethod(value);
+        if (closeMethod.Kind != LuaValueKind.Function)
+        {
+            throw new InvalidOperationException("To-be-closed value must expose a '__close' function.");
+        }
+
+        Call(closeMethod.AsFunction(), [value, errorObject]);
+    }
+
+    private void EnsureCloseMethodExists(LuaValue value)
+    {
+        var closeMethod = GetCloseMethod(value);
+        if (closeMethod.Kind != LuaValueKind.Function)
+        {
+            throw new InvalidOperationException("To-be-closed value must expose a '__close' function.");
+        }
+    }
+
     private LuaValue GetRegister(CallFrame frame, int registerIndex)
     {
         return State.Stack[frame.BaseIndex + registerIndex];
@@ -640,6 +694,17 @@ public sealed class LuaVirtualMachine
     private static LuaPrototype GetCurrentPrototype(CallFrame frame)
     {
         return GetBytecodeBody(frame.Closure).Prototype;
+    }
+
+    private static LuaValue GetCloseMethod(LuaValue value)
+    {
+        return value.Kind switch
+        {
+            LuaValueKind.Table => value.AsTable().TryGetMetamethod("__close", out var metamethod)
+                ? metamethod
+                : LuaValue.Nil,
+            _ => throw new NotSupportedException("To-be-closed values currently support tables only.")
+        };
     }
 
     private static LuaValue ConvertConstant(LuaConstant constant)

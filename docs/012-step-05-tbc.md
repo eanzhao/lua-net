@@ -106,7 +106,7 @@
 
 接下来继续往下补：
 
-- `__close` 方法调用
-- 更完整的 to-be-closed 生命周期
+- `__close` 与 to-be-closed 生命周期第一版已经拆到 `docs/013-step-05-close-metamethod.md`
+- 更完整的错误传播与嵌套关闭语义
 - 更完整的调用协议
 - `LOADF`、`LOADKX`、`EXTRAARG` 的剩余路径

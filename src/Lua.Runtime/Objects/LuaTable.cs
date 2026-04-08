@@ -14,6 +14,8 @@ public sealed class LuaTable
 
     public string? DebugName { get; }
 
+    public LuaTable? Metatable { get; private set; }
+
     public LuaValue GetValue(LuaValue key)
     {
         var normalizedKey = NormalizeKey(key);
@@ -30,6 +32,25 @@ public sealed class LuaTable
         }
 
         _entries[normalizedKey] = value;
+    }
+
+    public void SetMetatable(LuaTable? metatable)
+    {
+        Metatable = metatable;
+    }
+
+    public bool TryGetMetamethod(string name, out LuaValue value)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        if (Metatable is null)
+        {
+            value = LuaValue.Nil;
+            return false;
+        }
+
+        value = Metatable.GetValue(LuaValue.FromString(name));
+        return !value.IsNil;
     }
 
     public long GetSequenceLength()

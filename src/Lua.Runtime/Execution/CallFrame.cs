@@ -5,6 +5,7 @@ namespace Lua.Runtime.Execution;
 public sealed class CallFrame
 {
     private readonly Dictionary<int, LuaUpvalue> _openUpvalues = [];
+    private readonly List<int> _toBeClosedRegisters = [];
 
     public CallFrame(LuaClosure closure, int baseIndex, int expectedResults, int programCounter = 0)
     {
@@ -26,6 +27,41 @@ public sealed class CallFrame
     public int ExpectedResults { get; }
 
     public int ProgramCounter { get; private set; }
+
+    public void RegisterToBeClosed(int registerIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(registerIndex);
+
+        if (!_toBeClosedRegisters.Contains(registerIndex))
+        {
+            _toBeClosedRegisters.Add(registerIndex);
+        }
+    }
+
+    public IReadOnlyList<int> ConsumeToBeClosedRegistersFrom(int registerIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(registerIndex);
+
+        if (_toBeClosedRegisters.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var registers = new List<int>();
+        for (var index = _toBeClosedRegisters.Count - 1; index >= 0; index--)
+        {
+            var trackedRegister = _toBeClosedRegisters[index];
+            if (trackedRegister < registerIndex)
+            {
+                continue;
+            }
+
+            registers.Add(trackedRegister);
+            _toBeClosedRegisters.RemoveAt(index);
+        }
+
+        return registers;
+    }
 
     public LuaUpvalue GetOrCreateOpenUpvalue(int registerIndex)
     {
