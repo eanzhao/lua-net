@@ -20,13 +20,24 @@
 - 明确项目目标为 Lua 5.5.0
 - 拉取官方 Lua 5.5.0 源码到 `references/lua-5.5.0/`
 - 建立新的运行时主线项目 `Lua.Runtime`
+- 建立字节码主线项目 `Lua.Bytecode`
+- 建立虚拟机主线项目 `Lua.VM`
 - 完成运行时值、栈、调用帧、状态对象的第一版骨架
+- 完成 Lua 5.5 指令布局、opcode 顺序和字节码静态模型
+- 完成第一版 Lua 5.5 chunk 读取器、`proto` 模型和反汇编器
+- 完成第一版 VM 骨架和最小执行循环
+- 补上第一批布尔加载、条件判断和跳转指令
 - 建立 `Lua.Runtime.Tests`
+- 建立 `Lua.Bytecode.Tests`
+- 建立 `Lua.VM.Tests`
+- 加入真实 Lua 5.5 chunk fixture
+- 跑通真实 `nested_chunk.luac` 的执行结果
+- 跑通真实 `branch_chunk.luac` 的控制流执行结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 13 个测试通过
+- 31 个测试通过
 
 ## 仓库结构
 
@@ -38,8 +49,16 @@
   官方 Lua 5.5.0 源码参考
 - `src/Lua.Runtime/`
   当前主线运行时实现
+- `src/Lua.Bytecode/`
+  当前主线字节码实现
+- `src/Lua.VM/`
+  当前主线虚拟机实现
 - `test/Lua.Runtime.Tests/`
   当前主线运行时测试
+- `test/Lua.Bytecode.Tests/`
+  当前主线字节码测试
+- `test/Lua.VM.Tests/`
+  当前主线虚拟机测试
 
 后续会逐步扩展到这些模块：
 
@@ -53,10 +72,12 @@
 
 当前已经落地的文档：
 
-- [docs/001-roadmap.md](/Users/zhaoyiqi/Code/lua-net/docs/001-roadmap.md)
-- [docs/002-step-01-foundation.md](/Users/zhaoyiqi/Code/lua-net/docs/002-step-01-foundation.md)
-- [docs/003-step-01-source-reference.md](/Users/zhaoyiqi/Code/lua-net/docs/003-step-01-source-reference.md)
-- [docs/004-step-02-runtime-model.md](/Users/zhaoyiqi/Code/lua-net/docs/004-step-02-runtime-model.md)
+- [docs/001-roadmap.md](docs/001-roadmap.md)
+- [docs/002-step-01-foundation.md](docs/002-step-01-foundation.md)
+- [docs/003-step-01-source-reference.md](docs/003-step-01-source-reference.md)
+- [docs/004-step-02-runtime-model.md](docs/004-step-02-runtime-model.md)
+- [docs/005-step-03-bytecode-loader.md](docs/005-step-03-bytecode-loader.md)
+- [docs/006-step-04-vm-skeleton.md](docs/006-step-04-vm-skeleton.md)
 
 这些文档对应的是：
 
@@ -64,6 +85,8 @@
 - 第 1 步基础基线
 - 官方源码参考策略
 - 第 2 步运行时模型
+- 第 3 步字节码加载与反汇编
+- 第 4 步 VM 骨架与最小执行闭环
 
 ## 开发方式
 
@@ -114,18 +137,45 @@ ls references/lua-5.5.0/src
 - `LuaStack`
 - `CallFrame`
 - `LuaState`
+- `ILuaClosureBody`
 
 这些类型的目标不是一次做满，而是先为后续 VM、字节码、闭包、表和标准库提供统一的运行时承载结构。
 
+当前 `Lua.Bytecode` 已经包含这些基础能力：
+
+- Lua 5.5 chunk 头常量
+- 指令格式定义
+- 指令位布局定义
+- opcode 枚举
+- opcode 名称表
+- opcode 模式表
+- 原始 32 位指令解码
+- `LuaChunkReader`
+- `LuaChunk` / `LuaPrototype` / `LuaConstant` 模型
+- 真实 Lua 5.5 chunk 的基础结构读取
+- 第一版反汇编输出
+
+当前 `Lua.VM` 已经包含这些基础能力：
+
+- `LuaBytecodeClosureBody`
+- `LuaVirtualMachine`
+- 固定参数、固定返回值的最小调用协议
+- `MOVE` / `LOADFALSE` / `LOADTRUE` / `LOADNIL`
+- `LOADI` / `LOADK` / `ADD`
+- `JMP` / `EQI` / `LTI` / `LEI` / `GTI` / `GEI` / `TEST`
+- `CALL` / `TAILCALL` / `RETURN` / `RETURN0` / `RETURN1`
+- `CLOSURE` / `VARARGPREP`
+- 真实 Lua 5.5 chunk 的最小执行闭环
+- 真实控制流 chunk 的基础执行闭环
+
 ## 下一步
 
-下一步会进入第 3 步：
+下一步会继续第 4 步后半段：
 
-- 编写 `docs/005-step-03-bytecode-loader.md`
-- 对齐 Lua 5.5 二进制块格式
-- 读取 `proto`
-- 建立指令元数据表
-- 实现反汇编输出
+- 扩展更多基础 opcode
+- 补上更多条件指令和跳转场景
+- 补上更完整的调用协议
+- 开始进入上值捕获和元方法调度
 
 ## 参考资料
 

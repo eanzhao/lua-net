@@ -6,4 +6,9 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\Lua.Bytecode\Lua.Bytecode.csproj" />
+        <ProjectReference Include="..\Lua.Runtime\Lua.Runtime.csproj" />
+    </ItemGroup>
+
 </Project>
