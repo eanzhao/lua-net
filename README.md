@@ -28,6 +28,7 @@
 - 完成第一版 VM 骨架和最小执行循环
 - 补上第一批布尔加载、条件判断和跳转指令
 - 补上第一批比较与短路指令
+- 补上第一批算术与一元运算指令
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -35,11 +36,12 @@
 - 跑通真实 `nested_chunk.luac` 的执行结果
 - 跑通真实 `branch_chunk.luac` 的控制流执行结果
 - 跑通真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 的比较与短路结果
+- 跑通真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 的算术与一元结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 36 个测试通过
+- 40 个测试通过
 
 ## 仓库结构
 
@@ -163,7 +165,9 @@ ls references/lua-5.5.0/src
 - `LuaVirtualMachine`
 - 固定参数、固定返回值的最小调用协议
 - `MOVE` / `LOADFALSE` / `LOADTRUE` / `LOADNIL`
-- `LOADI` / `LOADK` / `ADD`
+- `LOADI` / `LOADK`
+- `ADDI` / `ADDK` / `ADD` / `SUB` / `MUL` / `MOD` / `DIV` / `IDIV`
+- `UNM` / `NOT`
 - `JMP`
 - `EQ` / `LT` / `LE` / `EQK`
 - `EQI` / `LTI` / `LEI` / `GTI` / `GEI`
@@ -173,6 +177,7 @@ ls references/lua-5.5.0/src
 - 真实 Lua 5.5 chunk 的最小执行闭环
 - 真实控制流 chunk 的基础执行闭环
 - 真实比较与短路 chunk 的基础执行闭环
+- 真实算术与一元 chunk 的基础执行闭环
 
 ## 下一步
 
@@ -181,6 +186,7 @@ ls references/lua-5.5.0/src
 - 扩展更多基础 opcode
 - 补上更多条件指令和跳转场景
 - 补上更完整的调用协议
+- 补上更多 K 变体和位运算
 - 开始进入上值捕获和元方法调度
 
 ## 参考资料

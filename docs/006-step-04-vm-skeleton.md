@@ -38,6 +38,7 @@
 - 用真实 `nested_chunk.luac` 验证执行结果
 - 用真实 `branch_chunk.luac` 验证控制流执行结果
 - 用真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 验证比较与短路行为
+- 用真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 验证算术与一元运算行为
 
 ## 设计原则
 
@@ -91,7 +92,16 @@ Lua 完整调用协议里有不少复杂点：
 - `LOADNIL`
 - `LOADI`
 - `LOADK`
+- `ADDI`
+- `ADDK`
 - `ADD`
+- `SUB`
+- `MUL`
+- `MOD`
+- `DIV`
+- `IDIV`
+- `UNM`
+- `NOT`
 - `JMP`
 - `EQ`
 - `LT`
@@ -113,6 +123,14 @@ Lua 完整调用协议里有不少复杂点：
 - `VARARGPREP`
 
 当前 `ADD` 只先支持数值快速路径；配套的元方法分派先留到后续阶段继续做。
+
+当前算术也只先支持最小快速路径：
+
+- `ADDI` / `ADDK` / `ADD` / `SUB` / `MUL` 先支持整数与浮点数
+- `DIV` 按 Lua 规则返回浮点结果
+- `IDIV` 和 `MOD` 先对齐 Lua 的向下取整和取模规则
+- `UNM` / `NOT` 先支持基础数值和真假值语义
+- 算术元方法分派放到后续阶段
 
 当前分支和比较也只先支持最小快速路径：
 
@@ -166,10 +184,12 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 支持最小调用与返回协议
 - [x] 支持最小布尔加载与条件跳转
 - [x] 支持第一批比较与短路指令
+- [x] 支持第一批算术与一元运算指令
 - [x] 建立 `Lua.VM.Tests`
 - [x] 用真实 `nested_chunk.luac` 验证执行结果
 - [x] 用真实 `branch_chunk.luac` 验证控制流结果
 - [x] 用真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 验证比较与短路结果
+- [x] 用真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 验证算术与一元结果
 
 ## 完成标准
 
@@ -185,10 +205,11 @@ Lua 完整调用协议里有不少复杂点：
 
 这一步跑通之后，后续继续往下补：
 
-- `ADDK` / `ADDI` 等更多基础指令
+- `SUBK` / `MULK` / `DIVK` / `IDIVK` / `MODK` 等更多 K 变体
 - 更完整的调用协议
 - 上值捕获
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
 - `and` / `or` 之外更复杂的短路场景
+- 位运算与移位
 - 元方法调度
