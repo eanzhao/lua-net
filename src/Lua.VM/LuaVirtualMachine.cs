@@ -214,6 +214,9 @@ public sealed class LuaVirtualMachine
                     case LuaOpcode.Close:
                         frame.CloseOpenUpvaluesFrom(State, instruction.A);
                         break;
+                    case LuaOpcode.Tbc:
+                        ExecuteToBeClosed(frame, instruction);
+                        break;
                     case LuaOpcode.Call:
                         ExecuteCall(frame, instruction);
                         break;
@@ -397,6 +400,17 @@ public sealed class LuaVirtualMachine
         }
 
         throw new NotSupportedException("Length semantics beyond strings and tables are not implemented yet.");
+    }
+
+    private void ExecuteToBeClosed(CallFrame frame, LuaInstruction instruction)
+    {
+        var value = GetRegister(frame, instruction.A);
+        if (value.IsNil || (value.Kind == LuaValueKind.Boolean && !value.AsBoolean()))
+        {
+            return;
+        }
+
+        throw new NotSupportedException("To-be-closed values with close methods are not implemented yet.");
     }
 
     private void ExecuteConcat(CallFrame frame, LuaInstruction instruction)

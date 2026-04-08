@@ -528,6 +528,36 @@ public class LuaVirtualMachineTests
         vm.State.Stack.Count.ShouldBe(0);
     }
 
+    [Fact]
+    public void Execute_ShouldHandleTbcNilChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "tbc_nil_chunk.luac")), "tbc_nil_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleTbcFalseChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "tbc_false_chunk.luac")), "tbc_false_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
     private static string GetFixturePath(string folder, string fileName)
     {
         return Path.Combine(AppContext.BaseDirectory, "fixtures", "lua55", folder, fileName);
