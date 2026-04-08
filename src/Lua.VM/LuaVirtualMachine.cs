@@ -41,7 +41,8 @@ public sealed class LuaVirtualMachine
         return new LuaClosure(
             debugName ?? GetDebugName(prototype),
             prototype.Upvalues.Length,
-            new LuaBytecodeClosureBody(prototype));
+            new LuaBytecodeClosureBody(prototype),
+            BuildUpvalues(prototype, parentFrame: null));
     }
 
     private LuaValue[] ExecuteClosure(LuaClosure closure, LuaPrototype prototype, IReadOnlyList<LuaValue> arguments)
@@ -83,6 +84,42 @@ public sealed class LuaVirtualMachine
                         break;
                     case LuaOpcode.LoadK:
                         SetRegister(frame, instruction.A, ConvertConstant(prototype.Constants[instruction.Bx]));
+                        break;
+                    case LuaOpcode.GetUpVal:
+                        SetRegister(frame, instruction.A, GetUpvalue(frame, instruction.B));
+                        break;
+                    case LuaOpcode.GetTabUp:
+                        ExecuteTableGet(frame, instruction.A, GetUpvalue(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]));
+                        break;
+                    case LuaOpcode.GetTable:
+                        ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C));
+                        break;
+                    case LuaOpcode.GetI:
+                        ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), LuaValue.FromInteger(instruction.C));
+                        break;
+                    case LuaOpcode.GetField:
+                        ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]));
+                        break;
+                    case LuaOpcode.SetUpVal:
+                        SetUpvalue(frame, instruction.B, GetRegister(frame, instruction.A));
+                        break;
+                    case LuaOpcode.SetTabUp:
+                        ExecuteTableSet(frame, GetUpvalue(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), GetRkValue(frame, prototype, instruction.C, instruction.K));
+                        break;
+                    case LuaOpcode.SetTable:
+                        ExecuteTableSet(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), GetRkValue(frame, prototype, instruction.C, instruction.K));
+                        break;
+                    case LuaOpcode.SetI:
+                        ExecuteTableSet(frame, GetRegister(frame, instruction.A), LuaValue.FromInteger(instruction.B), GetRkValue(frame, prototype, instruction.C, instruction.K));
+                        break;
+                    case LuaOpcode.SetField:
+                        ExecuteTableSet(frame, GetRegister(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), GetRkValue(frame, prototype, instruction.C, instruction.K));
+                        break;
+                    case LuaOpcode.NewTable:
+                        ExecuteNewTable(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.Self:
+                        ExecuteSelf(frame, prototype, instruction);
                         break;
                     case LuaOpcode.AddI:
                         ExecuteAddImmediate(frame, prototype, instruction);
@@ -239,6 +276,7 @@ public sealed class LuaVirtualMachine
         }
         finally
         {
+            frame.CloseOpenUpvalues(State);
             State.PopFrame();
             State.Stack.SetTop(baseIndex);
         }
@@ -292,6 +330,53 @@ public sealed class LuaVirtualMachine
         }
     }
 
+    private void ExecuteTableGet(CallFrame frame, int targetRegister, LuaValue tableValue, LuaValue key)
+    {
+        if (tableValue.Kind != LuaValueKind.Table)
+        {
+            throw new NotSupportedException("Table access metamethod dispatch is not implemented yet.");
+        }
+
+        SetRegister(frame, targetRegister, tableValue.AsTable().GetValue(key));
+    }
+
+    private void ExecuteTableSet(CallFrame frame, LuaValue tableValue, LuaValue key, LuaValue value)
+    {
+        if (tableValue.Kind != LuaValueKind.Table)
+        {
+            throw new NotSupportedException("Table access metamethod dispatch is not implemented yet.");
+        }
+
+        tableValue.AsTable().SetValue(key, value);
+    }
+
+    private void ExecuteNewTable(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
+    {
+        var extraArgument = ReadFollowingExtraArgument(frame, prototype, instruction.Opcode);
+        var hashCapacity = instruction.VB > 0 ? 1L << (instruction.VB - 1) : 0L;
+        var arrayCapacity = (long)instruction.VC;
+
+        if (instruction.K != 0)
+        {
+            arrayCapacity += (long)extraArgument * (LuaInstructionLayout.MaxArgVC + 1L);
+        }
+
+        var table = new LuaTable(
+            arrayCapacity: SaturateCapacity(arrayCapacity),
+            hashCapacity: SaturateCapacity(hashCapacity));
+
+        SetRegister(frame, instruction.A, LuaValue.FromTable(table));
+    }
+
+    private void ExecuteSelf(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
+    {
+        var receiver = GetRegister(frame, instruction.B);
+        var key = ConvertConstant(prototype.Constants[instruction.C]);
+
+        SetRegister(frame, instruction.A + 1, receiver);
+        ExecuteTableGet(frame, instruction.A, receiver, key);
+    }
+
     private void ExecuteLength(CallFrame frame, LuaInstruction instruction)
     {
         var value = GetRegister(frame, instruction.B);
@@ -302,7 +387,13 @@ public sealed class LuaVirtualMachine
             return;
         }
 
-        throw new NotSupportedException("Length semantics beyond strings are not implemented yet.");
+        if (value.Kind == LuaValueKind.Table)
+        {
+            SetRegister(frame, instruction.A, LuaValue.FromInteger(value.AsTable().GetSequenceLength()));
+            return;
+        }
+
+        throw new NotSupportedException("Length semantics beyond strings and tables are not implemented yet.");
     }
 
     private void ExecuteConcat(CallFrame frame, LuaInstruction instruction)
@@ -375,7 +466,7 @@ public sealed class LuaVirtualMachine
     private void ExecuteClosureInstruction(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
     {
         var nestedPrototype = prototype.NestedPrototypes[instruction.Bx];
-        var nestedClosure = CreateClosure(nestedPrototype);
+        var nestedClosure = CreateClosure(nestedPrototype, frame);
 
         SetRegister(frame, instruction.A, LuaValue.FromFunction(nestedClosure));
     }
@@ -519,6 +610,16 @@ public sealed class LuaVirtualMachine
         State.Stack[frame.BaseIndex + registerIndex] = value;
     }
 
+    private LuaValue GetUpvalue(CallFrame frame, int upvalueIndex)
+    {
+        return frame.Closure.Upvalues[upvalueIndex].GetValue(State);
+    }
+
+    private void SetUpvalue(CallFrame frame, int upvalueIndex, LuaValue value)
+    {
+        frame.Closure.Upvalues[upvalueIndex].SetValue(State, value);
+    }
+
     private static LuaPrototype GetCurrentPrototype(CallFrame frame)
     {
         return GetBytecodeBody(frame.Closure).Prototype;
@@ -535,6 +636,51 @@ public sealed class LuaVirtualMachine
             LuaConstantKind.String => LuaValue.FromString(constant.AsString()),
             _ => throw new NotSupportedException($"Constant kind '{constant.Kind}' is not implemented yet.")
         };
+    }
+
+    private LuaClosure CreateClosure(LuaPrototype prototype, CallFrame parentFrame, string? debugName = null)
+    {
+        ArgumentNullException.ThrowIfNull(prototype);
+        ArgumentNullException.ThrowIfNull(parentFrame);
+
+        return new LuaClosure(
+            debugName ?? GetDebugName(prototype),
+            prototype.Upvalues.Length,
+            new LuaBytecodeClosureBody(prototype),
+            BuildUpvalues(prototype, parentFrame));
+    }
+
+    private LuaValue GetRkValue(CallFrame frame, LuaPrototype prototype, int operand, int isConstant)
+    {
+        return isConstant != 0
+            ? ConvertConstant(prototype.Constants[operand])
+            : GetRegister(frame, operand);
+    }
+
+    private LuaUpvalue[] BuildUpvalues(LuaPrototype prototype, CallFrame? parentFrame)
+    {
+        var upvalues = new LuaUpvalue[prototype.Upvalues.Length];
+
+        for (var index = 0; index < prototype.Upvalues.Length; index++)
+        {
+            var descriptor = prototype.Upvalues[index];
+
+            if (parentFrame is null)
+            {
+                upvalues[index] = new LuaUpvalue(
+                    string.Equals(descriptor.Name, "_ENV", StringComparison.Ordinal)
+                        ? LuaValue.FromTable(State.GlobalEnvironment)
+                        : LuaValue.Nil);
+
+                continue;
+            }
+
+            upvalues[index] = descriptor.InStack != 0
+                ? parentFrame.GetOrCreateOpenUpvalue(descriptor.Index)
+                : parentFrame.Closure.Upvalues[descriptor.Index];
+        }
+
+        return upvalues;
     }
 
     private static string GetDebugName(LuaPrototype prototype)
@@ -876,6 +1022,33 @@ public sealed class LuaVirtualMachine
         }
 
         return value << (int)shift;
+    }
+
+    private static int SaturateCapacity(long value)
+    {
+        if (value <= 0)
+        {
+            return 0;
+        }
+
+        return value >= int.MaxValue ? int.MaxValue : (int)value;
+    }
+
+    private static int ReadFollowingExtraArgument(CallFrame frame, LuaPrototype prototype, LuaOpcode owner)
+    {
+        if (frame.ProgramCounter >= prototype.Code.Length)
+        {
+            throw new InvalidOperationException($"Opcode '{owner}' is missing the following EXTRAARG.");
+        }
+
+        var extraInstruction = LuaInstruction.FromRaw(prototype.Code[frame.ProgramCounter]);
+        if (extraInstruction.Opcode != LuaOpcode.ExtraArg)
+        {
+            throw new InvalidOperationException($"Opcode '{owner}' must be followed by EXTRAARG.");
+        }
+
+        frame.Advance();
+        return extraInstruction.Ax;
     }
 
     private static void SkipMetamethodInstructionIfPresent(CallFrame frame, LuaPrototype prototype)

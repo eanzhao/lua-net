@@ -31,21 +31,30 @@
 - 补上第一批算术与一元运算指令
 - 补上第一批 K 变体、位运算和移位指令
 - 补上第一批幂运算和字符串原语指令
+- 补上第一批表构造与原始表访问指令
+- 补上 `SELF` 和最小对象方法调用路径
+- 补上 `_ENV` 和最小全局表访问路径
+- 补上共享上值 cell 与 `GETUPVAL` / `SETUPVAL`
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
 - 加入真实 Lua 5.5 chunk fixture
+- 用官方 Lua 5.5.0 `luac` 统一重编当前 fixture
 - 跑通真实 `nested_chunk.luac` 的执行结果
 - 跑通真实 `branch_chunk.luac` 的控制流执行结果
 - 跑通真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 的比较与短路结果
 - 跑通真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 的算术与一元结果
 - 跑通真实 `k_ops_chunk.luac`、`bit_chunk.luac` 的 K 变体与位运算结果
 - 跑通真实 `pow_chunk.luac`、`str_chunk.luac` 的幂运算与字符串结果
+- 跑通真实 `table_chunk.luac`、`table_dynamic_chunk.luac` 的表访问结果
+- 跑通真实 `self_chunk.luac` 的对象方法调用结果
+- 跑通真实 `global_chunk.luac` 的全局读写结果
+- 跑通真实 `upvalue_chunk.luac` 的共享上值结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 44 个测试通过
+- 54 个测试通过
 
 ## 仓库结构
 
@@ -86,6 +95,10 @@
 - [docs/004-step-02-runtime-model.md](docs/004-step-02-runtime-model.md)
 - [docs/005-step-03-bytecode-loader.md](docs/005-step-03-bytecode-loader.md)
 - [docs/006-step-04-vm-skeleton.md](docs/006-step-04-vm-skeleton.md)
+- [docs/007-step-04-table-access.md](docs/007-step-04-table-access.md)
+- [docs/008-step-04-self-call.md](docs/008-step-04-self-call.md)
+- [docs/009-step-04-global-environment.md](docs/009-step-04-global-environment.md)
+- [docs/010-step-05-upvalue-cells.md](docs/010-step-05-upvalue-cells.md)
 
 这些文档对应的是：
 
@@ -95,6 +108,10 @@
 - 第 2 步运行时模型
 - 第 3 步字节码加载与反汇编
 - 第 4 步 VM 骨架与最小执行闭环
+- 第 4 步补充：表访问与对象基础路径
+- 第 4 步补充：SELF 与对象方法调用
+- 第 4 步补充：_ENV 与最小全局表访问
+- 第 5 步：共享上值 Cell 与最小捕获语义
 
 ## 开发方式
 
@@ -140,6 +157,7 @@ ls references/lua-5.5.0/src
 - `LuaValue`
 - `LuaTable`
 - `LuaClosure`
+- `LuaUpvalue`
 - `LuaThread`
 - `LuaUserData`
 - `LuaStack`
@@ -170,6 +188,14 @@ ls references/lua-5.5.0/src
 - 固定参数、固定返回值的最小调用协议
 - `MOVE` / `LOADFALSE` / `LOADTRUE` / `LOADNIL`
 - `LOADI` / `LOADK`
+- `GETUPVAL`
+- `GETTABUP`
+- `GETTABLE` / `GETI` / `GETFIELD`
+- `SETUPVAL`
+- `SETTABUP`
+- `SETTABLE` / `SETI` / `SETFIELD`
+- `NEWTABLE`
+- `SELF`
 - `ADDI` / `ADDK` / `SUBK` / `MULK` / `MODK` / `DIVK` / `IDIVK`
 - `POWK`
 - `ADD` / `SUB` / `MUL` / `MOD` / `POW` / `DIV` / `IDIV`
@@ -190,15 +216,19 @@ ls references/lua-5.5.0/src
 - 真实算术与一元 chunk 的基础执行闭环
 - 真实 K 变体与位运算 chunk 的基础执行闭环
 - 真实幂运算与字符串 chunk 的基础执行闭环
+- 真实表构造与原始表访问 chunk 的基础执行闭环
+- 真实对象方法调用 chunk 的基础执行闭环
+- 真实全局表访问 chunk 的基础执行闭环
+- 真实共享上值 chunk 的基础执行闭环
 
 ## 下一步
 
-下一步会继续第 4 步后半段：
+下一步会继续第 5 步前半段：
 
 - 扩展更多基础 opcode
 - 补上更多条件指令和跳转场景
 - 补上更完整的调用协议
-- 补上表访问、长度和拼接之外的对象操作
+- 补上 `CLOSE`、`TBC` 与更完整的上值生命周期路径
 - 开始进入上值捕获和元方法调度
 
 ## 参考资料

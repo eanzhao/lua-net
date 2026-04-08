@@ -1,3 +1,5 @@
+using Lua.Runtime.Objects;
+
 namespace Lua.Runtime.Execution;
 
 public sealed class LuaState
@@ -7,9 +9,12 @@ public sealed class LuaState
     public LuaState()
     {
         Stack = new LuaStack();
+        GlobalEnvironment = new LuaTable("_ENV");
     }
 
     public LuaStack Stack { get; }
+
+    public LuaTable GlobalEnvironment { get; }
 
     public IReadOnlyList<CallFrame> Frames => _frames;
 

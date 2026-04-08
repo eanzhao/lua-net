@@ -60,4 +60,14 @@ public class LuaValueTests
         LuaValue.FromThread(thread).AsThread().ShouldBeSameAs(thread);
         LuaValue.FromUserData(userData).AsUserData().ShouldBeSameAs(userData);
     }
+
+    [Fact]
+    public void Closure_ShouldAllocateNilUpvaluesByDefault()
+    {
+        var closure = new LuaClosure("main", 2);
+
+        closure.Upvalues.Length.ShouldBe(2);
+        closure.Upvalues[0].GetValue(new Lua.Runtime.Execution.LuaState()).IsNil.ShouldBeTrue();
+        closure.Upvalues[1].GetValue(new Lua.Runtime.Execution.LuaState()).IsNil.ShouldBeTrue();
+    }
 }

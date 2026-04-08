@@ -41,6 +41,9 @@
 - 用真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 验证算术与一元运算行为
 - 用真实 `k_ops_chunk.luac`、`bit_chunk.luac` 验证 K 变体、位运算与移位行为
 - 用真实 `pow_chunk.luac`、`str_chunk.luac` 验证幂运算与字符串原语行为
+- 用真实 `self_chunk.luac` 验证对象方法调用行为
+- 用真实 `global_chunk.luac` 验证 `_ENV` 全局读写行为
+- 用真实 `upvalue_chunk.luac` 验证共享上值捕获行为
 
 ## 设计原则
 
@@ -94,6 +97,18 @@ Lua 完整调用协议里有不少复杂点：
 - `LOADNIL`
 - `LOADI`
 - `LOADK`
+- `GETUPVAL`
+- `GETTABUP`
+- `GETTABLE`
+- `GETI`
+- `GETFIELD`
+- `SETUPVAL`
+- `SETTABUP`
+- `SETTABLE`
+- `SETI`
+- `SETFIELD`
+- `NEWTABLE`
+- `SELF`
 - `ADDI`
 - `ADDK`
 - `SUBK`
@@ -231,6 +246,9 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 验证算术与一元结果
 - [x] 用真实 `k_ops_chunk.luac`、`bit_chunk.luac` 验证 K 变体、位运算与移位结果
 - [x] 用真实 `pow_chunk.luac`、`str_chunk.luac` 验证幂运算与字符串原语结果
+- [x] 用真实 `self_chunk.luac` 验证对象方法调用结果
+- [x] 用真实 `global_chunk.luac` 验证 `_ENV` 全局读写结果
+- [x] 用真实 `upvalue_chunk.luac` 验证共享上值捕获结果
 
 ## 完成标准
 
@@ -246,11 +264,14 @@ Lua 完整调用协议里有不少复杂点：
 
 这一步跑通之后，后续继续往下补：
 
+- 表访问的最小快速路径已经拆到 `docs/007-step-04-table-access.md`
+- `SELF` 与最小对象方法调用路径已经拆到 `docs/008-step-04-self-call.md`
+- `_ENV` 与最小全局表访问路径已经拆到 `docs/009-step-04-global-environment.md`
+- 共享上值 cell 与 `GETUPVAL` / `SETUPVAL` 已经拆到 `docs/010-step-05-upvalue-cells.md`
 - 更完整的调用协议
-- 上值捕获
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
 - `and` / `or` 之外更复杂的短路场景
-- 表访问、长度和拼接之外的对象操作
+- `CLOSE`、`TBC` 与更完整的上值生命周期路径
 - `LOADF`、`LOADKX`、`EXTRAARG` 等其余加载路径
 - 元方法调度
