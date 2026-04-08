@@ -43,14 +43,35 @@ public sealed class CallFrame
 
     public void CloseOpenUpvalues(LuaState state)
     {
-        ArgumentNullException.ThrowIfNull(state);
+        CloseOpenUpvaluesFrom(state, 0);
+    }
 
-        foreach (var upvalue in _openUpvalues.Values)
+    public void CloseOpenUpvaluesFrom(LuaState state, int registerIndex)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentOutOfRangeException.ThrowIfNegative(registerIndex);
+
+        if (_openUpvalues.Count == 0)
         {
-            upvalue.Close(state);
+            return;
         }
 
-        _openUpvalues.Clear();
+        var keysToClose = new List<int>();
+        foreach (var (key, upvalue) in _openUpvalues)
+        {
+            if (key < registerIndex)
+            {
+                continue;
+            }
+
+            upvalue.Close(state);
+            keysToClose.Add(key);
+        }
+
+        foreach (var key in keysToClose)
+        {
+            _openUpvalues.Remove(key);
+        }
     }
 
     public void Advance(int amount = 1)

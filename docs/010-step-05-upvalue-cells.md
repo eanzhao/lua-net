@@ -67,7 +67,6 @@ Lua 上值有一个关键阶段差异：
 
 当前还没有进入这些内容：
 
-- `CLOSE`
 - `TBC`
 - 更完整的 to-be-closed 语义
 - 更复杂的开放结果调用协议
@@ -113,7 +112,7 @@ Lua 上值有一个关键阶段差异：
 
 接下来继续往下补：
 
-- `CLOSE`
+- `CLOSE` 与块作用域关闭路径已经拆到 `docs/011-step-05-close.md`
 - `TBC`
 - 更完整的调用协议
 - `LOADF`、`LOADKX`、`EXTRAARG` 的剩余路径

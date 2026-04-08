@@ -211,6 +211,9 @@ public sealed class LuaVirtualMachine
                     case LuaOpcode.Concat:
                         ExecuteConcat(frame, instruction);
                         break;
+                    case LuaOpcode.Close:
+                        frame.CloseOpenUpvaluesFrom(State, instruction.A);
+                        break;
                     case LuaOpcode.Call:
                         ExecuteCall(frame, instruction);
                         break;
