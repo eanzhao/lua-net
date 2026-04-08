@@ -36,6 +36,7 @@
 - 补上 `_ENV` 和最小全局表访问路径
 - 补上共享上值 cell 与 `GETUPVAL` / `SETUPVAL`
 - 补上 `CLOSE` 和块作用域上值关闭路径
+- 补上 `TBC` 的 `nil/false` 最小快速路径
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -52,11 +53,12 @@
 - 跑通真实 `global_chunk.luac` 的全局读写结果
 - 跑通真实 `upvalue_chunk.luac` 的共享上值结果
 - 跑通真实 `close_chunk.luac` 的块作用域关闭结果
+- 跑通真实 `tbc_nil_chunk.luac`、`tbc_false_chunk.luac` 的 `TBC` 最小快速路径结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 55 个测试通过
+- 57 个测试通过
 
 ## 仓库结构
 
@@ -102,6 +104,7 @@
 - [docs/009-step-04-global-environment.md](docs/009-step-04-global-environment.md)
 - [docs/010-step-05-upvalue-cells.md](docs/010-step-05-upvalue-cells.md)
 - [docs/011-step-05-close.md](docs/011-step-05-close.md)
+- [docs/012-step-05-tbc.md](docs/012-step-05-tbc.md)
 
 这些文档对应的是：
 
@@ -116,6 +119,7 @@
 - 第 4 步补充：_ENV 与最小全局表访问
 - 第 5 步：共享上值 Cell 与最小捕获语义
 - 第 5 步补充：CLOSE 与块作用域上值关闭
+- 第 5 步补充：TBC 的最小快速路径
 
 ## 开发方式
 
@@ -209,6 +213,7 @@ ls references/lua-5.5.0/src
 - `UNM` / `BNOT` / `NOT`
 - `LEN` / `CONCAT`
 - `CLOSE`
+- `TBC`
 - `JMP`
 - `EQ` / `LT` / `LE` / `EQK`
 - `EQI` / `LTI` / `LEI` / `GTI` / `GEI`
@@ -226,6 +231,7 @@ ls references/lua-5.5.0/src
 - 真实全局表访问 chunk 的基础执行闭环
 - 真实共享上值 chunk 的基础执行闭环
 - 真实块作用域关闭 chunk 的基础执行闭环
+- 真实 `TBC` 最小快速路径 chunk 的基础执行闭环
 
 ## 下一步
 
@@ -234,7 +240,7 @@ ls references/lua-5.5.0/src
 - 扩展更多基础 opcode
 - 补上更多条件指令和跳转场景
 - 补上更完整的调用协议
-- 补上 `TBC` 与更完整的上值生命周期路径
+- 补上 `__close` 方法调用与更完整的 to-be-closed 生命周期路径
 - 开始进入上值捕获和元方法调度
 
 ## 参考资料

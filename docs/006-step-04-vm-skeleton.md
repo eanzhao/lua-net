@@ -45,6 +45,7 @@
 - 用真实 `global_chunk.luac` 验证 `_ENV` 全局读写行为
 - 用真实 `upvalue_chunk.luac` 验证共享上值捕获行为
 - 用真实 `close_chunk.luac` 验证块作用域关闭上值行为
+- 用真实 `tbc_nil_chunk.luac`、`tbc_false_chunk.luac` 验证 `TBC` 的最小快速路径
 
 ## 设计原则
 
@@ -141,6 +142,7 @@ Lua 完整调用协议里有不少复杂点：
 - `LEN`
 - `CONCAT`
 - `CLOSE`
+- `TBC`
 - `JMP`
 - `EQ`
 - `LT`
@@ -252,6 +254,7 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `global_chunk.luac` 验证 `_ENV` 全局读写结果
 - [x] 用真实 `upvalue_chunk.luac` 验证共享上值捕获结果
 - [x] 用真实 `close_chunk.luac` 验证块作用域关闭上值结果
+- [x] 用真实 `tbc_nil_chunk.luac`、`tbc_false_chunk.luac` 验证 `TBC` 最小快速路径结果
 
 ## 完成标准
 
@@ -272,10 +275,11 @@ Lua 完整调用协议里有不少复杂点：
 - `_ENV` 与最小全局表访问路径已经拆到 `docs/009-step-04-global-environment.md`
 - 共享上值 cell 与 `GETUPVAL` / `SETUPVAL` 已经拆到 `docs/010-step-05-upvalue-cells.md`
 - `CLOSE` 与块作用域上值关闭已经拆到 `docs/011-step-05-close.md`
+- `TBC` 的 `nil/false` 快速路径已经拆到 `docs/012-step-05-tbc.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
 - `and` / `or` 之外更复杂的短路场景
-- `TBC` 与更完整的上值生命周期路径
+- `__close` 方法调用与更完整的 to-be-closed 生命周期路径
 - `LOADF`、`LOADKX`、`EXTRAARG` 等其余加载路径
 - 元方法调度

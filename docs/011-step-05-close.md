@@ -102,7 +102,7 @@
 
 接下来继续往下补：
 
-- `TBC`
+- `TBC` 的 `nil/false` 快速路径已经拆到 `docs/012-step-05-tbc.md`
 - 更完整的调用协议
 - `LOADF`、`LOADKX`、`EXTRAARG` 的剩余路径
 - 元方法调度
