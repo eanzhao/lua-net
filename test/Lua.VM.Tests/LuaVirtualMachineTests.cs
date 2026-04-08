@@ -357,6 +357,82 @@ public class LuaVirtualMachineTests
         vm.State.Stack.Count.ShouldBe(0);
     }
 
+    [Fact]
+    public void Execute_ShouldHandleKOpsChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "k_ops_chunk.luac")), "k_ops_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(8);
+        results[0].AsFloat().ShouldBe(17.5d, 1e-12);
+        results[1].AsInteger().ShouldBe(80);
+        results[2].AsFloat().ShouldBe(10d, 1e-12);
+        results[3].AsInteger().ShouldBe(3);
+        results[4].AsInteger().ShouldBe(2);
+        results[5].AsInteger().ShouldBe(4);
+        results[6].AsInteger().ShouldBe(21);
+        results[7].AsInteger().ShouldBe(23);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleBitChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "bit_chunk.luac")), "bit_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(8);
+        results[0].AsInteger().ShouldBe(2);
+        results[1].AsInteger().ShouldBe(7);
+        results[2].AsInteger().ShouldBe(5);
+        results[3].AsInteger().ShouldBe(48);
+        results[4].AsInteger().ShouldBe(0);
+        results[5].AsInteger().ShouldBe(3);
+        results[6].AsInteger().ShouldBe(16);
+        results[7].AsInteger().ShouldBe(~6L);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandlePowChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "pow_chunk.luac")), "pow_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(2);
+        results[0].AsFloat().ShouldBe(32d, 1e-12);
+        results[1].AsFloat().ShouldBe(4d, 1e-12);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleStringChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "str_chunk.luac")), "str_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(2);
+        results[0].AsInteger().ShouldBe(3);
+        results[1].AsString().ShouldBe("lua-net");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
     private static string GetFixturePath(string folder, string fileName)
     {
         return Path.Combine(AppContext.BaseDirectory, "fixtures", "lua55", folder, fileName);

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Lua.Bytecode.Chunks;
 using Lua.Bytecode.Instructions;
 using Lua.Runtime.Execution;
@@ -88,6 +90,39 @@ public sealed class LuaVirtualMachine
                     case LuaOpcode.AddK:
                         ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryAdd);
                         break;
+                    case LuaOpcode.SubK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TrySubtract);
+                        break;
+                    case LuaOpcode.MulK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryMultiply);
+                        break;
+                    case LuaOpcode.ModK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryModulo);
+                        break;
+                    case LuaOpcode.PowK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryPower);
+                        break;
+                    case LuaOpcode.DivK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryDivide);
+                        break;
+                    case LuaOpcode.IDivK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryIntegerDivide);
+                        break;
+                    case LuaOpcode.BandK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseAnd);
+                        break;
+                    case LuaOpcode.BorK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseOr);
+                        break;
+                    case LuaOpcode.BXorK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseXor);
+                        break;
+                    case LuaOpcode.ShlI:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, LuaValue.FromInteger(ToSignedC(instruction.C)), GetRegister(frame, instruction.B), TryShiftLeft);
+                        break;
+                    case LuaOpcode.ShrI:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), LuaValue.FromInteger(ToSignedC(instruction.C)), TryShiftRight);
+                        break;
                     case LuaOpcode.Add:
                         ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryAdd);
                         break;
@@ -100,17 +135,44 @@ public sealed class LuaVirtualMachine
                     case LuaOpcode.Mod:
                         ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryModulo);
                         break;
+                    case LuaOpcode.Pow:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryPower);
+                        break;
                     case LuaOpcode.Div:
                         ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryDivide);
                         break;
                     case LuaOpcode.IDiv:
                         ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryIntegerDivide);
                         break;
+                    case LuaOpcode.Band:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseAnd);
+                        break;
+                    case LuaOpcode.Bor:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseOr);
+                        break;
+                    case LuaOpcode.BXor:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseXor);
+                        break;
+                    case LuaOpcode.Shl:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftLeft);
+                        break;
+                    case LuaOpcode.Shr:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftRight);
+                        break;
                     case LuaOpcode.Unm:
                         ExecuteUnaryArithmetic(frame, instruction, TryUnaryMinus);
                         break;
+                    case LuaOpcode.BNot:
+                        ExecuteUnaryArithmetic(frame, instruction, TryBitwiseNot);
+                        break;
                     case LuaOpcode.Not:
                         SetRegister(frame, instruction.A, LuaValue.FromBoolean(!IsTruthy(GetRegister(frame, instruction.B))));
+                        break;
+                    case LuaOpcode.Len:
+                        ExecuteLength(frame, instruction);
+                        break;
+                    case LuaOpcode.Concat:
+                        ExecuteConcat(frame, instruction);
                         break;
                     case LuaOpcode.Call:
                         ExecuteCall(frame, instruction);
@@ -228,6 +290,37 @@ public sealed class LuaVirtualMachine
         {
             SetRegister(frame, instruction.A + index, LuaValue.Nil);
         }
+    }
+
+    private void ExecuteLength(CallFrame frame, LuaInstruction instruction)
+    {
+        var value = GetRegister(frame, instruction.B);
+
+        if (value.Kind == LuaValueKind.String)
+        {
+            SetRegister(frame, instruction.A, LuaValue.FromInteger(Encoding.UTF8.GetByteCount(value.AsString())));
+            return;
+        }
+
+        throw new NotSupportedException("Length semantics beyond strings are not implemented yet.");
+    }
+
+    private void ExecuteConcat(CallFrame frame, LuaInstruction instruction)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(instruction.B);
+
+        var builder = new StringBuilder();
+        for (var index = 0; index < instruction.B; index++)
+        {
+            if (!TryGetConcatenationString(GetRegister(frame, instruction.A + index), out var text))
+            {
+                throw new NotSupportedException("Concatenation metamethod dispatch is not implemented yet.");
+            }
+
+            builder.Append(text);
+        }
+
+        SetRegister(frame, instruction.A, LuaValue.FromString(builder.ToString()));
     }
 
     private void ExecuteCall(CallFrame frame, LuaInstruction instruction)
@@ -444,40 +537,6 @@ public sealed class LuaVirtualMachine
         };
     }
 
-    private static bool TryAdd(LuaValue left, LuaValue right, out LuaValue result)
-    {
-        if (left.Kind == LuaValueKind.Integer && right.Kind == LuaValueKind.Integer)
-        {
-            result = LuaValue.FromInteger(left.AsInteger() + right.AsInteger());
-            return true;
-        }
-
-        if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
-        {
-            result = LuaValue.FromFloat(leftNumber + rightNumber);
-            return true;
-        }
-
-        result = LuaValue.Nil;
-        return false;
-    }
-
-    private static bool TryGetNumber(LuaValue value, out double result)
-    {
-        switch (value.Kind)
-        {
-            case LuaValueKind.Integer:
-                result = value.AsInteger();
-                return true;
-            case LuaValueKind.Float:
-                result = value.AsFloat();
-                return true;
-            default:
-                result = default;
-                return false;
-        }
-    }
-
     private static string GetDebugName(LuaPrototype prototype)
     {
         if (prototype.LineDefined == 0)
@@ -533,11 +592,20 @@ public sealed class LuaVirtualMachine
         return (false, LuaValue.Nil);
     }
 
+    private static (bool Success, LuaValue Result) TryPower(LuaValue left, LuaValue right)
+    {
+        if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
+        {
+            return (true, LuaValue.FromFloat(Math.Pow(leftNumber, rightNumber)));
+        }
+
+        return (false, LuaValue.Nil);
+    }
+
     private static (bool Success, LuaValue Result) TryDivide(LuaValue left, LuaValue right)
     {
         if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
         {
-            ThrowIfDivisionByZero(rightNumber);
             return (true, LuaValue.FromFloat(leftNumber / rightNumber));
         }
 
@@ -553,7 +621,6 @@ public sealed class LuaVirtualMachine
 
         if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
         {
-            ThrowIfDivisionByZero(rightNumber);
             return (true, LuaValue.FromFloat(Math.Floor(leftNumber / rightNumber)));
         }
 
@@ -569,7 +636,6 @@ public sealed class LuaVirtualMachine
 
         if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
         {
-            ThrowIfDivisionByZero(rightNumber);
             var quotient = Math.Floor(leftNumber / rightNumber);
             return (true, LuaValue.FromFloat(leftNumber - quotient * rightNumber));
         }
@@ -585,6 +651,41 @@ public sealed class LuaVirtualMachine
             LuaValueKind.Float => (true, LuaValue.FromFloat(-value.AsFloat())),
             _ => (false, LuaValue.Nil)
         };
+    }
+
+    private static (bool Success, LuaValue Result) TryBitwiseAnd(LuaValue left, LuaValue right)
+    {
+        return TryBinaryIntegerOperation(left, right, static (x, y) => x & y);
+    }
+
+    private static (bool Success, LuaValue Result) TryBitwiseOr(LuaValue left, LuaValue right)
+    {
+        return TryBinaryIntegerOperation(left, right, static (x, y) => x | y);
+    }
+
+    private static (bool Success, LuaValue Result) TryBitwiseXor(LuaValue left, LuaValue right)
+    {
+        return TryBinaryIntegerOperation(left, right, static (x, y) => x ^ y);
+    }
+
+    private static (bool Success, LuaValue Result) TryShiftLeft(LuaValue left, LuaValue right)
+    {
+        return TryBinaryIntegerOperation(left, right, static (x, y) => LuaShiftLeft(x, y));
+    }
+
+    private static (bool Success, LuaValue Result) TryShiftRight(LuaValue left, LuaValue right)
+    {
+        return TryBinaryIntegerOperation(left, right, static (x, y) => LuaShiftLeft(x, -y));
+    }
+
+    private static (bool Success, LuaValue Result) TryBitwiseNot(LuaValue value)
+    {
+        if (!TryGetInteger(value, out var integer))
+        {
+            return (false, LuaValue.Nil);
+        }
+
+        return (true, LuaValue.FromInteger(~integer));
     }
 
     private static bool AreEqual(LuaValue left, LuaValue right)
@@ -618,6 +719,68 @@ public sealed class LuaVirtualMachine
 
         comparison = default;
         return false;
+    }
+
+    private static bool TryGetNumber(LuaValue value, out double result)
+    {
+        switch (value.Kind)
+        {
+            case LuaValueKind.Integer:
+                result = value.AsInteger();
+                return true;
+            case LuaValueKind.Float:
+                result = value.AsFloat();
+                return true;
+            default:
+                result = default;
+                return false;
+        }
+    }
+
+    private static bool TryGetInteger(LuaValue value, out long result)
+    {
+        switch (value.Kind)
+        {
+            case LuaValueKind.Integer:
+                result = value.AsInteger();
+                return true;
+            case LuaValueKind.Float:
+            {
+                var number = value.AsFloat();
+                if (double.IsFinite(number) &&
+                    number >= long.MinValue &&
+                    number <= long.MaxValue &&
+                    Math.Truncate(number) == number)
+                {
+                    result = (long)number;
+                    return true;
+                }
+
+                break;
+            }
+        }
+
+        result = default;
+        return false;
+    }
+
+    private static bool TryGetConcatenationString(LuaValue value, out string result)
+    {
+        switch (value.Kind)
+        {
+            case LuaValueKind.String:
+                result = value.AsString();
+                return true;
+            case LuaValueKind.Integer:
+                result = value.AsInteger().ToString(CultureInfo.InvariantCulture);
+                return true;
+            case LuaValueKind.Float:
+                result = value.AsFloat().ToString("G17", CultureInfo.InvariantCulture);
+                return true;
+            default:
+                result = string.Empty;
+                return false;
+        }
     }
 
     private static bool IsTruthy(LuaValue value)
@@ -682,12 +845,37 @@ public sealed class LuaVirtualMachine
         return remainder;
     }
 
-    private static void ThrowIfDivisionByZero(double value)
+    private static (bool Success, LuaValue Result) TryBinaryIntegerOperation(
+        LuaValue left,
+        LuaValue right,
+        Func<long, long, long> operation)
     {
-        if (value == 0)
+        if (!TryGetInteger(left, out var leftInteger) || !TryGetInteger(right, out var rightInteger))
         {
-            throw new DivideByZeroException("attempt to divide by zero");
+            return (false, LuaValue.Nil);
         }
+
+        return (true, LuaValue.FromInteger(operation(leftInteger, rightInteger)));
+    }
+
+    private static long LuaShiftLeft(long value, long shift)
+    {
+        if (shift < 0)
+        {
+            if (shift <= -64)
+            {
+                return 0;
+            }
+
+            return value >> (int)(-shift);
+        }
+
+        if (shift >= 64)
+        {
+            return 0;
+        }
+
+        return value << (int)shift;
     }
 
     private static void SkipMetamethodInstructionIfPresent(CallFrame frame, LuaPrototype prototype)

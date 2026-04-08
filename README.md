@@ -29,6 +29,8 @@
 - 补上第一批布尔加载、条件判断和跳转指令
 - 补上第一批比较与短路指令
 - 补上第一批算术与一元运算指令
+- 补上第一批 K 变体、位运算和移位指令
+- 补上第一批幂运算和字符串原语指令
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -37,11 +39,13 @@
 - 跑通真实 `branch_chunk.luac` 的控制流执行结果
 - 跑通真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 的比较与短路结果
 - 跑通真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 的算术与一元结果
+- 跑通真实 `k_ops_chunk.luac`、`bit_chunk.luac` 的 K 变体与位运算结果
+- 跑通真实 `pow_chunk.luac`、`str_chunk.luac` 的幂运算与字符串结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 40 个测试通过
+- 44 个测试通过
 
 ## 仓库结构
 
@@ -166,8 +170,14 @@ ls references/lua-5.5.0/src
 - 固定参数、固定返回值的最小调用协议
 - `MOVE` / `LOADFALSE` / `LOADTRUE` / `LOADNIL`
 - `LOADI` / `LOADK`
-- `ADDI` / `ADDK` / `ADD` / `SUB` / `MUL` / `MOD` / `DIV` / `IDIV`
-- `UNM` / `NOT`
+- `ADDI` / `ADDK` / `SUBK` / `MULK` / `MODK` / `DIVK` / `IDIVK`
+- `POWK`
+- `ADD` / `SUB` / `MUL` / `MOD` / `POW` / `DIV` / `IDIV`
+- `BANDK` / `BORK` / `BXORK`
+- `BAND` / `BOR` / `BXOR`
+- `SHLI` / `SHRI` / `SHL` / `SHR`
+- `UNM` / `BNOT` / `NOT`
+- `LEN` / `CONCAT`
 - `JMP`
 - `EQ` / `LT` / `LE` / `EQK`
 - `EQI` / `LTI` / `LEI` / `GTI` / `GEI`
@@ -178,6 +188,8 @@ ls references/lua-5.5.0/src
 - 真实控制流 chunk 的基础执行闭环
 - 真实比较与短路 chunk 的基础执行闭环
 - 真实算术与一元 chunk 的基础执行闭环
+- 真实 K 变体与位运算 chunk 的基础执行闭环
+- 真实幂运算与字符串 chunk 的基础执行闭环
 
 ## 下一步
 
@@ -186,7 +198,7 @@ ls references/lua-5.5.0/src
 - 扩展更多基础 opcode
 - 补上更多条件指令和跳转场景
 - 补上更完整的调用协议
-- 补上更多 K 变体和位运算
+- 补上表访问、长度和拼接之外的对象操作
 - 开始进入上值捕获和元方法调度
 
 ## 参考资料

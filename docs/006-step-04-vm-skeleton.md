@@ -39,6 +39,8 @@
 - 用真实 `branch_chunk.luac` 验证控制流执行结果
 - 用真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 验证比较与短路行为
 - 用真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 验证算术与一元运算行为
+- 用真实 `k_ops_chunk.luac`、`bit_chunk.luac` 验证 K 变体、位运算与移位行为
+- 用真实 `pow_chunk.luac`、`str_chunk.luac` 验证幂运算与字符串原语行为
 
 ## 设计原则
 
@@ -94,14 +96,34 @@ Lua 完整调用协议里有不少复杂点：
 - `LOADK`
 - `ADDI`
 - `ADDK`
+- `SUBK`
+- `MULK`
+- `MODK`
+- `DIVK`
+- `IDIVK`
+- `POWK`
 - `ADD`
 - `SUB`
 - `MUL`
 - `MOD`
+- `POW`
 - `DIV`
 - `IDIV`
+- `BANDK`
+- `BORK`
+- `BXORK`
+- `BAND`
+- `BOR`
+- `BXOR`
+- `SHLI`
+- `SHRI`
+- `SHL`
+- `SHR`
 - `UNM`
+- `BNOT`
 - `NOT`
+- `LEN`
+- `CONCAT`
 - `JMP`
 - `EQ`
 - `LT`
@@ -126,11 +148,26 @@ Lua 完整调用协议里有不少复杂点：
 
 当前算术也只先支持最小快速路径：
 
-- `ADDI` / `ADDK` / `ADD` / `SUB` / `MUL` 先支持整数与浮点数
+- `ADDI` / `ADDK` / `SUBK` / `MULK` / `ADD` / `SUB` / `MUL` 先支持整数与浮点数
+- `POWK` / `POW` 先支持数值路径，并按 Lua 的浮点结果语义返回
 - `DIV` 按 Lua 规则返回浮点结果
+- `DIVK` / `IDIVK` / `MODK` 和寄存器版本一起对齐 Lua 规则
 - `IDIV` 和 `MOD` 先对齐 Lua 的向下取整和取模规则
 - `UNM` / `NOT` 先支持基础数值和真假值语义
 - 算术元方法分派放到后续阶段
+
+当前字符串原语也先支持最小快速路径：
+
+- `LEN` 先支持字符串长度
+- `CONCAT` 先支持字符串和数值拼接
+- 表、元方法和更完整的对象语义放到后续阶段
+
+当前位运算也先支持快速路径：
+
+- `BANDK` / `BORK` / `BXORK` 与寄存器版本先支持整数运算
+- `SHLI` / `SHRI` / `SHL` / `SHR` 先对齐 Lua 的移位规则
+- `BNOT` 先支持整数路径
+- 位运算元方法分派放到后续阶段
 
 当前分支和比较也只先支持最小快速路径：
 
@@ -185,11 +222,15 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 支持最小布尔加载与条件跳转
 - [x] 支持第一批比较与短路指令
 - [x] 支持第一批算术与一元运算指令
+- [x] 支持第一批 K 变体、位运算与移位指令
+- [x] 支持第一批幂运算与字符串原语指令
 - [x] 建立 `Lua.VM.Tests`
 - [x] 用真实 `nested_chunk.luac` 验证执行结果
 - [x] 用真实 `branch_chunk.luac` 验证控制流结果
 - [x] 用真实 `eqk_chunk.luac`、`lt_chunk.luac`、`testset_chunk.luac` 验证比较与短路结果
 - [x] 用真实 `arith_chunk.luac`、`addk_chunk.luac`、`not_chunk.luac`、`floor_div_chunk.luac` 验证算术与一元结果
+- [x] 用真实 `k_ops_chunk.luac`、`bit_chunk.luac` 验证 K 变体、位运算与移位结果
+- [x] 用真实 `pow_chunk.luac`、`str_chunk.luac` 验证幂运算与字符串原语结果
 
 ## 完成标准
 
@@ -205,11 +246,11 @@ Lua 完整调用协议里有不少复杂点：
 
 这一步跑通之后，后续继续往下补：
 
-- `SUBK` / `MULK` / `DIVK` / `IDIVK` / `MODK` 等更多 K 变体
 - 更完整的调用协议
 - 上值捕获
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
 - `and` / `or` 之外更复杂的短路场景
-- 位运算与移位
+- 表访问、长度和拼接之外的对象操作
+- `LOADF`、`LOADKX`、`EXTRAARG` 等其余加载路径
 - 元方法调度
