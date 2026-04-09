@@ -10,5 +10,11 @@ public sealed class LuaRuntimeException : Exception
         ErrorObject = errorObject;
     }
 
+    public LuaRuntimeException(LuaValue errorObject, Exception innerException)
+        : base(errorObject.ToString(), innerException)
+    {
+        ErrorObject = errorObject;
+    }
+
     public LuaValue ErrorObject { get; }
 }

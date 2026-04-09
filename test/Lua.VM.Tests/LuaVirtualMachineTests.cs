@@ -1,6 +1,7 @@
 using Lua.Bytecode.Chunks;
 using Lua.Bytecode.Instructions;
 using Lua.Runtime.Execution;
+using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
 using Shouldly;
 
@@ -666,6 +667,42 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldRaiseLuaRuntimeExceptionForZeroIntegerForStep()
+    {
+        var main = new LuaPrototype
+        {
+            LineDefined = 0,
+            LastLineDefined = 0,
+            NumberOfParameters = 0,
+            Flags = 0,
+            MaxStackSize = 3,
+            Code =
+            [
+                EncodeAsBx(LuaOpcode.LoadI, a: 0, sBx: 1),
+                EncodeAsBx(LuaOpcode.LoadI, a: 1, sBx: 10),
+                EncodeAsBx(LuaOpcode.LoadI, a: 2, sBx: 0),
+                EncodeAbx(LuaOpcode.ForPrep, a: 0, bx: 0),
+                EncodeAbc(LuaOpcode.Return, a: 0, b: 1, c: 0)
+            ],
+            Constants = [],
+            Upvalues = [],
+            NestedPrototypes = [],
+            Source = "for_zero_step_test.lua",
+            LineInfo = [0, 0, 0, 0, 0],
+            AbsoluteLineInfo = [],
+            LocalVariables = []
+        };
+
+        var vm = new LuaVirtualMachine();
+
+        var exception = Should.Throw<LuaRuntimeException>(() => vm.Execute(CreateChunk(main)));
+
+        exception.ErrorObject.AsString().ShouldBe("'for' step is zero");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Execute_ShouldHandleGenericForChunkFixture()
     {
         var reader = new LuaChunkReader();
@@ -1318,6 +1355,20 @@ public class LuaVirtualMachineTests
         vm.State.GlobalEnvironment.GetValue(LuaValue.FromString("log")).AsString().ShouldBe("[b:boom][a:close-b]");
         vm.State.Frames.ShouldBeEmpty();
         vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Call_ShouldWrapClrExceptionsFromNativeClosures()
+    {
+        var closure = new LuaClosure(
+            "boom",
+            body: new LuaNativeClosureBody(static (_, _, _) => throw new InvalidOperationException("boom")));
+        var vm = new LuaVirtualMachine();
+
+        var exception = Should.Throw<LuaRuntimeException>(() => vm.Call(closure));
+
+        exception.ErrorObject.AsString().ShouldBe("boom");
+        exception.InnerException.ShouldBeOfType<InvalidOperationException>();
     }
 
     private static string GetFixturePath(string folder, string fileName)

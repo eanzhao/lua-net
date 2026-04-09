@@ -60,7 +60,7 @@ public sealed class LuaVirtualMachine
         return closure.Body switch
         {
             LuaBytecodeClosureBody body => ExecuteClosure(closure, body.Prototype, actualArguments),
-            LuaNativeClosureBody body => body.Function(State, closure, actualArguments),
+            LuaNativeClosureBody body => ExecuteNativeClosure(closure, body, actualArguments),
             null => throw new InvalidOperationException("The closure does not contain an executable body."),
             _ => throw new InvalidOperationException($"Unsupported closure body type '{closure.Body.GetType().Name}'.")
         };
@@ -151,7 +151,7 @@ public sealed class LuaVirtualMachine
                 return;
             }
 
-            throw new NotSupportedException("Arithmetic metamethod dispatch is not implemented yet.");
+            throw new NotImplementedException("Arithmetic metamethod dispatch is not implemented yet.");
         }
 
         SetRegister(frame, instruction.A, result);
@@ -229,7 +229,7 @@ public sealed class LuaVirtualMachine
 
             if (!TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
             {
-                throw new NotSupportedException("Table access semantics beyond tables are not implemented yet.");
+                throw new NotImplementedException("Table access semantics beyond tables are not implemented yet.");
             }
 
             if (nextMetamethod.Kind == LuaValueKind.Function)
@@ -277,7 +277,7 @@ public sealed class LuaVirtualMachine
 
             if (!TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
             {
-                throw new NotSupportedException("Table assignment semantics beyond tables are not implemented yet.");
+                throw new NotImplementedException("Table assignment semantics beyond tables are not implemented yet.");
             }
 
             if (nextMetamethod.Kind == LuaValueKind.Function)
@@ -297,7 +297,7 @@ public sealed class LuaVirtualMachine
         var tableValue = GetRegister(frame, instruction.A);
         if (tableValue.Kind != LuaValueKind.Table)
         {
-            throw new NotSupportedException("SETLIST currently supports tables only.");
+            throw new NotImplementedException("SETLIST currently supports tables only.");
         }
 
         var elementCount = instruction.VB;
@@ -377,7 +377,7 @@ public sealed class LuaVirtualMachine
             return;
         }
 
-        throw new NotSupportedException("Length semantics beyond strings, tables, and '__len' metamethods are not implemented yet.");
+        throw new NotImplementedException("Length semantics beyond strings, tables, and '__len' metamethods are not implemented yet.");
     }
 
     private void ExecuteToBeClosed(CallFrame frame, LuaInstruction instruction)
@@ -528,7 +528,7 @@ public sealed class LuaVirtualMachine
     {
         if (stepValue == 0)
         {
-            throw new InvalidOperationException("'for' step is zero");
+            throw CreateRuntimeException("'for' step is zero");
         }
 
         var limit = GetIntegerForLimit(limitValue, initialValue, stepValue);
@@ -552,22 +552,22 @@ public sealed class LuaVirtualMachine
     {
         if (!TryGetNumber(limitValue, out var numericLimit))
         {
-            throw new InvalidOperationException("'for' limit must be a number");
+            throw CreateRuntimeException("'for' limit must be a number");
         }
 
         if (!TryGetNumber(stepValue, out var numericStep))
         {
-            throw new InvalidOperationException("'for' step must be a number");
+            throw CreateRuntimeException("'for' step must be a number");
         }
 
         if (!TryGetNumber(initialValue, out var numericInitial))
         {
-            throw new InvalidOperationException("'for' initial value must be a number");
+            throw CreateRuntimeException("'for' initial value must be a number");
         }
 
         if (numericStep == 0d)
         {
-            throw new InvalidOperationException("'for' step is zero");
+            throw CreateRuntimeException("'for' step is zero");
         }
 
         if (ShouldSkipFloatForLoop(numericInitial, numericLimit, numericStep))
@@ -819,7 +819,7 @@ public sealed class LuaVirtualMachine
             return;
         }
 
-        throw new NotSupportedException("Comparison semantics beyond numeric immediates are not implemented yet.");
+        throw new NotImplementedException("Comparison semantics beyond numeric immediates are not implemented yet.");
     }
 
     private void ExecuteTestSet(CallFrame frame, LuaInstruction instruction)
@@ -1253,7 +1253,7 @@ public sealed class LuaVirtualMachine
                     ExecuteMetamethodBinaryConstant(frame, prototype, instruction);
                     break;
                 default:
-                    throw new NotSupportedException($"Opcode '{instruction.Name}' is not implemented yet.");
+                    throw new NotImplementedException($"Opcode '{instruction.Name}' is not implemented yet.");
             }
         }
 
@@ -1364,7 +1364,7 @@ public sealed class LuaVirtualMachine
             LuaValueKind.Table => value.AsTable().TryGetMetamethod("__close", out var metamethod)
                 ? metamethod
                 : LuaValue.Nil,
-            _ => throw new NotSupportedException("To-be-closed values currently support tables only.")
+            _ => throw new NotImplementedException("To-be-closed values currently support tables only.")
         };
     }
 
@@ -1377,7 +1377,7 @@ public sealed class LuaVirtualMachine
             LuaConstantKind.Integer => LuaValue.FromInteger(constant.AsInteger()),
             LuaConstantKind.Float => LuaValue.FromFloat(constant.AsFloat()),
             LuaConstantKind.String => LuaValue.FromString(constant.AsString()),
-            _ => throw new NotSupportedException($"Constant kind '{constant.Kind}' is not implemented yet.")
+            _ => throw new NotImplementedException($"Constant kind '{constant.Kind}' is not implemented yet.")
         };
     }
 
@@ -1386,7 +1386,7 @@ public sealed class LuaVirtualMachine
         return constant.Kind == LuaConstantKind.String ? constant.AsString() : null;
     }
 
-    private static IReadOnlyList<LuaValue> GetVarargs(
+    private static LuaValue[] GetVarargs(
         LuaPrototype prototype,
         IReadOnlyList<LuaValue> arguments,
         int fixedArgumentCount)
@@ -1804,7 +1804,7 @@ public sealed class LuaVirtualMachine
 
         if (!TryGetNumber(value, out var numericLimit))
         {
-            throw new InvalidOperationException("'for' limit must be a number");
+            throw CreateRuntimeException("'for' limit must be a number");
         }
 
         if (!double.IsFinite(numericLimit))
@@ -1934,6 +1934,27 @@ public sealed class LuaVirtualMachine
         }
 
         return arguments;
+    }
+
+    private LuaValue[] ExecuteNativeClosure(LuaClosure closure, LuaNativeClosureBody body, IReadOnlyList<LuaValue> arguments)
+    {
+        try
+        {
+            return body.Function(State, closure, arguments);
+        }
+        catch (LuaRuntimeException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new LuaRuntimeException(LuaValue.FromString(ex.Message), ex);
+        }
+    }
+
+    private static LuaRuntimeException CreateRuntimeException(string message)
+    {
+        return new LuaRuntimeException(LuaValue.FromString(message));
     }
 
     private static bool IsTruthy(LuaValue value)
