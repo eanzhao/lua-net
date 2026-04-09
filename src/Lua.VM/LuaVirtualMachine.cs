@@ -14,6 +14,15 @@ public sealed class LuaVirtualMachine
 {
     private const byte VarArgFlagMask = 0b00000011;
     private const byte VarArgTableFlag = 0b00000010;
+    private const int LengthMetamethodEvent = 4;
+    private const int EqualityMetamethodEvent = 5;
+    private const int UnaryMinusMetamethodEvent = 18;
+    private const int BitwiseNotMetamethodEvent = 19;
+    private const int LessThanMetamethodEvent = 20;
+    private const int LessEqualMetamethodEvent = 21;
+    private const int ConcatMetamethodEvent = 22;
+    private const int CallMetamethodEvent = 23;
+    private const int MaxCallMetamethodDepth = 32;
     private static readonly string[] MetamethodNames =
     [
         "__index", "__newindex",
@@ -149,12 +158,14 @@ public sealed class LuaVirtualMachine
     private void ExecuteUnaryArithmetic(
         CallFrame frame,
         LuaInstruction instruction,
-        Func<LuaValue, (bool Success, LuaValue Result)> operation)
+        Func<LuaValue, (bool Success, LuaValue Result)> operation,
+        int metamethodEvent)
     {
-        var (success, result) = operation(GetRegister(frame, instruction.B));
+        var operand = GetRegister(frame, instruction.B);
+        var (success, result) = operation(operand);
         if (!success)
         {
-            throw new NotSupportedException("Arithmetic metamethod dispatch is not implemented yet.");
+            result = CallBinaryMetamethodResult(operand, operand, metamethodEvent);
         }
 
         SetRegister(frame, instruction.A, result);
@@ -263,11 +274,23 @@ public sealed class LuaVirtualMachine
 
         if (value.Kind == LuaValueKind.Table)
         {
+            if (TryGetMetamethod(value, GetMetamethodName(LengthMetamethodEvent), out var metamethod))
+            {
+                SetRegister(frame, instruction.A, CallMetamethodResult(metamethod.AsFunction(), value, value));
+                return;
+            }
+
             SetRegister(frame, instruction.A, LuaValue.FromInteger(value.AsTable().GetSequenceLength()));
             return;
         }
 
-        throw new NotSupportedException("Length semantics beyond strings and tables are not implemented yet.");
+        if (TryGetMetamethod(value, GetMetamethodName(LengthMetamethodEvent), out var dynamicMetamethod))
+        {
+            SetRegister(frame, instruction.A, CallMetamethodResult(dynamicMetamethod.AsFunction(), value, value));
+            return;
+        }
+
+        throw new NotSupportedException("Length semantics beyond strings, tables, and '__len' metamethods are not implemented yet.");
     }
 
     private void ExecuteToBeClosed(CallFrame frame, LuaInstruction instruction)
@@ -279,25 +302,35 @@ public sealed class LuaVirtualMachine
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(instruction.B);
 
-        var builder = new StringBuilder();
+        var values = new LuaValue[instruction.B];
         for (var index = 0; index < instruction.B; index++)
         {
-            if (!TryGetConcatenationString(GetRegister(frame, instruction.A + index), out var text))
-            {
-                throw new NotSupportedException("Concatenation metamethod dispatch is not implemented yet.");
-            }
-
-            builder.Append(text);
+            values[index] = GetRegister(frame, instruction.A + index);
         }
 
-        SetRegister(frame, instruction.A, LuaValue.FromString(builder.ToString()));
+        var total = values.Length;
+        while (total > 1)
+        {
+            var left = values[total - 2];
+            var right = values[total - 1];
+
+            if (!TryConcatenateValues(left, right, out var result))
+            {
+                result = CallBinaryMetamethodResult(left, right, ConcatMetamethodEvent);
+            }
+
+            values[total - 2] = result;
+            total -= 1;
+        }
+
+        SetRegister(frame, instruction.A, values[0]);
     }
 
     private void ExecuteCall(CallFrame frame, LuaInstruction instruction)
     {
-        var closure = GetRegister(frame, instruction.A).AsFunction();
+        var callable = GetRegister(frame, instruction.A);
         var arguments = ReadArguments(frame, instruction.A, instruction.B);
-        var results = Call(closure, arguments);
+        var results = CallValue(callable, arguments);
 
         if (instruction.C == 0)
         {
@@ -310,9 +343,9 @@ public sealed class LuaVirtualMachine
 
     private LuaValue[] ExecuteTailCall(CallFrame frame, LuaInstruction instruction)
     {
-        var closure = GetRegister(frame, instruction.A).AsFunction();
+        var callable = GetRegister(frame, instruction.A);
         var arguments = ReadArguments(frame, instruction.A, instruction.B);
-        return Call(closure, arguments);
+        return CallValue(callable, arguments);
     }
 
     private LuaValue[] ExecuteReturn(CallFrame frame, LuaInstruction instruction)
@@ -533,8 +566,8 @@ public sealed class LuaVirtualMachine
         SetRegister(frame, instruction.A + 4, GetRegister(frame, instruction.A + 1));
         SetRegister(frame, instruction.A + 3, GetRegister(frame, instruction.A));
 
-        var iterator = GetRegister(frame, instruction.A + 3).AsFunction();
-        var results = Call(
+        var iterator = GetRegister(frame, instruction.A + 3);
+        var results = CallValue(
             iterator,
             [
                 GetRegister(frame, instruction.A + 4),
@@ -640,9 +673,15 @@ public sealed class LuaVirtualMachine
         SetRegister(frame, resultRegister, results.Length == 0 ? LuaValue.Nil : results[0]);
     }
 
+    private LuaValue[] CallValue(LuaValue callable, IReadOnlyList<LuaValue> arguments)
+    {
+        var resolved = ResolveCallable(callable, arguments);
+        return Call(resolved.Closure, resolved.Arguments);
+    }
+
     private void ExecuteEqualityComparison(CallFrame frame, LuaValue left, LuaValue right, int expected)
     {
-        ExecuteConditionalJump(frame, AreEqual(left, right), expected);
+        ExecuteConditionalJump(frame, AreEqualWithMetamethod(left, right), expected);
     }
 
     private void ExecuteRegisterComparison(
@@ -650,11 +689,13 @@ public sealed class LuaVirtualMachine
         LuaValue left,
         LuaValue right,
         int expected,
-        Func<int, bool> accept)
+        Func<int, bool> accept,
+        int metamethodEvent)
     {
         if (!TryCompareOrdered(left, right, out var comparison))
         {
-            throw new NotSupportedException("Comparison metamethod dispatch is not implemented yet.");
+            ExecuteConditionalJump(frame, CallBinaryMetamethodBoolean(left, right, metamethodEvent), expected);
+            return;
         }
 
         ExecuteConditionalJump(frame, accept(comparison), expected);
@@ -664,23 +705,34 @@ public sealed class LuaVirtualMachine
         CallFrame frame,
         LuaInstruction instruction,
         Func<double, double, bool> comparison,
+        int metamethodEvent = -1,
+        bool flipOperands = false,
         bool allowNonNumericAsFalse = false)
     {
         var value = GetRegister(frame, instruction.A);
-        var immediate = ToSignedB(instruction.B);
+        var immediateValue = GetImmediateComparisonValue(instruction);
 
-        if (!TryGetNumber(value, out var numericValue))
+        if (TryGetNumber(value, out var numericValue) && TryGetNumber(immediateValue, out var numericImmediate))
         {
-            if (allowNonNumericAsFalse)
-            {
-                ExecuteConditionalJump(frame, false, instruction.K);
-                return;
-            }
-
-            throw new NotSupportedException("Comparison metamethod dispatch is not implemented yet.");
+            ExecuteConditionalJump(frame, comparison(numericValue, numericImmediate), instruction.K);
+            return;
         }
 
-        ExecuteConditionalJump(frame, comparison(numericValue, immediate), instruction.K);
+        if (allowNonNumericAsFalse)
+        {
+            ExecuteConditionalJump(frame, false, instruction.K);
+            return;
+        }
+
+        if (metamethodEvent >= 0)
+        {
+            var left = flipOperands ? immediateValue : value;
+            var right = flipOperands ? value : immediateValue;
+            ExecuteConditionalJump(frame, CallBinaryMetamethodBoolean(left, right, metamethodEvent), instruction.K);
+            return;
+        }
+
+        throw new NotSupportedException("Comparison semantics beyond numeric immediates are not implemented yet.");
     }
 
     private void ExecuteTestSet(CallFrame frame, LuaInstruction instruction)
@@ -746,6 +798,48 @@ public sealed class LuaVirtualMachine
 
         throw new LuaRuntimeException(
             LuaValue.FromString($"no metamethod '{metamethodName}' for {left.Kind} and {right.Kind}"));
+    }
+
+    private LuaValue CallBinaryMetamethodResult(LuaValue left, LuaValue right, int eventIndex)
+    {
+        return CallMetamethodResult(ResolveBinaryMetamethod(left, right, eventIndex).AsFunction(), left, right);
+    }
+
+    private bool CallBinaryMetamethodBoolean(LuaValue left, LuaValue right, int eventIndex)
+    {
+        return IsTruthy(CallBinaryMetamethodResult(left, right, eventIndex));
+    }
+
+    private LuaValue CallMetamethodResult(LuaClosure metamethod, LuaValue left, LuaValue right)
+    {
+        var results = Call(metamethod, [left, right]);
+        return results.Length == 0 ? LuaValue.Nil : results[0];
+    }
+
+    private (LuaClosure Closure, IReadOnlyList<LuaValue> Arguments) ResolveCallable(
+        LuaValue callable,
+        IReadOnlyList<LuaValue> arguments)
+    {
+        var currentCallable = callable;
+        var currentArguments = arguments;
+
+        for (var depth = 0; depth < MaxCallMetamethodDepth; depth++)
+        {
+            if (currentCallable.Kind == LuaValueKind.Function)
+            {
+                return (currentCallable.AsFunction(), currentArguments);
+            }
+
+            if (!TryGetMetamethod(currentCallable, GetMetamethodName(CallMetamethodEvent), out var metamethod))
+            {
+                throw new LuaRuntimeException(LuaValue.FromString($"attempt to call a {currentCallable.Kind} value"));
+            }
+
+            currentArguments = PrependArgument(currentCallable, currentArguments);
+            currentCallable = metamethod;
+        }
+
+        throw new LuaRuntimeException(LuaValue.FromString("'__call' chain too long"));
     }
 
     private void InitializeRegisters(int baseIndex, IReadOnlyList<LuaValue> arguments, int fixedArgumentCount)
@@ -962,10 +1056,10 @@ public sealed class LuaVirtualMachine
                     ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftRight);
                     break;
                 case LuaOpcode.Unm:
-                    ExecuteUnaryArithmetic(frame, instruction, TryUnaryMinus);
+                    ExecuteUnaryArithmetic(frame, instruction, TryUnaryMinus, UnaryMinusMetamethodEvent);
                     break;
                 case LuaOpcode.BNot:
-                    ExecuteUnaryArithmetic(frame, instruction, TryBitwiseNot);
+                    ExecuteUnaryArithmetic(frame, instruction, TryBitwiseNot, BitwiseNotMetamethodEvent);
                     break;
                 case LuaOpcode.Not:
                     SetRegister(frame, instruction.A, LuaValue.FromBoolean(!IsTruthy(GetRegister(frame, instruction.B))));
@@ -1033,10 +1127,10 @@ public sealed class LuaVirtualMachine
                     ExecuteEqualityComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K);
                     break;
                 case LuaOpcode.Lt:
-                    ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison < 0);
+                    ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison < 0, LessThanMetamethodEvent);
                     break;
                 case LuaOpcode.Le:
-                    ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison <= 0);
+                    ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison <= 0, LessEqualMetamethodEvent);
                     break;
                 case LuaOpcode.EqK:
                     ExecuteEqualityComparison(frame, GetRegister(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), instruction.K);
@@ -1045,16 +1139,16 @@ public sealed class LuaVirtualMachine
                     ExecuteImmediateComparison(frame, instruction, static (left, right) => left == right, allowNonNumericAsFalse: true);
                     break;
                 case LuaOpcode.LtI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left < right);
+                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left < right, metamethodEvent: LessThanMetamethodEvent);
                     break;
                 case LuaOpcode.LeI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left <= right);
+                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left <= right, metamethodEvent: LessEqualMetamethodEvent);
                     break;
                 case LuaOpcode.GtI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left > right);
+                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left > right, metamethodEvent: LessThanMetamethodEvent, flipOperands: true);
                     break;
                 case LuaOpcode.GeI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left >= right);
+                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left >= right, metamethodEvent: LessEqualMetamethodEvent, flipOperands: true);
                     break;
                 case LuaOpcode.Test:
                     ExecuteConditionalJump(frame, IsTruthy(GetRegister(frame, instruction.A)), instruction.K);
@@ -1476,6 +1570,17 @@ public sealed class LuaVirtualMachine
     {
         if (left.Kind == right.Kind)
         {
+            if (left == right)
+            {
+                return true;
+            }
+
+            if (left.Kind == LuaValueKind.Table &&
+                TryGetMetamethod(left, GetMetamethodName(EqualityMetamethodEvent), out _))
+            {
+                return false;
+            }
+
             return left == right;
         }
 
@@ -1484,7 +1589,39 @@ public sealed class LuaVirtualMachine
             return leftNumber.Equals(rightNumber);
         }
 
+        if (left.Kind == right.Kind &&
+            (left.Kind == LuaValueKind.Table || left.Kind == LuaValueKind.UserData))
+        {
+            return false;
+        }
+
         return false;
+    }
+
+    private bool AreEqualWithMetamethod(LuaValue left, LuaValue right)
+    {
+        if (left.Kind != right.Kind)
+        {
+            return TryGetNumber(left, out var leftNumber) &&
+                   TryGetNumber(right, out var rightNumber) &&
+                   leftNumber.Equals(rightNumber);
+        }
+
+        if (left == right)
+        {
+            return true;
+        }
+
+        if (left.Kind is LuaValueKind.Table or LuaValueKind.UserData)
+        {
+            if (TryGetMetamethod(left, GetMetamethodName(EqualityMetamethodEvent), out var metamethod) ||
+                TryGetMetamethod(right, GetMetamethodName(EqualityMetamethodEvent), out metamethod))
+            {
+                return IsTruthy(CallMetamethodResult(metamethod.AsFunction(), left, right));
+            }
+        }
+
+        return AreEqual(left, right);
     }
 
     private static bool TryCompareOrdered(LuaValue left, LuaValue right, out int comparison)
@@ -1507,13 +1644,25 @@ public sealed class LuaVirtualMachine
 
     private static bool TryGetMetamethod(LuaValue value, string metamethodName, out LuaValue metamethod)
     {
-        if (value.Kind == LuaValueKind.Table)
+        return value.Kind switch
         {
-            return value.AsTable().TryGetMetamethod(metamethodName, out metamethod);
-        }
+            LuaValueKind.Table => value.AsTable().TryGetMetamethod(metamethodName, out metamethod),
+            _ => ReturnMissingMetamethod(out metamethod)
+        };
+    }
 
+    private static bool ReturnMissingMetamethod(out LuaValue metamethod)
+    {
         metamethod = LuaValue.Nil;
         return false;
+    }
+
+    private static LuaValue GetImmediateComparisonValue(LuaInstruction instruction)
+    {
+        var immediate = ToSignedB(instruction.B);
+        return instruction.C != 0
+            ? LuaValue.FromFloat(immediate)
+            : LuaValue.FromInteger(immediate);
     }
 
     private static bool TryGetNumber(LuaValue value, out double result)
@@ -1673,6 +1822,31 @@ public sealed class LuaVirtualMachine
                 result = string.Empty;
                 return false;
         }
+    }
+
+    private static bool TryConcatenateValues(LuaValue left, LuaValue right, out LuaValue result)
+    {
+        if (TryGetConcatenationString(left, out var leftText) &&
+            TryGetConcatenationString(right, out var rightText))
+        {
+            result = LuaValue.FromString(leftText + rightText);
+            return true;
+        }
+
+        result = LuaValue.Nil;
+        return false;
+    }
+
+    private static LuaValue[] PrependArgument(LuaValue head, IReadOnlyList<LuaValue> tail)
+    {
+        var arguments = new LuaValue[tail.Count + 1];
+        arguments[0] = head;
+        for (var index = 0; index < tail.Count; index++)
+        {
+            arguments[index + 1] = tail[index];
+        }
+
+        return arguments;
     }
 
     private static bool IsTruthy(LuaValue value)

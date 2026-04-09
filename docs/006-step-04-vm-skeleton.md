@@ -47,6 +47,10 @@
 - 用真实 `close_chunk.luac` 验证块作用域关闭上值行为
 - 用真实 `tbc_nil_chunk.luac`、`tbc_false_chunk.luac` 验证 `TBC` 的最小快速路径
 - 用真实 `meta_add_chunk.luac`、`meta_addi_chunk.luac`、`meta_flip_chunk.luac`、`meta_addk_chunk.luac` 验证二元元方法分发行为
+- 用真实 `meta_len_chunk.luac`、`meta_concat_chunk.luac`、`meta_eq_chunk.luac`、`meta_lt_chunk.luac`、`meta_le_chunk.luac` 验证长度、拼接与比较元方法行为
+- 用真实 `meta_lti_chunk.luac`、`meta_gti_chunk.luac`、`meta_lei_chunk.luac`、`meta_gei_chunk.luac` 验证立即数比较元方法行为
+- 用真实 `meta_unm_chunk.luac`、`meta_bnot_chunk.luac` 验证一元元方法行为
+- 用真实 `meta_call_chunk.luac`、`meta_tailcall_chunk.luac` 验证最小 `__call` 行为
 
 ## 设计原则
 
@@ -194,30 +198,35 @@ Lua 完整调用协议里有不少复杂点：
 - `DIVK` / `IDIVK` / `MODK` 和寄存器版本一起对齐 Lua 规则
 - `IDIV` 和 `MOD` 先对齐 Lua 的向下取整和取模规则
 - `UNM` / `NOT` 先支持基础数值和真假值语义
-- 一元算术元方法分派放到后续阶段
+- `UNM` 也补上了 table metatable 上的 `__unm`
 
 当前字符串原语也先支持最小快速路径：
 
-- `LEN` 先支持字符串长度
-- `CONCAT` 先支持字符串和数值拼接
-- 表、元方法和更完整的对象语义放到后续阶段
+- `LEN` 先支持字符串长度，以及 table metatable 上的 `__len`
+- `CONCAT` 先支持字符串和数值拼接，也支持 table metatable 上的 `__concat`
+- userdata 和更完整的对象语义放到后续阶段
 
 当前位运算也先支持快速路径：
 
 - `BANDK` / `BORK` / `BXORK` 与寄存器版本先支持整数运算
 - `SHLI` / `SHRI` / `SHL` / `SHR` 先对齐 Lua 的移位规则
 - 二元位运算快速路径失败时，也会通过 `MMBIN` / `MMBINI` / `MMBINK` 走 `__band`、`__bor`、`__bxor`、`__shl`、`__shr`
-- `BNOT` 先支持整数路径
-- 一元位运算元方法分派放到后续阶段
+- `BNOT` 先支持整数路径，也补上了 table metatable 上的 `__bnot`
 
 当前分支和比较也只先支持最小快速路径：
 
 - `TEST` 走 Lua 的真假值规则
 - `TESTSET` 走 Lua 的短路规则
-- 立即数比较先支持数值路径
-- `EQ` / `EQK` 先走原始比较快速路径
-- `LT` / `LE` 先支持数值和字符串顺序比较
-- 元方法与更复杂的比较行为放到后续阶段
+- `EQ` / `EQK` 先走原始比较快速路径，并补上 table metatable 上的 `__eq`
+- `LT` / `LE` 先支持数值和字符串顺序比较，并补上 table metatable 上的 `__lt` / `__le`
+- `LTI` / `LEI` / `GTI` / `GEI` 先支持数值路径，也补上 table metatable 的立即数比较元方法路径
+- userdata 和更复杂的比较行为放到后续阶段
+
+当前调用协议也先支持最小可调用对象路径：
+
+- `CALL` / `TAILCALL` 现在除函数外，也支持 table metatable 上的 `__call`
+- `TFORCALL` 沿用同一套最小 callable 解析
+- `__call` chain 和 userdata 可调用对象放到后续阶段
 
 ## 模型说明
 
@@ -293,6 +302,10 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `global_ok_chunk.luac`、`global_err_chunk.luac` 验证 `ERRNNIL` 与 `global` 声明检查结果
 - [x] 用真实 `vararg_table_return_chunk.luac`、`vararg_table_mix_chunk.luac`、`vararg_table_mutation_chunk.luac` 验证具名 vararg 参数与 vararg table 结果
 - [x] 用真实 `meta_add_chunk.luac`、`meta_addi_chunk.luac`、`meta_flip_chunk.luac`、`meta_addk_chunk.luac` 验证二元元方法分发结果
+- [x] 用真实 `meta_len_chunk.luac`、`meta_concat_chunk.luac`、`meta_eq_chunk.luac`、`meta_lt_chunk.luac`、`meta_le_chunk.luac` 验证长度、拼接与比较元方法结果
+- [x] 用真实 `meta_lti_chunk.luac`、`meta_gti_chunk.luac`、`meta_lei_chunk.luac`、`meta_gei_chunk.luac` 验证立即数比较元方法结果
+- [x] 用真实 `meta_unm_chunk.luac`、`meta_bnot_chunk.luac` 验证一元元方法结果
+- [x] 用真实 `meta_call_chunk.luac`、`meta_tailcall_chunk.luac` 验证最小 `__call` 结果
 
 ## 完成标准
 
@@ -323,6 +336,8 @@ Lua 完整调用协议里有不少复杂点：
 - `repeat / until` 与全局声明检查已经拆到 `docs/019-step-04-repeat-global-checks.md`
 - 具名 vararg 参数与 vararg table 已经拆到 `docs/020-step-04-vararg-table.md`
 - 二元算术与位运算元方法分发已经拆到 `docs/021-step-04-binary-metamethods.md`
+- 长度、拼接与比较元方法分发已经拆到 `docs/022-step-04-length-concat-compare-metamethods.md`
+- 一元元方法与最小 `__call` 已经拆到 `docs/023-step-04-unary-call-metamethods.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合

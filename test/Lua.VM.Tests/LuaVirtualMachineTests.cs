@@ -857,6 +857,201 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleMetaLengthChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_len_chunk.luac")), "meta_len_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaConcatChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_concat_chunk.luac")), "meta_concat_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("lua-net");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaEqualityChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_eq_chunk.luac")), "meta_eq_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(1);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaLessThanChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_lt_chunk.luac")), "meta_lt_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("lt");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaLessEqualChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_le_chunk.luac")), "meta_le_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("le");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaLessThanImmediateChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_lti_chunk.luac")), "meta_lti_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("lti");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaGreaterThanImmediateChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_gti_chunk.luac")), "meta_gti_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("gti");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaLessEqualImmediateChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_lei_chunk.luac")), "meta_lei_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("lei");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaGreaterEqualImmediateChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_gei_chunk.luac")), "meta_gei_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("gei");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaUnaryMinusChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_unm_chunk.luac")), "meta_unm_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaBitwiseNotChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_bnot_chunk.luac")), "meta_bnot_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(5);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaCallChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_call_chunk.luac")), "meta_call_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(43);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMetaTailCallChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "meta_tailcall_chunk.luac")), "meta_tailcall_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(43);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Execute_ShouldHandleSelfChunkFixture()
     {
         var reader = new LuaChunkReader();

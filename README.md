@@ -49,6 +49,8 @@
 - 补上 `ERRNNIL` 与全局声明检查路径
 - 补上具名 vararg 参数与 vararg table 路径
 - 补上 `MMBIN` / `MMBINI` / `MMBINK` 的第一版二元元方法分发路径
+- 补上 `LEN` / `CONCAT` 与比较运算的第一版元方法分发路径
+- 补上 `UNM` / `BNOT` 与最小 `__call` 路径
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -82,11 +84,15 @@
 - 跑通真实 `global_ok_chunk.luac`、`global_err_chunk.luac` 的全局声明检查结果
 - 跑通真实 `vararg_table_return_chunk.luac`、`vararg_table_mix_chunk.luac`、`vararg_table_mutation_chunk.luac` 的具名 vararg 参数与 vararg table 结果
 - 跑通真实 `meta_add_chunk.luac`、`meta_addi_chunk.luac`、`meta_flip_chunk.luac`、`meta_addk_chunk.luac` 的二元元方法分发结果
+- 跑通真实 `meta_len_chunk.luac`、`meta_concat_chunk.luac`、`meta_eq_chunk.luac`、`meta_lt_chunk.luac`、`meta_le_chunk.luac` 的长度、拼接与比较元方法结果
+- 跑通真实 `meta_lti_chunk.luac`、`meta_gti_chunk.luac`、`meta_lei_chunk.luac`、`meta_gei_chunk.luac` 的立即数比较元方法结果
+- 跑通真实 `meta_unm_chunk.luac`、`meta_bnot_chunk.luac` 的一元元方法结果
+- 跑通真实 `meta_call_chunk.luac`、`meta_tailcall_chunk.luac` 的 `__call` 结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 88 个测试通过
+- 101 个测试通过
 
 ## 仓库结构
 
@@ -142,6 +148,8 @@
 - [docs/019-step-04-repeat-global-checks.md](docs/019-step-04-repeat-global-checks.md)
 - [docs/020-step-04-vararg-table.md](docs/020-step-04-vararg-table.md)
 - [docs/021-step-04-binary-metamethods.md](docs/021-step-04-binary-metamethods.md)
+- [docs/022-step-04-length-concat-compare-metamethods.md](docs/022-step-04-length-concat-compare-metamethods.md)
+- [docs/023-step-04-unary-call-metamethods.md](docs/023-step-04-unary-call-metamethods.md)
 
 这些文档对应的是：
 
@@ -166,6 +174,8 @@
 - 第 4 步补充：`repeat / until` 与全局声明检查
 - 第 4 步补充：具名 vararg 参数与 vararg table
 - 第 4 步补充：二元算术与位运算元方法分发
+- 第 4 步补充：长度、拼接与比较元方法分发
+- 第 4 步补充：一元元方法与最小 `__call`
 
 ## 开发方式
 
@@ -271,6 +281,7 @@ ls references/lua-5.5.0/src
 - `TBC`
 - `_ENV.setmetatable`
 - `_ENV.error`
+- table metatable 上的最小 `__call`
 - `JMP`
 - `EQ` / `LT` / `LE` / `EQK`
 - `EQI` / `LTI` / `LEI` / `GTI` / `GEI`
@@ -307,12 +318,14 @@ ls references/lua-5.5.0/src
 - 真实全局声明检查 chunk 的基础执行闭环
 - 真实具名 vararg 参数与 vararg table chunk 的基础执行闭环
 - 真实二元算术与位运算元方法 chunk 的基础执行闭环
+- 真实长度、拼接与比较元方法 chunk 的基础执行闭环
+- 真实一元元方法与 `__call` chunk 的基础执行闭环
 
 ## 下一步
 
 下一步会继续沿着 VM 和运行时主线往下补：
 
-- 补上更多比较、长度、拼接和调用相关元方法
+- 补上 `__index` / `__newindex` 和更一般的表访问元方法
 - 补上更多控制流与标准库配套路径
 - 补上更完整的全局声明与相关语义
 - 扩展 userdata 路径
