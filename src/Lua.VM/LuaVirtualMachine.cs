@@ -14,6 +14,8 @@ public sealed class LuaVirtualMachine
 {
     private const byte VarArgFlagMask = 0b00000011;
     private const byte VarArgTableFlag = 0b00000010;
+    private const int IndexMetamethodEvent = 0;
+    private const int NewIndexMetamethodEvent = 1;
     private const int LengthMetamethodEvent = 4;
     private const int EqualityMetamethodEvent = 5;
     private const int UnaryMinusMetamethodEvent = 18;
@@ -23,6 +25,7 @@ public sealed class LuaVirtualMachine
     private const int ConcatMetamethodEvent = 22;
     private const int CallMetamethodEvent = 23;
     private const int MaxCallMetamethodDepth = 32;
+    private const int MaxTableAccessMetamethodDepth = 2000;
     private static readonly string[] MetamethodNames =
     [
         "__index", "__newindex",
@@ -187,22 +190,106 @@ public sealed class LuaVirtualMachine
 
     private void ExecuteTableGet(CallFrame frame, int targetRegister, LuaValue tableValue, LuaValue key)
     {
-        if (tableValue.Kind != LuaValueKind.Table)
-        {
-            throw new NotSupportedException("Table access metamethod dispatch is not implemented yet.");
-        }
-
-        SetRegister(frame, targetRegister, tableValue.AsTable().GetValue(key));
+        SetRegister(frame, targetRegister, ResolveTableGet(tableValue, key));
     }
 
     private void ExecuteTableSet(CallFrame frame, LuaValue tableValue, LuaValue key, LuaValue value)
     {
-        if (tableValue.Kind != LuaValueKind.Table)
+        AssignTableValue(tableValue, key, value);
+    }
+
+    private LuaValue ResolveTableGet(LuaValue target, LuaValue key)
+    {
+        var currentTarget = target;
+        var metamethodName = GetMetamethodName(IndexMetamethodEvent);
+
+        for (var depth = 0; depth < MaxTableAccessMetamethodDepth; depth++)
         {
-            throw new NotSupportedException("Table access metamethod dispatch is not implemented yet.");
+            if (currentTarget.Kind == LuaValueKind.Table)
+            {
+                var table = currentTarget.AsTable();
+                if (table.TryGetValue(key, out var value))
+                {
+                    return value;
+                }
+
+                if (!table.TryGetMetamethod(metamethodName, out var metamethod))
+                {
+                    return LuaValue.Nil;
+                }
+
+                if (metamethod.Kind == LuaValueKind.Function)
+                {
+                    return CallMetamethodResult(metamethod.AsFunction(), currentTarget, key);
+                }
+
+                currentTarget = metamethod;
+                continue;
+            }
+
+            if (!TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
+            {
+                throw new NotSupportedException("Table access semantics beyond tables are not implemented yet.");
+            }
+
+            if (nextMetamethod.Kind == LuaValueKind.Function)
+            {
+                return CallMetamethodResult(nextMetamethod.AsFunction(), currentTarget, key);
+            }
+
+            currentTarget = nextMetamethod;
         }
 
-        tableValue.AsTable().SetValue(key, value);
+        throw new LuaRuntimeException(LuaValue.FromString($"'{metamethodName}' chain too long; possible loop"));
+    }
+
+    private void AssignTableValue(LuaValue target, LuaValue key, LuaValue value)
+    {
+        var currentTarget = target;
+        var metamethodName = GetMetamethodName(NewIndexMetamethodEvent);
+
+        for (var depth = 0; depth < MaxTableAccessMetamethodDepth; depth++)
+        {
+            if (currentTarget.Kind == LuaValueKind.Table)
+            {
+                var table = currentTarget.AsTable();
+                if (table.TryGetValue(key, out _))
+                {
+                    table.SetValue(key, value);
+                    return;
+                }
+
+                if (!table.TryGetMetamethod(metamethodName, out var metamethod))
+                {
+                    table.SetValue(key, value);
+                    return;
+                }
+
+                if (metamethod.Kind == LuaValueKind.Function)
+                {
+                    Call(metamethod.AsFunction(), [currentTarget, key, value]);
+                    return;
+                }
+
+                currentTarget = metamethod;
+                continue;
+            }
+
+            if (!TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
+            {
+                throw new NotSupportedException("Table assignment semantics beyond tables are not implemented yet.");
+            }
+
+            if (nextMetamethod.Kind == LuaValueKind.Function)
+            {
+                Call(nextMetamethod.AsFunction(), [currentTarget, key, value]);
+                return;
+            }
+
+            currentTarget = nextMetamethod;
+        }
+
+        throw new LuaRuntimeException(LuaValue.FromString($"'{metamethodName}' chain too long; possible loop"));
     }
 
     private void ExecuteSetList(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)

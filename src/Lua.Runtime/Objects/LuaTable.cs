@@ -18,8 +18,13 @@ public sealed class LuaTable
 
     public LuaValue GetValue(LuaValue key)
     {
+        return TryGetValue(key, out var value) ? value : LuaValue.Nil;
+    }
+
+    public bool TryGetValue(LuaValue key, out LuaValue value)
+    {
         var normalizedKey = NormalizeKey(key);
-        return _entries.TryGetValue(normalizedKey, out var value) ? value : LuaValue.Nil;
+        return _entries.TryGetValue(normalizedKey, out value);
     }
 
     public void SetValue(LuaValue key, LuaValue value)

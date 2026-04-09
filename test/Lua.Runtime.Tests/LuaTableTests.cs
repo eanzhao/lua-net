@@ -41,6 +41,29 @@ public class LuaTableTests
     }
 
     [Fact]
+    public void TryGetValue_ShouldDistinguishMissingEntries()
+    {
+        var table = new LuaTable();
+
+        table.SetValue(LuaValue.FromString("answer"), LuaValue.FromInteger(42));
+
+        table.TryGetValue(LuaValue.FromString("answer"), out var existing).ShouldBeTrue();
+        existing.AsInteger().ShouldBe(42);
+        table.TryGetValue(LuaValue.FromString("missing"), out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void TryGetValue_ShouldNormalizeIntegralFloatKeys()
+    {
+        var table = new LuaTable();
+
+        table.SetValue(LuaValue.FromInteger(1), LuaValue.FromString("lua"));
+
+        table.TryGetValue(LuaValue.FromFloat(1.0), out var value).ShouldBeTrue();
+        value.AsString().ShouldBe("lua");
+    }
+
+    [Fact]
     public void SetMetatable_ShouldExposeMetamethodLookup()
     {
         var table = new LuaTable();

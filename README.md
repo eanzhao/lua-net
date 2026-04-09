@@ -51,6 +51,7 @@
 - 补上 `MMBIN` / `MMBINI` / `MMBINK` 的第一版二元元方法分发路径
 - 补上 `LEN` / `CONCAT` 与比较运算的第一版元方法分发路径
 - 补上 `UNM` / `BNOT` 与最小 `__call` 路径
+- 补上 table `__index` / `__newindex` 的第一版表访问元方法分发路径
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -88,11 +89,13 @@
 - 跑通真实 `meta_lti_chunk.luac`、`meta_gti_chunk.luac`、`meta_lei_chunk.luac`、`meta_gei_chunk.luac` 的立即数比较元方法结果
 - 跑通真实 `meta_unm_chunk.luac`、`meta_bnot_chunk.luac` 的一元元方法结果
 - 跑通真实 `meta_call_chunk.luac`、`meta_tailcall_chunk.luac` 的 `__call` 结果
+- 跑通真实 `meta_index_table_chunk.luac`、`meta_index_function_chunk.luac` 的 `__index` 结果
+- 跑通真实 `meta_newindex_table_chunk.luac`、`meta_newindex_function_chunk.luac`、`meta_newindex_existing_chunk.luac` 的 `__newindex` 结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 101 个测试通过
+- 108 个测试通过
 
 ## 仓库结构
 
@@ -150,6 +153,7 @@
 - [docs/021-step-04-binary-metamethods.md](docs/021-step-04-binary-metamethods.md)
 - [docs/022-step-04-length-concat-compare-metamethods.md](docs/022-step-04-length-concat-compare-metamethods.md)
 - [docs/023-step-04-unary-call-metamethods.md](docs/023-step-04-unary-call-metamethods.md)
+- [docs/024-step-04-table-metamethods.md](docs/024-step-04-table-metamethods.md)
 
 这些文档对应的是：
 
@@ -176,6 +180,7 @@
 - 第 4 步补充：二元算术与位运算元方法分发
 - 第 4 步补充：长度、拼接与比较元方法分发
 - 第 4 步补充：一元元方法与最小 `__call`
+- 第 4 步补充：表访问元方法分发
 
 ## 开发方式
 
@@ -320,15 +325,15 @@ ls references/lua-5.5.0/src
 - 真实二元算术与位运算元方法 chunk 的基础执行闭环
 - 真实长度、拼接与比较元方法 chunk 的基础执行闭环
 - 真实一元元方法与 `__call` chunk 的基础执行闭环
+- 真实 `__index` / `__newindex` chunk 的基础执行闭环
 
 ## 下一步
 
 下一步会继续沿着 VM 和运行时主线往下补：
 
-- 补上 `__index` / `__newindex` 和更一般的表访问元方法
+- 补上 userdata 和更一般的表访问元方法
 - 补上更多控制流与标准库配套路径
 - 补上更完整的全局声明与相关语义
-- 扩展 userdata 路径
 - 补上更完整的 to-be-closed 生命周期和错误恢复路径
 - 开始往语法分析和编译器主线推进
 

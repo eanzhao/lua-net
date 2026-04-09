@@ -51,6 +51,8 @@
 - 用真实 `meta_lti_chunk.luac`、`meta_gti_chunk.luac`、`meta_lei_chunk.luac`、`meta_gei_chunk.luac` 验证立即数比较元方法行为
 - 用真实 `meta_unm_chunk.luac`、`meta_bnot_chunk.luac` 验证一元元方法行为
 - 用真实 `meta_call_chunk.luac`、`meta_tailcall_chunk.luac` 验证最小 `__call` 行为
+- 用真实 `meta_index_table_chunk.luac`、`meta_index_function_chunk.luac` 验证 `__index` 表访问元方法行为
+- 用真实 `meta_newindex_table_chunk.luac`、`meta_newindex_function_chunk.luac`、`meta_newindex_existing_chunk.luac` 验证 `__newindex` 表访问元方法行为
 
 ## 设计原则
 
@@ -206,6 +208,13 @@ Lua 完整调用协议里有不少复杂点：
 - `CONCAT` 先支持字符串和数值拼接，也支持 table metatable 上的 `__concat`
 - userdata 和更完整的对象语义放到后续阶段
 
+当前表访问也先支持最小元方法路径：
+
+- `GETTABUP` / `GETTABLE` / `GETI` / `GETFIELD` 现在在原始 miss 时，也支持 table metatable 上的 `__index`
+- `SETTABUP` / `SETTABLE` / `SETI` / `SETFIELD` 现在在原始 miss 时，也支持 table metatable 上的 `__newindex`
+- `__index` / `__newindex` 先支持 table fallback 和 function fallback
+- 已有原始键命中时，会绕过 `__newindex`
+
 当前位运算也先支持快速路径：
 
 - `BANDK` / `BORK` / `BXORK` 与寄存器版本先支持整数运算
@@ -306,6 +315,8 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `meta_lti_chunk.luac`、`meta_gti_chunk.luac`、`meta_lei_chunk.luac`、`meta_gei_chunk.luac` 验证立即数比较元方法结果
 - [x] 用真实 `meta_unm_chunk.luac`、`meta_bnot_chunk.luac` 验证一元元方法结果
 - [x] 用真实 `meta_call_chunk.luac`、`meta_tailcall_chunk.luac` 验证最小 `__call` 结果
+- [x] 用真实 `meta_index_table_chunk.luac`、`meta_index_function_chunk.luac` 验证 `__index` 结果
+- [x] 用真实 `meta_newindex_table_chunk.luac`、`meta_newindex_function_chunk.luac`、`meta_newindex_existing_chunk.luac` 验证 `__newindex` 结果
 
 ## 完成标准
 
@@ -338,6 +349,7 @@ Lua 完整调用协议里有不少复杂点：
 - 二元算术与位运算元方法分发已经拆到 `docs/021-step-04-binary-metamethods.md`
 - 长度、拼接与比较元方法分发已经拆到 `docs/022-step-04-length-concat-compare-metamethods.md`
 - 一元元方法与最小 `__call` 已经拆到 `docs/023-step-04-unary-call-metamethods.md`
+- 表访问元方法分发已经拆到 `docs/024-step-04-table-metamethods.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
