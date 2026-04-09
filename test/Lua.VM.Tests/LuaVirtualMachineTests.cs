@@ -502,6 +502,140 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleVarArgFixedChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "vararg_fixed_chunk.luac")), "vararg_fixed_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(3);
+        results[0].AsInteger().ShouldBe(10);
+        results[1].AsInteger().ShouldBe(20);
+        results[2].AsInteger().ShouldBe(30);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleVarArgAllChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "vararg_all_chunk.luac")), "vararg_all_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(3);
+        results[0].AsString().ShouldBe("x");
+        results[1].AsString().ShouldBe("y");
+        results[2].AsString().ShouldBe("z");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleOpenCallChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "open_call_chunk.luac")), "open_call_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(3);
+        results[0].AsInteger().ShouldBe(1);
+        results[1].AsInteger().ShouldBe(2);
+        results[2].AsInteger().ShouldBe(3);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleOpenSetListChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "setlist_open_chunk.luac")), "setlist_open_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(3);
+        results[0].AsInteger().ShouldBe(4);
+        results[1].AsInteger().ShouldBe(5);
+        results[2].AsInteger().ShouldBe(6);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleGetVarArgInstruction()
+    {
+        var callee = new LuaPrototype
+        {
+            LineDefined = 1,
+            LastLineDefined = 1,
+            NumberOfParameters = 0,
+            Flags = 1,
+            MaxStackSize = 4,
+            Code =
+            [
+                EncodeAbc(LuaOpcode.VarArgPrep, a: 0, b: 0, c: 0),
+                EncodeAsBx(LuaOpcode.LoadI, a: 0, sBx: 2),
+                EncodeAbc(LuaOpcode.GetVArg, a: 1, b: 0, c: 0),
+                EncodeAbx(LuaOpcode.LoadK, a: 2, bx: 0),
+                EncodeAbc(LuaOpcode.GetVArg, a: 2, b: 0, c: 2),
+                EncodeAbc(LuaOpcode.Return, a: 1, b: 3, c: 0)
+            ],
+            Constants =
+            [
+                LuaConstant.FromString("n")
+            ],
+            Upvalues = [],
+            NestedPrototypes = [],
+            Source = "getvarg_test.lua",
+            LineInfo = [0, 0, 0, 0, 0, 0],
+            AbsoluteLineInfo = [],
+            LocalVariables = []
+        };
+
+        var main = new LuaPrototype
+        {
+            LineDefined = 0,
+            LastLineDefined = 0,
+            NumberOfParameters = 0,
+            Flags = 0,
+            MaxStackSize = 4,
+            Code =
+            [
+                EncodeAbx(LuaOpcode.Closure, a: 0, bx: 0),
+                EncodeAsBx(LuaOpcode.LoadI, a: 1, sBx: 10),
+                EncodeAsBx(LuaOpcode.LoadI, a: 2, sBx: 20),
+                EncodeAsBx(LuaOpcode.LoadI, a: 3, sBx: 30),
+                EncodeAbc(LuaOpcode.Call, a: 0, b: 4, c: 3),
+                EncodeAbc(LuaOpcode.Return, a: 0, b: 3, c: 0)
+            ],
+            Constants = [],
+            Upvalues = [],
+            NestedPrototypes = [callee],
+            Source = "getvarg_test.lua",
+            LineInfo = [0, 0, 0, 0, 0, 0],
+            AbsoluteLineInfo = [],
+            LocalVariables = []
+        };
+
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(CreateChunk(main));
+
+        results.Length.ShouldBe(2);
+        results[0].AsInteger().ShouldBe(20);
+        results[1].AsInteger().ShouldBe(3);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Execute_ShouldHandleSelfChunkFixture()
     {
         var reader = new LuaChunkReader();

@@ -12,6 +12,9 @@ namespace Lua.VM;
 
 public sealed class LuaVirtualMachine
 {
+    private const byte VarArgFlagMask = 0b00000011;
+    private const byte VarArgTableFlag = 0b00000010;
+
     public LuaVirtualMachine()
     {
         State = new LuaState();
@@ -57,12 +60,18 @@ public sealed class LuaVirtualMachine
         ArgumentNullException.ThrowIfNull(arguments);
 
         var baseIndex = State.Stack.Count;
-        var frameSize = Math.Max(prototype.MaxStackSize, arguments.Count);
+        var fixedArgumentCount = Math.Min(arguments.Count, prototype.NumberOfParameters);
+        var frameSize = Math.Max(prototype.MaxStackSize, prototype.NumberOfParameters);
 
         State.Stack.SetTop(baseIndex + frameSize);
-        InitializeRegisters(baseIndex, arguments);
+        InitializeRegisters(baseIndex, arguments, fixedArgumentCount);
 
-        var frame = new CallFrame(closure, baseIndex, expectedResults: 0);
+        var frame = new CallFrame(
+            closure,
+            baseIndex,
+            expectedResults: 0,
+            registerTop: fixedArgumentCount,
+            varargs: GetVarargs(prototype, arguments, fixedArgumentCount));
         State.PushFrame(frame);
         LuaValue[] results = [];
         Exception? pendingException = null;
@@ -181,7 +190,7 @@ public sealed class LuaVirtualMachine
         var elementCount = instruction.VB;
         if (elementCount == 0)
         {
-            throw new NotSupportedException("SETLIST with open result count is not implemented yet.");
+            elementCount = GetOpenValueCount(frame, instruction.A + 1);
         }
 
         var startIndex = instruction.VC;
@@ -278,30 +287,21 @@ public sealed class LuaVirtualMachine
 
     private void ExecuteCall(CallFrame frame, LuaInstruction instruction)
     {
-        if (instruction.B == 0)
-        {
-            throw new NotSupportedException("Open argument CALL is not implemented yet.");
-        }
-
-        if (instruction.C == 0)
-        {
-            throw new NotSupportedException("Open result CALL is not implemented yet.");
-        }
-
         var closure = GetRegister(frame, instruction.A).AsFunction();
         var arguments = ReadArguments(frame, instruction.A, instruction.B);
         var results = Call(closure, arguments);
+
+        if (instruction.C == 0)
+        {
+            WriteOpenResults(frame, instruction.A, results);
+            return;
+        }
 
         WriteResults(frame, instruction.A, instruction.C - 1, results);
     }
 
     private LuaValue[] ExecuteTailCall(CallFrame frame, LuaInstruction instruction)
     {
-        if (instruction.B == 0)
-        {
-            throw new NotSupportedException("Open argument TAILCALL is not implemented yet.");
-        }
-
         var closure = GetRegister(frame, instruction.A).AsFunction();
         var arguments = ReadArguments(frame, instruction.A, instruction.B);
         return Call(closure, arguments);
@@ -311,7 +311,7 @@ public sealed class LuaVirtualMachine
     {
         if (instruction.B == 0)
         {
-            throw new NotSupportedException("Open result RETURN is not implemented yet.");
+            return ReadOpenResults(frame, instruction.A);
         }
 
         var resultCount = instruction.B - 1;
@@ -323,6 +323,28 @@ public sealed class LuaVirtualMachine
         }
 
         return results;
+    }
+
+    private void ExecuteVarArg(CallFrame frame, LuaInstruction instruction)
+    {
+        if (instruction.K != 0)
+        {
+            throw new NotSupportedException("VARARG with vararg table is not implemented yet.");
+        }
+
+        var requestedResultCount = instruction.C - 1;
+        if (requestedResultCount < 0)
+        {
+            WriteOpenResults(frame, instruction.A, frame.Varargs);
+            return;
+        }
+
+        WriteResults(frame, instruction.A, requestedResultCount, frame.Varargs);
+    }
+
+    private void ExecuteGetVarArg(CallFrame frame, LuaInstruction instruction)
+    {
+        SetRegister(frame, instruction.A, GetVarArgValue(frame, GetRegister(frame, instruction.C)));
     }
 
     private void ExecuteClosureInstruction(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
@@ -432,9 +454,9 @@ public sealed class LuaVirtualMachine
         return body;
     }
 
-    private void InitializeRegisters(int baseIndex, IReadOnlyList<LuaValue> arguments)
+    private void InitializeRegisters(int baseIndex, IReadOnlyList<LuaValue> arguments, int fixedArgumentCount)
     {
-        for (var index = 0; index < arguments.Count; index++)
+        for (var index = 0; index < fixedArgumentCount; index++)
         {
             State.Stack[baseIndex + index] = arguments[index];
         }
@@ -442,7 +464,9 @@ public sealed class LuaVirtualMachine
 
     private LuaValue[] ReadArguments(CallFrame frame, int functionRegister, int functionAndArgumentCount)
     {
-        var argumentCount = functionAndArgumentCount - 1;
+        var argumentCount = functionAndArgumentCount == 0
+            ? GetOpenValueCount(frame, functionRegister + 1)
+            : functionAndArgumentCount - 1;
         var arguments = new LuaValue[argumentCount];
 
         for (var index = 0; index < argumentCount; index++)
@@ -460,6 +484,34 @@ public sealed class LuaVirtualMachine
             var value = index < results.Count ? results[index] : LuaValue.Nil;
             SetRegister(frame, registerIndex + index, value);
         }
+    }
+
+    private void WriteOpenResults(CallFrame frame, int registerIndex, IReadOnlyList<LuaValue> results)
+    {
+        for (var index = 0; index < results.Count; index++)
+        {
+            SetRegister(frame, registerIndex + index, results[index]);
+        }
+
+        frame.SetRegisterTop(registerIndex + results.Count);
+    }
+
+    private LuaValue[] ReadOpenResults(CallFrame frame, int registerIndex)
+    {
+        var resultCount = GetOpenValueCount(frame, registerIndex);
+        var results = new LuaValue[resultCount];
+
+        for (var index = 0; index < resultCount; index++)
+        {
+            results[index] = GetRegister(frame, registerIndex + index);
+        }
+
+        return results;
+    }
+
+    private static int GetOpenValueCount(CallFrame frame, int registerIndex)
+    {
+        return Math.Max(0, frame.RegisterTop - registerIndex);
     }
 
     private LuaValue[] RunClosure(CallFrame frame, LuaPrototype prototype)
@@ -648,6 +700,12 @@ public sealed class LuaVirtualMachine
                 case LuaOpcode.Closure:
                     ExecuteClosureInstruction(frame, prototype, instruction);
                     break;
+                case LuaOpcode.VarArg:
+                    ExecuteVarArg(frame, instruction);
+                    break;
+                case LuaOpcode.GetVArg:
+                    ExecuteGetVarArg(frame, instruction);
+                    break;
                 case LuaOpcode.VarArgPrep:
                     break;
                 case LuaOpcode.Jmp:
@@ -776,6 +834,7 @@ public sealed class LuaVirtualMachine
 
     private void SetRegister(CallFrame frame, int registerIndex, LuaValue value)
     {
+        EnsureRegisterExists(frame, registerIndex);
         State.Stack[frame.BaseIndex + registerIndex] = value;
     }
 
@@ -818,6 +877,25 @@ public sealed class LuaVirtualMachine
         };
     }
 
+    private static IReadOnlyList<LuaValue> GetVarargs(
+        LuaPrototype prototype,
+        IReadOnlyList<LuaValue> arguments,
+        int fixedArgumentCount)
+    {
+        if (!IsVarArgFunction(prototype) || arguments.Count <= fixedArgumentCount)
+        {
+            return Array.Empty<LuaValue>();
+        }
+
+        var varargs = new LuaValue[arguments.Count - fixedArgumentCount];
+        for (var index = 0; index < varargs.Length; index++)
+        {
+            varargs[index] = arguments[fixedArgumentCount + index];
+        }
+
+        return varargs;
+    }
+
     private LuaClosure CreateClosure(LuaPrototype prototype, CallFrame parentFrame, string? debugName = null)
     {
         ArgumentNullException.ThrowIfNull(prototype);
@@ -835,6 +913,35 @@ public sealed class LuaVirtualMachine
         return isConstant != 0
             ? ConvertConstant(prototype.Constants[operand])
             : GetRegister(frame, operand);
+    }
+
+    private static LuaValue GetVarArgValue(CallFrame frame, LuaValue key)
+    {
+        if (TryGetInteger(key, out var integerKey))
+        {
+            if (integerKey >= 1 && integerKey <= frame.Varargs.Count)
+            {
+                return frame.Varargs[(int)integerKey - 1];
+            }
+
+            return LuaValue.Nil;
+        }
+
+        if (key.Kind == LuaValueKind.String && string.Equals(key.AsString(), "n", StringComparison.Ordinal))
+        {
+            return LuaValue.FromInteger(frame.Varargs.Count);
+        }
+
+        return LuaValue.Nil;
+    }
+
+    private void EnsureRegisterExists(CallFrame frame, int registerIndex)
+    {
+        var absoluteIndex = frame.BaseIndex + registerIndex;
+        if (absoluteIndex >= State.Stack.Count)
+        {
+            State.Stack.SetTop(absoluteIndex + 1);
+        }
     }
 
     private LuaUpvalue[] BuildUpvalues(LuaPrototype prototype, CallFrame? parentFrame)
@@ -1088,6 +1195,11 @@ public sealed class LuaVirtualMachine
 
         result = default;
         return false;
+    }
+
+    private static bool IsVarArgFunction(LuaPrototype prototype)
+    {
+        return (prototype.Flags & VarArgFlagMask) != 0;
     }
 
     private static bool TryGetConcatenationString(LuaValue value, out string result)

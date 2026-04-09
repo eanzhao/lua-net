@@ -86,4 +86,28 @@ public class LuaStateTests
         remaining.Count.ShouldBe(1);
         remaining[0].ShouldBe(1);
     }
+
+    [Fact]
+    public void CallFrame_ShouldExposeVarargsAndRegisterTop()
+    {
+        var frame = new CallFrame(
+            new LuaClosure("main"),
+            baseIndex: 0,
+            expectedResults: 0,
+            registerTop: 2,
+            varargs:
+            [
+                LuaValue.FromInteger(10),
+                LuaValue.FromInteger(20),
+                LuaValue.FromInteger(30)
+            ]);
+
+        frame.RegisterTop.ShouldBe(2);
+        frame.Varargs.Count.ShouldBe(3);
+        frame.Varargs[1].AsInteger().ShouldBe(20);
+
+        frame.SetRegisterTop(5);
+
+        frame.RegisterTop.ShouldBe(5);
+    }
 }

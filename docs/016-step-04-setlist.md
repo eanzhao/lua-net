@@ -6,6 +6,8 @@
 
 这一轮继续沿着 VM 的剩余执行路径往前补，把表构造里还没接上的 `SETLIST` 补上了。
 
+后续在 `docs/017-step-04-vararg-open-results.md` 里，已经继续补上了 `SETLIST B == 0` 这条依赖动态栈顶的路径。
+
 ## 背景与参考
 
 这一轮主要参考这些官方文件：
@@ -89,7 +91,7 @@ local t = {1, 2, 3}
 - `SETLIST` 的 `k + EXTRAARG`
 - 真实数组 table constructor 的批量数组写入
 
-当前还没有进入这些内容：
+当前这一轮还没有进入这些内容：
 
 - `SETLIST` 的 `B == 0` 路径
 - `CALL` / `RETURN` / `VARARG` 的 open result / open argument 路径
@@ -148,3 +150,5 @@ local t = {1, 2, 3}
 - `CALL` / `RETURN` / `SETLIST` 的 open result / open argument 路径
 - 更完整的调用协议
 - 更一般的元方法分发
+
+这些内容已经在后续一轮继续推进到 `docs/017-step-04-vararg-open-results.md`。

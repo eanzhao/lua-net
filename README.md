@@ -44,6 +44,7 @@
 - 补上 `__close` 的错误对象传递与继续关闭路径
 - 补上 `LOADF`、`LOADKX`、`LFALSESKIP` 的最小执行路径
 - 补上 `SETLIST` 和数组批量写入路径
+- 补上 `VARARG`、`GETVARG` 和第一版开放结果协议
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -66,11 +67,15 @@
 - 跑通真实 `loadf_chunk.luac`、`lfalseskip_chunk.luac` 的加载与布尔转换结果
 - 跑通手工 proto 的 `LOADKX + EXTRAARG` 结果
 - 跑通真实 `setlist_chunk.luac`、`setlist_extraarg_chunk.luac` 的数组批量写入结果
+- 跑通真实 `vararg_fixed_chunk.luac`、`vararg_all_chunk.luac` 的 vararg 结果
+- 跑通真实 `open_call_chunk.luac` 的开放调用链结果
+- 跑通真实 `setlist_open_chunk.luac` 的开放 `SETLIST` 结果
+- 跑通手工 proto 的 `GETVARG` 最小语义结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 68 个测试通过
+- 74 个测试通过
 
 ## 仓库结构
 
@@ -121,6 +126,7 @@
 - [docs/014-step-05-close-errors.md](docs/014-step-05-close-errors.md)
 - [docs/015-step-04-load-opcodes.md](docs/015-step-04-load-opcodes.md)
 - [docs/016-step-04-setlist.md](docs/016-step-04-setlist.md)
+- [docs/017-step-04-vararg-open-results.md](docs/017-step-04-vararg-open-results.md)
 
 这些文档对应的是：
 
@@ -140,6 +146,7 @@
 - 第 5 步补充：`__close` 的错误传播与继续关闭
 - 第 4 步补充：剩余加载路径
 - 第 4 步补充：`SETLIST` 与数组批量写入
+- 第 4 步补充：`VARARG` 与开放结果协议
 
 ## 开发方式
 
@@ -215,7 +222,7 @@ ls references/lua-5.5.0/src
 
 - `LuaBytecodeClosureBody`
 - `LuaVirtualMachine`
-- 固定参数、固定返回值的最小调用协议
+- 固定参数调用协议与第一版开放结果协议
 - `MOVE` / `LOADFALSE` / `LOADTRUE` / `LOADNIL`
 - `LOADI` / `LOADF` / `LOADK` / `LOADKX`
 - `LFALSESKIP`
@@ -245,7 +252,7 @@ ls references/lua-5.5.0/src
 - `EQI` / `LTI` / `LEI` / `GTI` / `GEI`
 - `TEST` / `TESTSET`
 - `CALL` / `TAILCALL` / `RETURN` / `RETURN0` / `RETURN1`
-- `CLOSURE` / `VARARGPREP`
+- `CLOSURE` / `VARARG` / `GETVARG` / `VARARGPREP`
 - 真实 Lua 5.5 chunk 的最小执行闭环
 - 真实控制流 chunk 的基础执行闭环
 - 真实比较与短路 chunk 的基础执行闭环
@@ -263,17 +270,20 @@ ls references/lua-5.5.0/src
 - 真实 `LOADF` / `LFALSESKIP` chunk 的基础执行闭环
 - 手工 proto 的 `LOADKX + EXTRAARG` 执行闭环
 - 真实 `SETLIST` / `EXTRAARG` chunk 的基础执行闭环
+- 真实 vararg chunk 的基础执行闭环
+- 真实开放调用链 chunk 的基础执行闭环
+- 真实开放 `SETLIST` chunk 的基础执行闭环
+- 手工 proto 的 `GETVARG` 执行闭环
 
 ## 下一步
 
-下一步会继续第 5 步前半段：
+下一步会继续沿着 VM 和运行时主线往下补：
 
 - 扩展更多基础 opcode
-- 补上更多条件指令和跳转场景
-- 补上更完整的调用协议
+- 补上迭代器相关 opcode
+- 补上 vararg table 那条路径
 - 扩展 userdata 和更一般的元方法调度
 - 补上更完整的 to-be-closed 生命周期和错误恢复路径
-- 补上 `VARARG` / open result 这几条剩余执行路径
 - 开始进入上值捕获和元方法调度
 
 ## 参考资料

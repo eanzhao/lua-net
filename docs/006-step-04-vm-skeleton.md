@@ -60,7 +60,7 @@
 
 所以第 4 步最重要的事情，不是继续堆模型，而是把这几块接成一条真实链路。
 
-### 2. 先支持固定协议
+### 2. 先从固定协议出发，再逐步接开放结果
 
 Lua 完整调用协议里有不少复杂点：
 
@@ -70,7 +70,7 @@ Lua 完整调用协议里有不少复杂点：
 - 上值捕获
 - 元方法调度
 
-这一步先只支持最小固定协议：
+这一步最开始先只支持最小固定协议：
 
 - 固定实参数量
 - 固定返回值数量
@@ -78,6 +78,14 @@ Lua 完整调用协议里有不少复杂点：
 - 基础闭包调用
 
 这样可以先把主循环稳定下来，再逐层扩展。
+
+到当前这一轮，已经在这个基础上继续接上了第一版动态结果路径：
+
+- `VARARG`
+- open `CALL`
+- open `TAILCALL`
+- open `RETURN`
+- `SETLIST B == 0`
 
 ### 3. 用真实 chunk 验证，而不是只测手工数据
 
@@ -161,6 +169,8 @@ Lua 完整调用协议里有不少复杂点：
 - `RETURN0`
 - `RETURN1`
 - `CLOSURE`
+- `VARARG`
+- `GETVARG`
 - `VARARGPREP`
 
 当前 `ADD` 只先支持数值快速路径；配套的元方法分派先留到后续阶段继续做。
@@ -260,6 +270,10 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `loadf_chunk.luac`、`lfalseskip_chunk.luac` 验证剩余加载路径结果
 - [x] 用手工 proto 验证 `LOADKX + EXTRAARG` 执行结果
 - [x] 用真实 `setlist_chunk.luac`、`setlist_extraarg_chunk.luac` 验证 `SETLIST` 与 `EXTRAARG` 结果
+- [x] 用真实 `vararg_fixed_chunk.luac`、`vararg_all_chunk.luac` 验证 `VARARG` 结果
+- [x] 用真实 `open_call_chunk.luac` 验证开放调用链结果
+- [x] 用真实 `setlist_open_chunk.luac` 验证开放 `SETLIST` 结果
+- [x] 用手工 proto 验证 `GETVARG` 最小语义结果
 
 ## 完成标准
 
@@ -285,9 +299,10 @@ Lua 完整调用协议里有不少复杂点：
 - `__close` 的错误传播与继续关闭已经拆到 `docs/014-step-05-close-errors.md`
 - 剩余加载路径已经拆到 `docs/015-step-04-load-opcodes.md`
 - `SETLIST` 与数组批量写入已经拆到 `docs/016-step-04-setlist.md`
+- `VARARG` 与开放结果协议已经拆到 `docs/017-step-04-vararg-open-results.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
 - `and` / `or` 之外更复杂的短路场景
-- `VARARG`、open result 等剩余执行路径
+- vararg table 等剩余变长参数路径
 - 元方法调度

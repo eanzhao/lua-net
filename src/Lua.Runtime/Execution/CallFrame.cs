@@ -1,4 +1,5 @@
 using Lua.Runtime.Objects;
+using Lua.Runtime.Values;
 
 namespace Lua.Runtime.Execution;
 
@@ -7,17 +8,26 @@ public sealed class CallFrame
     private readonly Dictionary<int, LuaUpvalue> _openUpvalues = [];
     private readonly List<int> _toBeClosedRegisters = [];
 
-    public CallFrame(LuaClosure closure, int baseIndex, int expectedResults, int programCounter = 0)
+    public CallFrame(
+        LuaClosure closure,
+        int baseIndex,
+        int expectedResults,
+        int programCounter = 0,
+        int registerTop = 0,
+        IReadOnlyList<LuaValue>? varargs = null)
     {
         ArgumentNullException.ThrowIfNull(closure);
         ArgumentOutOfRangeException.ThrowIfNegative(baseIndex);
         ArgumentOutOfRangeException.ThrowIfNegative(expectedResults);
         ArgumentOutOfRangeException.ThrowIfNegative(programCounter);
+        ArgumentOutOfRangeException.ThrowIfNegative(registerTop);
 
         Closure = closure;
         BaseIndex = baseIndex;
         ExpectedResults = expectedResults;
         ProgramCounter = programCounter;
+        RegisterTop = registerTop;
+        Varargs = varargs ?? Array.Empty<LuaValue>();
     }
 
     public LuaClosure Closure { get; }
@@ -27,6 +37,16 @@ public sealed class CallFrame
     public int ExpectedResults { get; }
 
     public int ProgramCounter { get; private set; }
+
+    public int RegisterTop { get; private set; }
+
+    public IReadOnlyList<LuaValue> Varargs { get; }
+
+    public void SetRegisterTop(int registerTop)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(registerTop);
+        RegisterTop = registerTop;
+    }
 
     public void RegisterToBeClosed(int registerIndex)
     {
