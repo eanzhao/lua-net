@@ -45,6 +45,17 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void LuaState_ShouldPreloadError()
+    {
+        var state = new LuaState();
+
+        var error = state.GlobalEnvironment.GetValue(LuaValue.FromString("error"));
+
+        error.Kind.ShouldBe(LuaValueKind.Function);
+        error.AsFunction().DebugName.ShouldBe("error");
+    }
+
+    [Fact]
     public void CallFrame_ShouldAdvanceAndJump()
     {
         var frame = new CallFrame(new LuaClosure("main"), baseIndex: 0, expectedResults: 0);

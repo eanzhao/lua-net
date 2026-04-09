@@ -1,5 +1,6 @@
 using Lua.Bytecode.Chunks;
 using Lua.Bytecode.Instructions;
+using Lua.Runtime.Execution;
 using Lua.Runtime.Values;
 using Shouldly;
 
@@ -574,6 +575,89 @@ public class LuaVirtualMachineTests
         vm.State.Stack.Count.ShouldBe(0);
     }
 
+    [Fact]
+    public void Execute_ShouldHandleLoadfChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "loadf_chunk.luac")), "loadf_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsFloat().ShouldBe(3d, 1e-12);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleLFalseSkipChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "lfalseskip_chunk.luac")), "lfalseskip_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsBoolean().ShouldBeTrue();
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleLoadKxInstruction()
+    {
+        var main = new LuaPrototype
+        {
+            LineDefined = 0,
+            LastLineDefined = 0,
+            NumberOfParameters = 0,
+            Flags = 0,
+            MaxStackSize = 1,
+            Code =
+            [
+                EncodeAbx(LuaOpcode.LoadKx, a: 0, bx: 0),
+                EncodeAx(LuaOpcode.ExtraArg, ax: 1),
+                EncodeAbc(LuaOpcode.Return1, a: 0, b: 0, c: 0)
+            ],
+            Constants =
+            [
+                LuaConstant.FromString("first"),
+                LuaConstant.FromString("second")
+            ],
+            Upvalues = [],
+            NestedPrototypes = [],
+            Source = "loadkx_test.lua",
+            LineInfo = [0, 0, 0],
+            AbsoluteLineInfo = [],
+            LocalVariables = []
+        };
+
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(CreateChunk(main));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("second");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldPropagateLatestCloseErrorAndContinueClosing()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "tbc_error_chunk.luac")), "tbc_error_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var exception = Should.Throw<LuaRuntimeException>(() => vm.Execute(chunk));
+
+        exception.ErrorObject.AsString().ShouldBe("close-b");
+        vm.State.GlobalEnvironment.GetValue(LuaValue.FromString("log")).AsString().ShouldBe("[b:boom][a:close-b]");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
     private static string GetFixturePath(string folder, string fileName)
     {
         return Path.Combine(AppContext.BaseDirectory, "fixtures", "lua55", folder, fileName);
@@ -601,6 +685,13 @@ public class LuaVirtualMachineTests
     {
         var encoded = (uint)(sBx + LuaInstructionLayout.OffsetSBx);
         return EncodeAbx(opcode, a, (int)encoded);
+    }
+
+    private static uint EncodeAx(LuaOpcode opcode, int ax)
+    {
+        return
+            ((uint)opcode << LuaInstructionLayout.PosOp) |
+            ((uint)ax << LuaInstructionLayout.PosAx);
     }
 
     private static uint EncodeSJ(LuaOpcode opcode, int sJ)

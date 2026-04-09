@@ -256,6 +256,9 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `close_chunk.luac` 验证块作用域关闭上值结果
 - [x] 用真实 `tbc_nil_chunk.luac`、`tbc_false_chunk.luac` 验证 `TBC` 最小快速路径结果
 - [x] 用真实 `tbc_close_chunk.luac` 验证 `__close`、`CLOSE` 与函数退出关闭结果
+- [x] 用真实 `tbc_error_chunk.luac` 验证 `__close` 的错误传播与继续关闭结果
+- [x] 用真实 `loadf_chunk.luac`、`lfalseskip_chunk.luac` 验证剩余加载路径结果
+- [x] 用手工 proto 验证 `LOADKX + EXTRAARG` 执行结果
 
 ## 完成标准
 
@@ -278,6 +281,8 @@ Lua 完整调用协议里有不少复杂点：
 - `CLOSE` 与块作用域上值关闭已经拆到 `docs/011-step-05-close.md`
 - `TBC` 的 `nil/false` 快速路径已经拆到 `docs/012-step-05-tbc.md`
 - `__close` 与 to-be-closed 生命周期第一版已经拆到 `docs/013-step-05-close-metamethod.md`
+- `__close` 的错误传播与继续关闭已经拆到 `docs/014-step-05-close-errors.md`
+- 剩余加载路径已经拆到 `docs/015-step-04-load-opcodes.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合

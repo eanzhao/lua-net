@@ -27,10 +27,16 @@ public sealed class LuaState
         var setMetatable = new LuaClosure(
             "setmetatable",
             body: new LuaNativeClosureBody(SetMetatable));
+        var error = new LuaClosure(
+            "error",
+            body: new LuaNativeClosureBody(Error));
 
         GlobalEnvironment.SetValue(
             LuaValue.FromString("setmetatable"),
             LuaValue.FromFunction(setMetatable));
+        GlobalEnvironment.SetValue(
+            LuaValue.FromString("error"),
+            LuaValue.FromFunction(error));
     }
 
     public void PushFrame(CallFrame frame)
@@ -78,5 +84,14 @@ public sealed class LuaState
 
         table.SetMetatable(metatableValue.AsTable());
         return [arguments[0]];
+    }
+
+    private static LuaValue[] Error(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        _ = state;
+        _ = closure;
+
+        var errorObject = arguments.Count == 0 ? LuaValue.Nil : arguments[0];
+        throw new LuaRuntimeException(errorObject);
     }
 }

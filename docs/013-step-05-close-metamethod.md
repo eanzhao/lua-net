@@ -137,7 +137,7 @@ Lua 的 `__close` 不只可能落在表上，但当前真实 fixture 走的是�
 
 接下来继续往下补：
 
-- `__close` 的错误传播与嵌套关闭语义
+- `__close` 的错误传播与继续关闭已经拆到 `docs/014-step-05-close-errors.md`
 - userdata 路径
 - 更完整的元方法分发
 - 更完整的调用协议

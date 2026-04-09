@@ -38,8 +38,11 @@
 - 补上 `CLOSE` 和块作用域上值关闭路径
 - 补上 `TBC` 的 `nil/false` 最小快速路径
 - 补上最小 native closure 与 `_ENV.setmetatable`
+- 补上最小 `_ENV.error` 和 Lua 运行时异常对象
 - 补上表 metatable 与 `__close` 查找路径
 - 补上 to-be-closed 寄存器登记与逆序关闭路径
+- 补上 `__close` 的错误对象传递与继续关闭路径
+- 补上 `LOADF`、`LOADKX`、`LFALSESKIP` 的最小执行路径
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -58,11 +61,14 @@
 - 跑通真实 `close_chunk.luac` 的块作用域关闭结果
 - 跑通真实 `tbc_nil_chunk.luac`、`tbc_false_chunk.luac` 的 `TBC` 最小快速路径结果
 - 跑通真实 `tbc_close_chunk.luac` 的 `__close` 与关闭顺序结果
+- 跑通真实 `tbc_error_chunk.luac` 的 `__close` 错误传播与继续关闭结果
+- 跑通真实 `loadf_chunk.luac`、`lfalseskip_chunk.luac` 的加载与布尔转换结果
+- 跑通手工 proto 的 `LOADKX + EXTRAARG` 结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 61 个测试通过
+- 66 个测试通过
 
 ## 仓库结构
 
@@ -110,6 +116,8 @@
 - [docs/011-step-05-close.md](docs/011-step-05-close.md)
 - [docs/012-step-05-tbc.md](docs/012-step-05-tbc.md)
 - [docs/013-step-05-close-metamethod.md](docs/013-step-05-close-metamethod.md)
+- [docs/014-step-05-close-errors.md](docs/014-step-05-close-errors.md)
+- [docs/015-step-04-load-opcodes.md](docs/015-step-04-load-opcodes.md)
 
 这些文档对应的是：
 
@@ -126,6 +134,8 @@
 - 第 5 步补充：CLOSE 与块作用域上值关闭
 - 第 5 步补充：TBC 的最小快速路径
 - 第 5 步补充：`__close` 与 to-be-closed 生命周期第一版
+- 第 5 步补充：`__close` 的错误传播与继续关闭
+- 第 4 步补充：剩余加载路径
 
 ## 开发方式
 
@@ -177,6 +187,7 @@ ls references/lua-5.5.0/src
 - `LuaUserData`
 - `LuaStack`
 - `CallFrame`
+- `LuaRuntimeException`
 - `LuaState`
 - `ILuaClosureBody`
 
@@ -202,7 +213,8 @@ ls references/lua-5.5.0/src
 - `LuaVirtualMachine`
 - 固定参数、固定返回值的最小调用协议
 - `MOVE` / `LOADFALSE` / `LOADTRUE` / `LOADNIL`
-- `LOADI` / `LOADK`
+- `LOADI` / `LOADF` / `LOADK` / `LOADKX`
+- `LFALSESKIP`
 - `GETUPVAL`
 - `GETTABUP`
 - `GETTABLE` / `GETI` / `GETFIELD`
@@ -222,6 +234,7 @@ ls references/lua-5.5.0/src
 - `CLOSE`
 - `TBC`
 - `_ENV.setmetatable`
+- `_ENV.error`
 - `JMP`
 - `EQ` / `LT` / `LE` / `EQK`
 - `EQI` / `LTI` / `LEI` / `GTI` / `GEI`
@@ -241,6 +254,9 @@ ls references/lua-5.5.0/src
 - 真实块作用域关闭 chunk 的基础执行闭环
 - 真实 `TBC` 最小快速路径 chunk 的基础执行闭环
 - 真实 `__close` 与关闭顺序 chunk 的基础执行闭环
+- 真实 `__close` 错误传播与继续关闭 chunk 的基础执行闭环
+- 真实 `LOADF` / `LFALSESKIP` chunk 的基础执行闭环
+- 手工 proto 的 `LOADKX + EXTRAARG` 执行闭环
 
 ## 下一步
 
@@ -249,8 +265,9 @@ ls references/lua-5.5.0/src
 - 扩展更多基础 opcode
 - 补上更多条件指令和跳转场景
 - 补上更完整的调用协议
-- 补上 `__close` 的错误传播与更完整的 to-be-closed 生命周期路径
 - 扩展 userdata 和更一般的元方法调度
+- 补上更完整的 to-be-closed 生命周期和错误恢复路径
+- 补上 `SETLIST` / `VARARG` / open result 这几条剩余执行路径
 - 开始进入上值捕获和元方法调度
 
 ## 参考资料
