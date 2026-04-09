@@ -287,5 +287,5 @@ Lua 完整调用协议里有不少复杂点：
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
 - `and` / `or` 之外更复杂的短路场景
-- `LOADF`、`LOADKX`、`EXTRAARG` 等其余加载路径
+- `SETLIST`、`VARARG`、open result 等剩余执行路径
 - 元方法调度
