@@ -170,6 +170,36 @@ public sealed class LuaVirtualMachine
         tableValue.AsTable().SetValue(key, value);
     }
 
+    private void ExecuteSetList(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
+    {
+        var tableValue = GetRegister(frame, instruction.A);
+        if (tableValue.Kind != LuaValueKind.Table)
+        {
+            throw new NotSupportedException("SETLIST currently supports tables only.");
+        }
+
+        var elementCount = instruction.VB;
+        if (elementCount == 0)
+        {
+            throw new NotSupportedException("SETLIST with open result count is not implemented yet.");
+        }
+
+        var startIndex = instruction.VC;
+        if (instruction.K != 0)
+        {
+            startIndex += ReadFollowingExtraArgument(frame, prototype, instruction.Opcode) * (LuaInstructionLayout.MaxArgVC + 1);
+        }
+
+        var currentIndex = startIndex + elementCount;
+        var table = tableValue.AsTable();
+
+        for (var offset = elementCount; offset > 0; offset--)
+        {
+            table.SetValue(LuaValue.FromInteger(currentIndex), GetRegister(frame, instruction.A + offset));
+            currentIndex -= 1;
+        }
+    }
+
     private void ExecuteNewTable(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
     {
         var extraArgument = ReadFollowingExtraArgument(frame, prototype, instruction.Opcode);
@@ -612,6 +642,9 @@ public sealed class LuaVirtualMachine
                     return [];
                 case LuaOpcode.Return1:
                     return [GetRegister(frame, instruction.A)];
+                case LuaOpcode.SetList:
+                    ExecuteSetList(frame, prototype, instruction);
+                    break;
                 case LuaOpcode.Closure:
                     ExecuteClosureInstruction(frame, prototype, instruction);
                     break;

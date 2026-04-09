@@ -467,6 +467,41 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleSetListChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "setlist_chunk.luac")), "setlist_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(3);
+        results[0].AsInteger().ShouldBe(10);
+        results[1].AsInteger().ShouldBe(20);
+        results[2].AsInteger().ShouldBe(30);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleSetListExtraArgChunkFixture()
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(File.ReadAllBytes(GetFixturePath("chunks", "setlist_extraarg_chunk.luac")), "setlist_extraarg_chunk.luac");
+        var vm = new LuaVirtualMachine();
+
+        var results = vm.Execute(chunk);
+
+        results.Length.ShouldBe(4);
+        results[0].AsInteger().ShouldBe(1);
+        results[1].AsInteger().ShouldBe(1024);
+        results[2].AsInteger().ShouldBe(1050);
+        results[3].AsInteger().ShouldBe(1100);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Execute_ShouldHandleSelfChunkFixture()
     {
         var reader = new LuaChunkReader();

@@ -82,7 +82,7 @@ Lua 5.5 这里的 `Bx` 是 17 位，也就是：
 
 当前还没有进入这些内容：
 
-- `SETLIST` 对大索引 `EXTRAARG` 的完整路径
+- `SETLIST` 对大索引 `EXTRAARG` 的完整路径已经拆到 `docs/016-step-04-setlist.md`
 - `VARARG` / `RETURN` 的 open 结果路径
 - 更完整的迭代器和循环指令
 
@@ -125,7 +125,7 @@ Lua 5.5 这里的 `Bx` 是 17 位，也就是：
 
 接下来继续往下补：
 
-- `SETLIST` 的大索引路径
+- `SETLIST` 的大索引路径已经拆到 `docs/016-step-04-setlist.md`
 - `VARARG` / `RETURN` 的 open 结果路径
 - 更完整的调用协议
 - 更一般的元方法分发

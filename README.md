@@ -43,6 +43,7 @@
 - 补上 to-be-closed 寄存器登记与逆序关闭路径
 - 补上 `__close` 的错误对象传递与继续关闭路径
 - 补上 `LOADF`、`LOADKX`、`LFALSESKIP` 的最小执行路径
+- 补上 `SETLIST` 和数组批量写入路径
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -64,11 +65,12 @@
 - 跑通真实 `tbc_error_chunk.luac` 的 `__close` 错误传播与继续关闭结果
 - 跑通真实 `loadf_chunk.luac`、`lfalseskip_chunk.luac` 的加载与布尔转换结果
 - 跑通手工 proto 的 `LOADKX + EXTRAARG` 结果
+- 跑通真实 `setlist_chunk.luac`、`setlist_extraarg_chunk.luac` 的数组批量写入结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 66 个测试通过
+- 68 个测试通过
 
 ## 仓库结构
 
@@ -118,6 +120,7 @@
 - [docs/013-step-05-close-metamethod.md](docs/013-step-05-close-metamethod.md)
 - [docs/014-step-05-close-errors.md](docs/014-step-05-close-errors.md)
 - [docs/015-step-04-load-opcodes.md](docs/015-step-04-load-opcodes.md)
+- [docs/016-step-04-setlist.md](docs/016-step-04-setlist.md)
 
 这些文档对应的是：
 
@@ -136,6 +139,7 @@
 - 第 5 步补充：`__close` 与 to-be-closed 生命周期第一版
 - 第 5 步补充：`__close` 的错误传播与继续关闭
 - 第 4 步补充：剩余加载路径
+- 第 4 步补充：`SETLIST` 与数组批量写入
 
 ## 开发方式
 
@@ -221,6 +225,7 @@ ls references/lua-5.5.0/src
 - `SETUPVAL`
 - `SETTABUP`
 - `SETTABLE` / `SETI` / `SETFIELD`
+- `SETLIST`
 - `NEWTABLE`
 - `SELF`
 - `ADDI` / `ADDK` / `SUBK` / `MULK` / `MODK` / `DIVK` / `IDIVK`
@@ -257,6 +262,7 @@ ls references/lua-5.5.0/src
 - 真实 `__close` 错误传播与继续关闭 chunk 的基础执行闭环
 - 真实 `LOADF` / `LFALSESKIP` chunk 的基础执行闭环
 - 手工 proto 的 `LOADKX + EXTRAARG` 执行闭环
+- 真实 `SETLIST` / `EXTRAARG` chunk 的基础执行闭环
 
 ## 下一步
 
@@ -267,7 +273,7 @@ ls references/lua-5.5.0/src
 - 补上更完整的调用协议
 - 扩展 userdata 和更一般的元方法调度
 - 补上更完整的 to-be-closed 生命周期和错误恢复路径
-- 补上 `SETLIST` / `VARARG` / open result 这几条剩余执行路径
+- 补上 `VARARG` / open result 这几条剩余执行路径
 - 开始进入上值捕获和元方法调度
 
 ## 参考资料
