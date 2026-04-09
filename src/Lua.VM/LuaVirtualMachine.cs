@@ -257,14 +257,7 @@ public sealed class LuaVirtualMachine
 
     private void ExecuteToBeClosed(CallFrame frame, LuaInstruction instruction)
     {
-        var value = GetRegister(frame, instruction.A);
-        if (value.IsNil || (value.Kind == LuaValueKind.Boolean && !value.AsBoolean()))
-        {
-            return;
-        }
-
-        EnsureCloseMethodExists(value);
-        frame.RegisterToBeClosed(instruction.A);
+        RegisterToBeClosed(frame, instruction.A);
     }
 
     private void ExecuteConcat(CallFrame frame, LuaInstruction instruction)
@@ -347,6 +340,171 @@ public sealed class LuaVirtualMachine
         SetRegister(frame, instruction.A, GetVarArgValue(frame, GetRegister(frame, instruction.C)));
     }
 
+    private void ExecuteIntegerForPrep(
+        CallFrame frame,
+        LuaInstruction instruction,
+        long initialValue,
+        LuaValue limitValue,
+        long stepValue)
+    {
+        if (stepValue == 0)
+        {
+            throw new InvalidOperationException("'for' step is zero");
+        }
+
+        var limit = GetIntegerForLimit(limitValue, initialValue, stepValue);
+        if (ShouldSkipIntegerForLoop(initialValue, limit, stepValue))
+        {
+            frame.Advance(instruction.Bx + 1);
+            return;
+        }
+
+        SetRegister(frame, instruction.A, LuaValue.FromInteger(ComputeIntegerForLoopCount(initialValue, limit, stepValue)));
+        SetRegister(frame, instruction.A + 1, LuaValue.FromInteger(stepValue));
+        SetRegister(frame, instruction.A + 2, LuaValue.FromInteger(initialValue));
+    }
+
+    private void ExecuteFloatForPrep(
+        CallFrame frame,
+        LuaInstruction instruction,
+        LuaValue initialValue,
+        LuaValue limitValue,
+        LuaValue stepValue)
+    {
+        if (!TryGetNumber(limitValue, out var numericLimit))
+        {
+            throw new InvalidOperationException("'for' limit must be a number");
+        }
+
+        if (!TryGetNumber(stepValue, out var numericStep))
+        {
+            throw new InvalidOperationException("'for' step must be a number");
+        }
+
+        if (!TryGetNumber(initialValue, out var numericInitial))
+        {
+            throw new InvalidOperationException("'for' initial value must be a number");
+        }
+
+        if (numericStep == 0d)
+        {
+            throw new InvalidOperationException("'for' step is zero");
+        }
+
+        if (ShouldSkipFloatForLoop(numericInitial, numericLimit, numericStep))
+        {
+            frame.Advance(instruction.Bx + 1);
+            return;
+        }
+
+        SetRegister(frame, instruction.A, LuaValue.FromFloat(numericLimit));
+        SetRegister(frame, instruction.A + 1, LuaValue.FromFloat(numericStep));
+        SetRegister(frame, instruction.A + 2, LuaValue.FromFloat(numericInitial));
+    }
+
+    private void ExecuteIntegerForLoop(CallFrame frame, LuaInstruction instruction)
+    {
+        var remaining = unchecked((ulong)GetRegister(frame, instruction.A).AsInteger());
+        if (remaining == 0)
+        {
+            return;
+        }
+
+        var step = GetRegister(frame, instruction.A + 1).AsInteger();
+        var index = GetRegister(frame, instruction.A + 2).AsInteger();
+
+        SetRegister(frame, instruction.A, LuaValue.FromInteger(unchecked((long)(remaining - 1))));
+        SetRegister(frame, instruction.A + 2, LuaValue.FromInteger(index + step));
+        JumpRelative(frame, -instruction.Bx);
+    }
+
+    private void ExecuteFloatForLoop(CallFrame frame, LuaInstruction instruction)
+    {
+        var step = GetRegister(frame, instruction.A + 1).AsFloat();
+        var limit = GetRegister(frame, instruction.A).AsFloat();
+        var index = GetRegister(frame, instruction.A + 2).AsFloat() + step;
+
+        if (ShouldContinueFloatForLoop(index, limit, step))
+        {
+            SetRegister(frame, instruction.A + 2, LuaValue.FromFloat(index));
+            JumpRelative(frame, -instruction.Bx);
+        }
+    }
+
+    private void ExecuteForPrep(CallFrame frame, LuaInstruction instruction)
+    {
+        var initialValue = GetRegister(frame, instruction.A);
+        var limitValue = GetRegister(frame, instruction.A + 1);
+        var stepValue = GetRegister(frame, instruction.A + 2);
+
+        if (initialValue.Kind == LuaValueKind.Integer && stepValue.Kind == LuaValueKind.Integer)
+        {
+            ExecuteIntegerForPrep(frame, instruction, initialValue.AsInteger(), limitValue, stepValue.AsInteger());
+            return;
+        }
+
+        ExecuteFloatForPrep(frame, instruction, initialValue, limitValue, stepValue);
+    }
+
+    private void ExecuteForLoop(CallFrame frame, LuaInstruction instruction)
+    {
+        if (GetRegister(frame, instruction.A + 1).Kind == LuaValueKind.Integer)
+        {
+            ExecuteIntegerForLoop(frame, instruction);
+            return;
+        }
+
+        ExecuteFloatForLoop(frame, instruction);
+    }
+
+    private void ExecuteTForPrep(CallFrame frame, LuaInstruction instruction)
+    {
+        var controlValue = GetRegister(frame, instruction.A + 2);
+        var closeValue = GetRegister(frame, instruction.A + 3);
+
+        SetRegister(frame, instruction.A + 2, closeValue);
+        SetRegister(frame, instruction.A + 3, controlValue);
+        RegisterToBeClosed(frame, instruction.A + 2);
+        frame.Advance(instruction.Bx);
+    }
+
+    private void ExecuteTForCall(CallFrame frame, LuaInstruction instruction)
+    {
+        SetRegister(frame, instruction.A + 5, GetRegister(frame, instruction.A + 3));
+        SetRegister(frame, instruction.A + 4, GetRegister(frame, instruction.A + 1));
+        SetRegister(frame, instruction.A + 3, GetRegister(frame, instruction.A));
+
+        var iterator = GetRegister(frame, instruction.A + 3).AsFunction();
+        var results = Call(
+            iterator,
+            [
+                GetRegister(frame, instruction.A + 4),
+                GetRegister(frame, instruction.A + 5)
+            ]);
+
+        WriteResults(frame, instruction.A + 3, instruction.C, results);
+    }
+
+    private void ExecuteTForLoop(CallFrame frame, LuaInstruction instruction)
+    {
+        if (!GetRegister(frame, instruction.A + 3).IsNil)
+        {
+            JumpRelative(frame, -instruction.Bx);
+        }
+    }
+
+    private void RegisterToBeClosed(CallFrame frame, int registerIndex)
+    {
+        var value = GetRegister(frame, registerIndex);
+        if (value.IsNil || (value.Kind == LuaValueKind.Boolean && !value.AsBoolean()))
+        {
+            return;
+        }
+
+        EnsureCloseMethodExists(value);
+        frame.RegisterToBeClosed(registerIndex);
+    }
+
     private void ExecuteClosureInstruction(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
     {
         var nestedPrototype = prototype.NestedPrototypes[instruction.Bx];
@@ -357,7 +515,7 @@ public sealed class LuaVirtualMachine
 
     private void ExecuteJump(CallFrame frame, LuaInstruction instruction)
     {
-        frame.Advance(instruction.SJ);
+        JumpRelative(frame, instruction.SJ);
     }
 
     private void ExecuteEqualityComparison(CallFrame frame, LuaValue left, LuaValue right, int expected)
@@ -441,7 +599,7 @@ public sealed class LuaVirtualMachine
             throw new InvalidOperationException("Conditional instruction must be followed by JMP.");
         }
 
-        frame.Advance(jumpInstruction.SJ + 1);
+        frame.Jump(frame.ProgramCounter + jumpInstruction.SJ + 1);
     }
 
     private static LuaBytecodeClosureBody GetBytecodeBody(LuaClosure closure)
@@ -512,6 +670,11 @@ public sealed class LuaVirtualMachine
     private static int GetOpenValueCount(CallFrame frame, int registerIndex)
     {
         return Math.Max(0, frame.RegisterTop - registerIndex);
+    }
+
+    private static void JumpRelative(CallFrame frame, int offset)
+    {
+        frame.Jump(frame.ProgramCounter + offset);
     }
 
     private LuaValue[] RunClosure(CallFrame frame, LuaPrototype prototype)
@@ -694,6 +857,21 @@ public sealed class LuaVirtualMachine
                     return [];
                 case LuaOpcode.Return1:
                     return [GetRegister(frame, instruction.A)];
+                case LuaOpcode.ForLoop:
+                    ExecuteForLoop(frame, instruction);
+                    break;
+                case LuaOpcode.ForPrep:
+                    ExecuteForPrep(frame, instruction);
+                    break;
+                case LuaOpcode.TForPrep:
+                    ExecuteTForPrep(frame, instruction);
+                    break;
+                case LuaOpcode.TForCall:
+                    ExecuteTForCall(frame, instruction);
+                    break;
+                case LuaOpcode.TForLoop:
+                    ExecuteTForLoop(frame, instruction);
+                    break;
                 case LuaOpcode.SetList:
                     ExecuteSetList(frame, prototype, instruction);
                     break;
@@ -707,6 +885,13 @@ public sealed class LuaVirtualMachine
                     ExecuteGetVarArg(frame, instruction);
                     break;
                 case LuaOpcode.VarArgPrep:
+                    break;
+                case LuaOpcode.ErrNNil:
+                    if (!GetRegister(frame, instruction.A).IsNil)
+                    {
+                        throw new NotSupportedException("ERRNNIL error reporting is not implemented yet.");
+                    }
+
                     break;
                 case LuaOpcode.Jmp:
                     ExecuteJump(frame, instruction);
@@ -1195,6 +1380,93 @@ public sealed class LuaVirtualMachine
 
         result = default;
         return false;
+    }
+
+    private static long GetIntegerForLimit(LuaValue value, long initialValue, long stepValue)
+    {
+        if (value.Kind == LuaValueKind.Integer)
+        {
+            return value.AsInteger();
+        }
+
+        if (!TryGetNumber(value, out var numericLimit))
+        {
+            throw new InvalidOperationException("'for' limit must be a number");
+        }
+
+        if (!double.IsFinite(numericLimit))
+        {
+            return stepValue > 0 ? long.MaxValue : long.MinValue;
+        }
+
+        if (stepValue > 0)
+        {
+            if (numericLimit < initialValue)
+            {
+                return long.MinValue;
+            }
+
+            if (numericLimit >= long.MaxValue)
+            {
+                return long.MaxValue;
+            }
+
+            return (long)Math.Floor(numericLimit);
+        }
+
+        if (numericLimit > initialValue)
+        {
+            return long.MaxValue;
+        }
+
+        if (numericLimit <= long.MinValue)
+        {
+            return long.MinValue;
+        }
+
+        return (long)Math.Ceiling(numericLimit);
+    }
+
+    private static bool ShouldSkipIntegerForLoop(long initialValue, long limit, long stepValue)
+    {
+        return stepValue > 0 ? limit < initialValue : initialValue < limit;
+    }
+
+    private static long ComputeIntegerForLoopCount(long initialValue, long limit, long stepValue)
+    {
+        ulong count;
+        if (stepValue > 0)
+        {
+            count = unchecked((ulong)limit) - unchecked((ulong)initialValue);
+            if (stepValue != 1)
+            {
+                count /= (ulong)stepValue;
+            }
+        }
+        else
+        {
+            count = unchecked((ulong)initialValue) - unchecked((ulong)limit);
+            count /= GetUnsignedAbs(stepValue);
+        }
+
+        return unchecked((long)count);
+    }
+
+    private static ulong GetUnsignedAbs(long value)
+    {
+        return value >= 0
+            ? (ulong)value
+            : unchecked((ulong)(-(value + 1))) + 1UL;
+    }
+
+    private static bool ShouldSkipFloatForLoop(double initialValue, double limit, double stepValue)
+    {
+        return stepValue > 0d ? limit < initialValue : initialValue < limit;
+    }
+
+    private static bool ShouldContinueFloatForLoop(double value, double limit, double stepValue)
+    {
+        return stepValue > 0d ? value <= limit : limit <= value;
     }
 
     private static bool IsVarArgFunction(LuaPrototype prototype)

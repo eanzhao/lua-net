@@ -168,6 +168,11 @@ Lua 完整调用协议里有不少复杂点：
 - `RETURN`
 - `RETURN0`
 - `RETURN1`
+- `FORLOOP`
+- `FORPREP`
+- `TFORPREP`
+- `TFORCALL`
+- `TFORLOOP`
 - `CLOSURE`
 - `VARARG`
 - `GETVARG`
@@ -274,6 +279,9 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `open_call_chunk.luac` 验证开放调用链结果
 - [x] 用真实 `setlist_open_chunk.luac` 验证开放 `SETLIST` 结果
 - [x] 用手工 proto 验证 `GETVARG` 最小语义结果
+- [x] 用真实 `for_integer_chunk.luac`、`for_float_chunk.luac` 验证数值 `for` 结果
+- [x] 用真实 `for_generic_chunk.luac` 验证泛型 `for` 结果
+- [x] 用真实 `while_chunk.luac` 验证 backward `JMP` 结果
 
 ## 完成标准
 
@@ -300,6 +308,7 @@ Lua 完整调用协议里有不少复杂点：
 - 剩余加载路径已经拆到 `docs/015-step-04-load-opcodes.md`
 - `SETLIST` 与数组批量写入已经拆到 `docs/016-step-04-setlist.md`
 - `VARARG` 与开放结果协议已经拆到 `docs/017-step-04-vararg-open-results.md`
+- 循环执行路径已经拆到 `docs/018-step-04-loops.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合

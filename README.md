@@ -45,6 +45,7 @@
 - 补上 `LOADF`、`LOADKX`、`LFALSESKIP` 的最小执行路径
 - 补上 `SETLIST` 和数组批量写入路径
 - 补上 `VARARG`、`GETVARG` 和第一版开放结果协议
+- 补上数值 `for`、泛型 `for` 和循环回跳路径
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -71,11 +72,14 @@
 - 跑通真实 `open_call_chunk.luac` 的开放调用链结果
 - 跑通真实 `setlist_open_chunk.luac` 的开放 `SETLIST` 结果
 - 跑通手工 proto 的 `GETVARG` 最小语义结果
+- 跑通真实 `for_integer_chunk.luac`、`for_float_chunk.luac` 的数值 `for` 结果
+- 跑通真实 `for_generic_chunk.luac` 的泛型 `for` 结果
+- 跑通真实 `while_chunk.luac` 的循环回跳结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 74 个测试通过
+- 78 个测试通过
 
 ## 仓库结构
 
@@ -127,6 +131,7 @@
 - [docs/015-step-04-load-opcodes.md](docs/015-step-04-load-opcodes.md)
 - [docs/016-step-04-setlist.md](docs/016-step-04-setlist.md)
 - [docs/017-step-04-vararg-open-results.md](docs/017-step-04-vararg-open-results.md)
+- [docs/018-step-04-loops.md](docs/018-step-04-loops.md)
 
 这些文档对应的是：
 
@@ -147,6 +152,7 @@
 - 第 4 步补充：剩余加载路径
 - 第 4 步补充：`SETLIST` 与数组批量写入
 - 第 4 步补充：`VARARG` 与开放结果协议
+- 第 4 步补充：循环执行路径
 
 ## 开发方式
 
@@ -252,6 +258,8 @@ ls references/lua-5.5.0/src
 - `EQI` / `LTI` / `LEI` / `GTI` / `GEI`
 - `TEST` / `TESTSET`
 - `CALL` / `TAILCALL` / `RETURN` / `RETURN0` / `RETURN1`
+- `FORLOOP` / `FORPREP`
+- `TFORPREP` / `TFORCALL` / `TFORLOOP`
 - `CLOSURE` / `VARARG` / `GETVARG` / `VARARGPREP`
 - 真实 Lua 5.5 chunk 的最小执行闭环
 - 真实控制流 chunk 的基础执行闭环
@@ -274,12 +282,16 @@ ls references/lua-5.5.0/src
 - 真实开放调用链 chunk 的基础执行闭环
 - 真实开放 `SETLIST` chunk 的基础执行闭环
 - 手工 proto 的 `GETVARG` 执行闭环
+- 真实数值 `for` chunk 的基础执行闭环
+- 真实泛型 `for` chunk 的基础执行闭环
+- 真实 backward `JMP` chunk 的基础执行闭环
 
 ## 下一步
 
 下一步会继续沿着 VM 和运行时主线往下补：
 
 - 扩展更多基础 opcode
+- 补上 `repeat` / `until`
 - 补上迭代器相关 opcode
 - 补上 vararg table 那条路径
 - 扩展 userdata 和更一般的元方法调度
