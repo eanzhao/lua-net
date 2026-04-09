@@ -6,6 +6,8 @@
 
 这一轮继续沿着 VM 的调用协议往前补，把之前还断着的 vararg 和开放结果路径接上了。
 
+后续在 `docs/020-step-04-vararg-table.md` 里，已经继续补上了具名 vararg 参数和 vararg table 这条路径。
+
 这次真正打通的是这几类场景：
 
 - `...` 读取固定个数结果
@@ -163,3 +165,5 @@ Lua 5.5 的 vararg 有两条内部表示路线：
 - 更完整的 vararg table 路径
 - 迭代器相关 opcode
 - 更一般的元方法分发
+
+其中 vararg table 这条线已经在后续一轮推进到 `docs/020-step-04-vararg-table.md`。

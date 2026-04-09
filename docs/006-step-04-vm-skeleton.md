@@ -46,6 +46,7 @@
 - 用真实 `upvalue_chunk.luac` 验证共享上值捕获行为
 - 用真实 `close_chunk.luac` 验证块作用域关闭上值行为
 - 用真实 `tbc_nil_chunk.luac`、`tbc_false_chunk.luac` 验证 `TBC` 的最小快速路径
+- 用真实 `meta_add_chunk.luac`、`meta_addi_chunk.luac`、`meta_flip_chunk.luac`、`meta_addk_chunk.luac` 验证二元元方法分发行为
 
 ## 设计原则
 
@@ -144,6 +145,9 @@ Lua 完整调用协议里有不少复杂点：
 - `SHRI`
 - `SHL`
 - `SHR`
+- `MMBIN`
+- `MMBINI`
+- `MMBINK`
 - `UNM`
 - `BNOT`
 - `NOT`
@@ -176,19 +180,21 @@ Lua 完整调用协议里有不少复杂点：
 - `CLOSURE`
 - `VARARG`
 - `GETVARG`
+- `ERRNNIL`
 - `VARARGPREP`
 
-当前 `ADD` 只先支持数值快速路径；配套的元方法分派先留到后续阶段继续做。
+当前二元算术和位运算已经补上了第一版 `MMBIN` / `MMBINI` / `MMBINK` 分发，但仍然只覆盖最小对象语义。
 
 当前算术也只先支持最小快速路径：
 
 - `ADDI` / `ADDK` / `SUBK` / `MULK` / `ADD` / `SUB` / `MUL` 先支持整数与浮点数
+- 二元算术快速路径失败时，会继续落到 `MMBIN` / `MMBINI` / `MMBINK` 查找 `__add`、`__sub`、`__mul`、`__mod`、`__pow`、`__div`、`__idiv`
 - `POWK` / `POW` 先支持数值路径，并按 Lua 的浮点结果语义返回
 - `DIV` 按 Lua 规则返回浮点结果
 - `DIVK` / `IDIVK` / `MODK` 和寄存器版本一起对齐 Lua 规则
 - `IDIV` 和 `MOD` 先对齐 Lua 的向下取整和取模规则
 - `UNM` / `NOT` 先支持基础数值和真假值语义
-- 算术元方法分派放到后续阶段
+- 一元算术元方法分派放到后续阶段
 
 当前字符串原语也先支持最小快速路径：
 
@@ -200,8 +206,9 @@ Lua 完整调用协议里有不少复杂点：
 
 - `BANDK` / `BORK` / `BXORK` 与寄存器版本先支持整数运算
 - `SHLI` / `SHRI` / `SHL` / `SHR` 先对齐 Lua 的移位规则
+- 二元位运算快速路径失败时，也会通过 `MMBIN` / `MMBINI` / `MMBINK` 走 `__band`、`__bor`、`__bxor`、`__shl`、`__shr`
 - `BNOT` 先支持整数路径
-- 位运算元方法分派放到后续阶段
+- 一元位运算元方法分派放到后续阶段
 
 当前分支和比较也只先支持最小快速路径：
 
@@ -282,6 +289,10 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `for_integer_chunk.luac`、`for_float_chunk.luac` 验证数值 `for` 结果
 - [x] 用真实 `for_generic_chunk.luac` 验证泛型 `for` 结果
 - [x] 用真实 `while_chunk.luac` 验证 backward `JMP` 结果
+- [x] 用真实 `repeat_chunk.luac` 验证 `repeat / until` 结果
+- [x] 用真实 `global_ok_chunk.luac`、`global_err_chunk.luac` 验证 `ERRNNIL` 与 `global` 声明检查结果
+- [x] 用真实 `vararg_table_return_chunk.luac`、`vararg_table_mix_chunk.luac`、`vararg_table_mutation_chunk.luac` 验证具名 vararg 参数与 vararg table 结果
+- [x] 用真实 `meta_add_chunk.luac`、`meta_addi_chunk.luac`、`meta_flip_chunk.luac`、`meta_addk_chunk.luac` 验证二元元方法分发结果
 
 ## 完成标准
 
@@ -309,9 +320,11 @@ Lua 完整调用协议里有不少复杂点：
 - `SETLIST` 与数组批量写入已经拆到 `docs/016-step-04-setlist.md`
 - `VARARG` 与开放结果协议已经拆到 `docs/017-step-04-vararg-open-results.md`
 - 循环执行路径已经拆到 `docs/018-step-04-loops.md`
+- `repeat / until` 与全局声明检查已经拆到 `docs/019-step-04-repeat-global-checks.md`
+- 具名 vararg 参数与 vararg table 已经拆到 `docs/020-step-04-vararg-table.md`
+- 二元算术与位运算元方法分发已经拆到 `docs/021-step-04-binary-metamethods.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
 - `and` / `or` 之外更复杂的短路场景
-- vararg table 等剩余变长参数路径
-- 元方法调度
+- 更一般的元方法调度

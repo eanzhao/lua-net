@@ -46,6 +46,9 @@
 - 补上 `SETLIST` 和数组批量写入路径
 - 补上 `VARARG`、`GETVARG` 和第一版开放结果协议
 - 补上数值 `for`、泛型 `for` 和循环回跳路径
+- 补上 `ERRNNIL` 与全局声明检查路径
+- 补上具名 vararg 参数与 vararg table 路径
+- 补上 `MMBIN` / `MMBINI` / `MMBINK` 的第一版二元元方法分发路径
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -75,11 +78,15 @@
 - 跑通真实 `for_integer_chunk.luac`、`for_float_chunk.luac` 的数值 `for` 结果
 - 跑通真实 `for_generic_chunk.luac` 的泛型 `for` 结果
 - 跑通真实 `while_chunk.luac` 的循环回跳结果
+- 跑通真实 `repeat_chunk.luac` 的 `repeat / until` 结果
+- 跑通真实 `global_ok_chunk.luac`、`global_err_chunk.luac` 的全局声明检查结果
+- 跑通真实 `vararg_table_return_chunk.luac`、`vararg_table_mix_chunk.luac`、`vararg_table_mutation_chunk.luac` 的具名 vararg 参数与 vararg table 结果
+- 跑通真实 `meta_add_chunk.luac`、`meta_addi_chunk.luac`、`meta_flip_chunk.luac`、`meta_addk_chunk.luac` 的二元元方法分发结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 78 个测试通过
+- 88 个测试通过
 
 ## 仓库结构
 
@@ -132,6 +139,9 @@
 - [docs/016-step-04-setlist.md](docs/016-step-04-setlist.md)
 - [docs/017-step-04-vararg-open-results.md](docs/017-step-04-vararg-open-results.md)
 - [docs/018-step-04-loops.md](docs/018-step-04-loops.md)
+- [docs/019-step-04-repeat-global-checks.md](docs/019-step-04-repeat-global-checks.md)
+- [docs/020-step-04-vararg-table.md](docs/020-step-04-vararg-table.md)
+- [docs/021-step-04-binary-metamethods.md](docs/021-step-04-binary-metamethods.md)
 
 这些文档对应的是：
 
@@ -153,6 +163,9 @@
 - 第 4 步补充：`SETLIST` 与数组批量写入
 - 第 4 步补充：`VARARG` 与开放结果协议
 - 第 4 步补充：循环执行路径
+- 第 4 步补充：`repeat / until` 与全局声明检查
+- 第 4 步补充：具名 vararg 参数与 vararg table
+- 第 4 步补充：二元算术与位运算元方法分发
 
 ## 开发方式
 
@@ -169,6 +182,10 @@
 1. 先看 Lua 5.5 手册
 2. 再看官方 Lua 5.5 源码
 3. 最后把行为落实到 C# 代码和测试
+
+补充约定：
+
+- `references/lua-5.5.0/src` 里的本地临时构建产物已经通过 `.gitignore` 忽略
 
 ## 快速开始
 
@@ -247,6 +264,7 @@ ls references/lua-5.5.0/src
 - `BANDK` / `BORK` / `BXORK`
 - `BAND` / `BOR` / `BXOR`
 - `SHLI` / `SHRI` / `SHL` / `SHR`
+- `MMBIN` / `MMBINI` / `MMBINK`
 - `UNM` / `BNOT` / `NOT`
 - `LEN` / `CONCAT`
 - `CLOSE`
@@ -260,7 +278,7 @@ ls references/lua-5.5.0/src
 - `CALL` / `TAILCALL` / `RETURN` / `RETURN0` / `RETURN1`
 - `FORLOOP` / `FORPREP`
 - `TFORPREP` / `TFORCALL` / `TFORLOOP`
-- `CLOSURE` / `VARARG` / `GETVARG` / `VARARGPREP`
+- `CLOSURE` / `VARARG` / `GETVARG` / `ERRNNIL` / `VARARGPREP`
 - 真实 Lua 5.5 chunk 的最小执行闭环
 - 真实控制流 chunk 的基础执行闭环
 - 真实比较与短路 chunk 的基础执行闭环
@@ -285,18 +303,21 @@ ls references/lua-5.5.0/src
 - 真实数值 `for` chunk 的基础执行闭环
 - 真实泛型 `for` chunk 的基础执行闭环
 - 真实 backward `JMP` chunk 的基础执行闭环
+- 真实 `repeat / until` chunk 的基础执行闭环
+- 真实全局声明检查 chunk 的基础执行闭环
+- 真实具名 vararg 参数与 vararg table chunk 的基础执行闭环
+- 真实二元算术与位运算元方法 chunk 的基础执行闭环
 
 ## 下一步
 
 下一步会继续沿着 VM 和运行时主线往下补：
 
-- 扩展更多基础 opcode
-- 补上 `repeat` / `until`
-- 补上迭代器相关 opcode
-- 补上 vararg table 那条路径
-- 扩展 userdata 和更一般的元方法调度
+- 补上更多比较、长度、拼接和调用相关元方法
+- 补上更多控制流与标准库配套路径
+- 补上更完整的全局声明与相关语义
+- 扩展 userdata 路径
 - 补上更完整的 to-be-closed 生命周期和错误恢复路径
-- 开始进入上值捕获和元方法调度
+- 开始往语法分析和编译器主线推进
 
 ## 参考资料
 

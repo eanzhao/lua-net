@@ -14,6 +14,16 @@ public sealed class LuaVirtualMachine
 {
     private const byte VarArgFlagMask = 0b00000011;
     private const byte VarArgTableFlag = 0b00000010;
+    private static readonly string[] MetamethodNames =
+    [
+        "__index", "__newindex",
+        "__gc", "__mode", "__len", "__eq",
+        "__add", "__sub", "__mul", "__mod", "__pow",
+        "__div", "__idiv",
+        "__band", "__bor", "__bxor", "__shl", "__shr",
+        "__unm", "__bnot", "__lt", "__le",
+        "__concat", "__call", "__close"
+    ];
 
     public LuaVirtualMachine()
     {
@@ -124,6 +134,11 @@ public sealed class LuaVirtualMachine
         var (success, result) = operation(left, right);
         if (!success)
         {
+            if (HasFollowingMetamethodInstruction(frame, prototype))
+            {
+                return;
+            }
+
             throw new NotSupportedException("Arithmetic metamethod dispatch is not implemented yet.");
         }
 
@@ -322,7 +337,8 @@ public sealed class LuaVirtualMachine
     {
         if (instruction.K != 0)
         {
-            throw new NotSupportedException("VARARG with vararg table is not implemented yet.");
+            ExecuteVarArgFromTable(frame, instruction);
+            return;
         }
 
         var requestedResultCount = instruction.C - 1;
@@ -338,6 +354,49 @@ public sealed class LuaVirtualMachine
     private void ExecuteGetVarArg(CallFrame frame, LuaInstruction instruction)
     {
         SetRegister(frame, instruction.A, GetVarArgValue(frame, GetRegister(frame, instruction.C)));
+    }
+
+    private void ExecuteVarArgFromTable(CallFrame frame, LuaInstruction instruction)
+    {
+        var varargTable = GetRegister(frame, instruction.B).AsTable();
+        var requestedResultCount = instruction.C - 1;
+        var availableCount = GetVarArgCount(varargTable);
+
+        if (requestedResultCount < 0)
+        {
+            var results = new LuaValue[availableCount];
+            for (var index = 0; index < availableCount; index++)
+            {
+                results[index] = varargTable.GetValue(LuaValue.FromInteger(index + 1));
+            }
+
+            WriteOpenResults(frame, instruction.A, results);
+            return;
+        }
+
+        var values = new LuaValue[requestedResultCount];
+        for (var index = 0; index < requestedResultCount; index++)
+        {
+            values[index] = index < availableCount
+                ? varargTable.GetValue(LuaValue.FromInteger(index + 1))
+                : LuaValue.Nil;
+        }
+
+        WriteResults(frame, instruction.A, requestedResultCount, values);
+    }
+
+    private void ExecuteErrNNil(LuaPrototype prototype, CallFrame frame, LuaInstruction instruction)
+    {
+        if (GetRegister(frame, instruction.A).IsNil)
+        {
+            return;
+        }
+
+        var globalName = instruction.Bx == 0
+            ? "?"
+            : GetConstantString(prototype.Constants[instruction.Bx - 1]) ?? "?";
+
+        throw new LuaRuntimeException(LuaValue.FromString($"global '{globalName}' already defined"));
     }
 
     private void ExecuteIntegerForPrep(
@@ -493,6 +552,16 @@ public sealed class LuaVirtualMachine
         }
     }
 
+    private void ExecuteVarArgPrep(CallFrame frame, LuaPrototype prototype)
+    {
+        if (!UsesVarArgTable(prototype))
+        {
+            return;
+        }
+
+        SetRegister(frame, prototype.NumberOfParameters, LuaValue.FromTable(CreateVarArgTable(frame.Varargs)));
+    }
+
     private void RegisterToBeClosed(CallFrame frame, int registerIndex)
     {
         var value = GetRegister(frame, registerIndex);
@@ -516,6 +585,59 @@ public sealed class LuaVirtualMachine
     private void ExecuteJump(CallFrame frame, LuaInstruction instruction)
     {
         JumpRelative(frame, instruction.SJ);
+    }
+
+    private void ExecuteMetamethodBinary(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
+    {
+        var resultRegister = ReadPreviousInstruction(frame, prototype, instruction.Opcode).A;
+        ExecuteBinaryMetamethod(
+            frame,
+            resultRegister,
+            GetRegister(frame, instruction.A),
+            GetRegister(frame, instruction.B),
+            instruction.C);
+    }
+
+    private void ExecuteMetamethodBinaryImmediate(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
+    {
+        var resultRegister = ReadPreviousInstruction(frame, prototype, instruction.Opcode).A;
+        var registerOperand = GetRegister(frame, instruction.A);
+        var immediateOperand = LuaValue.FromInteger(ToSignedB(instruction.B));
+
+        if (instruction.K != 0)
+        {
+            ExecuteBinaryMetamethod(frame, resultRegister, immediateOperand, registerOperand, instruction.C);
+            return;
+        }
+
+        ExecuteBinaryMetamethod(frame, resultRegister, registerOperand, immediateOperand, instruction.C);
+    }
+
+    private void ExecuteMetamethodBinaryConstant(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
+    {
+        var resultRegister = ReadPreviousInstruction(frame, prototype, instruction.Opcode).A;
+        var registerOperand = GetRegister(frame, instruction.A);
+        var constantOperand = ConvertConstant(prototype.Constants[instruction.B]);
+
+        if (instruction.K != 0)
+        {
+            ExecuteBinaryMetamethod(frame, resultRegister, constantOperand, registerOperand, instruction.C);
+            return;
+        }
+
+        ExecuteBinaryMetamethod(frame, resultRegister, registerOperand, constantOperand, instruction.C);
+    }
+
+    private void ExecuteBinaryMetamethod(
+        CallFrame frame,
+        int resultRegister,
+        LuaValue left,
+        LuaValue right,
+        int eventIndex)
+    {
+        var metamethod = ResolveBinaryMetamethod(left, right, eventIndex).AsFunction();
+        var results = Call(metamethod, [left, right]);
+        SetRegister(frame, resultRegister, results.Length == 0 ? LuaValue.Nil : results[0]);
     }
 
     private void ExecuteEqualityComparison(CallFrame frame, LuaValue left, LuaValue right, int expected)
@@ -610,6 +732,20 @@ public sealed class LuaVirtualMachine
         }
 
         return body;
+    }
+
+    private LuaValue ResolveBinaryMetamethod(LuaValue left, LuaValue right, int eventIndex)
+    {
+        var metamethodName = GetMetamethodName(eventIndex);
+
+        if (TryGetMetamethod(left, metamethodName, out var metamethod) ||
+            TryGetMetamethod(right, metamethodName, out metamethod))
+        {
+            return metamethod;
+        }
+
+        throw new LuaRuntimeException(
+            LuaValue.FromString($"no metamethod '{metamethodName}' for {left.Kind} and {right.Kind}"));
     }
 
     private void InitializeRegisters(int baseIndex, IReadOnlyList<LuaValue> arguments, int fixedArgumentCount)
@@ -885,13 +1021,10 @@ public sealed class LuaVirtualMachine
                     ExecuteGetVarArg(frame, instruction);
                     break;
                 case LuaOpcode.VarArgPrep:
+                    ExecuteVarArgPrep(frame, prototype);
                     break;
                 case LuaOpcode.ErrNNil:
-                    if (!GetRegister(frame, instruction.A).IsNil)
-                    {
-                        throw new NotSupportedException("ERRNNIL error reporting is not implemented yet.");
-                    }
-
+                    ExecuteErrNNil(prototype, frame, instruction);
                     break;
                 case LuaOpcode.Jmp:
                     ExecuteJump(frame, instruction);
@@ -930,9 +1063,14 @@ public sealed class LuaVirtualMachine
                     ExecuteTestSet(frame, instruction);
                     break;
                 case LuaOpcode.MmBin:
+                    ExecuteMetamethodBinary(frame, prototype, instruction);
+                    break;
                 case LuaOpcode.MmBinI:
+                    ExecuteMetamethodBinaryImmediate(frame, prototype, instruction);
+                    break;
                 case LuaOpcode.MmBinK:
-                    throw new NotSupportedException("Metamethod dispatch is not implemented yet.");
+                    ExecuteMetamethodBinaryConstant(frame, prototype, instruction);
+                    break;
                 default:
                     throw new NotSupportedException($"Opcode '{instruction.Name}' is not implemented yet.");
             }
@@ -1062,6 +1200,11 @@ public sealed class LuaVirtualMachine
         };
     }
 
+    private static string? GetConstantString(LuaConstant constant)
+    {
+        return constant.Kind == LuaConstantKind.String ? constant.AsString() : null;
+    }
+
     private static IReadOnlyList<LuaValue> GetVarargs(
         LuaPrototype prototype,
         IReadOnlyList<LuaValue> arguments,
@@ -1079,6 +1222,18 @@ public sealed class LuaVirtualMachine
         }
 
         return varargs;
+    }
+
+    private static LuaTable CreateVarArgTable(IReadOnlyList<LuaValue> varargs)
+    {
+        var table = new LuaTable("vararg", arrayCapacity: varargs.Count);
+        for (var index = 0; index < varargs.Count; index++)
+        {
+            table.SetValue(LuaValue.FromInteger(index + 1), varargs[index]);
+        }
+
+        table.SetValue(LuaValue.FromString("n"), LuaValue.FromInteger(varargs.Count));
+        return table;
     }
 
     private LuaClosure CreateClosure(LuaPrototype prototype, CallFrame parentFrame, string? debugName = null)
@@ -1118,6 +1273,17 @@ public sealed class LuaVirtualMachine
         }
 
         return LuaValue.Nil;
+    }
+
+    private static int GetVarArgCount(LuaTable table)
+    {
+        var countValue = table.GetValue(LuaValue.FromString("n"));
+        if (!TryGetInteger(countValue, out var count) || count < 0 || count > int.MaxValue)
+        {
+            throw new InvalidOperationException("vararg table has no proper 'n'");
+        }
+
+        return (int)count;
     }
 
     private void EnsureRegisterExists(CallFrame frame, int registerIndex)
@@ -1339,6 +1505,17 @@ public sealed class LuaVirtualMachine
         return false;
     }
 
+    private static bool TryGetMetamethod(LuaValue value, string metamethodName, out LuaValue metamethod)
+    {
+        if (value.Kind == LuaValueKind.Table)
+        {
+            return value.AsTable().TryGetMetamethod(metamethodName, out metamethod);
+        }
+
+        metamethod = LuaValue.Nil;
+        return false;
+    }
+
     private static bool TryGetNumber(LuaValue value, out double result)
     {
         switch (value.Kind)
@@ -1474,6 +1651,11 @@ public sealed class LuaVirtualMachine
         return (prototype.Flags & VarArgFlagMask) != 0;
     }
 
+    private static bool UsesVarArgTable(LuaPrototype prototype)
+    {
+        return (prototype.Flags & VarArgTableFlag) != 0;
+    }
+
     private static bool TryGetConcatenationString(LuaValue value, out string result)
     {
         switch (value.Kind)
@@ -1598,6 +1780,16 @@ public sealed class LuaVirtualMachine
         return value >= int.MaxValue ? int.MaxValue : (int)value;
     }
 
+    private static string GetMetamethodName(int eventIndex)
+    {
+        if (eventIndex < 0 || eventIndex >= MetamethodNames.Length)
+        {
+            throw new InvalidOperationException($"Unknown metamethod event index '{eventIndex}'.");
+        }
+
+        return MetamethodNames[eventIndex];
+    }
+
     private static int ReadFollowingExtraArgument(CallFrame frame, LuaPrototype prototype, LuaOpcode owner)
     {
         if (frame.ProgramCounter >= prototype.Code.Length)
@@ -1613,6 +1805,27 @@ public sealed class LuaVirtualMachine
 
         frame.Advance();
         return extraInstruction.Ax;
+    }
+
+    private static LuaInstruction ReadPreviousInstruction(CallFrame frame, LuaPrototype prototype, LuaOpcode owner)
+    {
+        if (frame.ProgramCounter < 2)
+        {
+            throw new InvalidOperationException($"Opcode '{owner}' is missing the preceding arithmetic instruction.");
+        }
+
+        return LuaInstruction.FromRaw(prototype.Code[frame.ProgramCounter - 2]);
+    }
+
+    private static bool HasFollowingMetamethodInstruction(CallFrame frame, LuaPrototype prototype)
+    {
+        if (frame.ProgramCounter >= prototype.Code.Length)
+        {
+            return false;
+        }
+
+        var next = LuaInstruction.FromRaw(prototype.Code[frame.ProgramCounter]).Opcode;
+        return next is LuaOpcode.MmBin or LuaOpcode.MmBinI or LuaOpcode.MmBinK;
     }
 
     private static void SkipMetamethodInstructionIfPresent(CallFrame frame, LuaPrototype prototype)
