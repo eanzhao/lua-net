@@ -69,6 +69,7 @@ public class LuaStateTests
         state.GlobalEnvironment.GetValue(LuaValue.FromString("assert")).AsFunction().DebugName.ShouldBe("assert");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("select")).AsFunction().DebugName.ShouldBe("select");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("pcall")).AsFunction().DebugName.ShouldBe("pcall");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("xpcall")).AsFunction().DebugName.ShouldBe("xpcall");
     }
 
     [Fact]
@@ -247,6 +248,66 @@ public class LuaStateTests
         failure.Length.ShouldBe(2);
         failure[0].AsBoolean().ShouldBeFalse();
         failure[1].AsString().ShouldBe("boom");
+    }
+
+    [Fact]
+    public void XPCall_ShouldTransformErrorsThroughMessageHandler()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var xpcall = GetBaseFunction(state, "xpcall");
+        var okClosure = new LuaClosure(
+            "ok",
+            body: new LuaNativeClosureBody(static (_, _, arguments) =>
+            [
+                LuaValue.FromInteger(arguments[0].AsInteger() + arguments[1].AsInteger()),
+                LuaValue.FromInteger(arguments[0].AsInteger() * arguments[1].AsInteger())
+            ]));
+        var handlerClosure = new LuaClosure(
+            "handler",
+            body: new LuaNativeClosureBody(static (_, _, arguments) => [LuaValue.FromString("handled:" + arguments[0].AsString())]));
+        var errorClosure = new LuaClosure(
+            "boom",
+            body: new LuaNativeClosureBody(static (_, _, _) => throw new LuaRuntimeException(LuaValue.FromString("boom"))));
+        var badHandlerClosure = new LuaClosure(
+            "bad-handler",
+            body: new LuaNativeClosureBody(static (_, _, _) => throw new LuaRuntimeException(LuaValue.FromString("handler-boom"))));
+
+        var success = InvokeBaseFunction(
+            state,
+            xpcall,
+            LuaValue.FromFunction(okClosure),
+            LuaValue.FromFunction(handlerClosure),
+            LuaValue.FromInteger(6),
+            LuaValue.FromInteger(7));
+        success.Length.ShouldBe(3);
+        success[0].AsBoolean().ShouldBeTrue();
+        success[1].AsInteger().ShouldBe(13);
+        success[2].AsInteger().ShouldBe(42);
+
+        var failure = InvokeBaseFunction(
+            state,
+            xpcall,
+            LuaValue.FromFunction(errorClosure),
+            LuaValue.FromFunction(handlerClosure));
+        failure.Length.ShouldBe(2);
+        failure[0].AsBoolean().ShouldBeFalse();
+        failure[1].AsString().ShouldBe("handled:boom");
+
+        var handlerFailure = InvokeBaseFunction(
+            state,
+            xpcall,
+            LuaValue.FromFunction(errorClosure),
+            LuaValue.FromFunction(badHandlerClosure));
+        handlerFailure.Length.ShouldBe(2);
+        handlerFailure[0].AsBoolean().ShouldBeFalse();
+        handlerFailure[1].AsString().ShouldBe("error in error handling");
     }
 
     [Fact]

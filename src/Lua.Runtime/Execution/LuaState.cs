@@ -36,6 +36,7 @@ public sealed class LuaState
         RegisterBaseFunction("assert", Assert);
         RegisterBaseFunction("select", Select);
         RegisterBaseFunction("pcall", ProtectedCall);
+        RegisterBaseFunction("xpcall", ExtendedProtectedCall);
         RegisterBaseFunction("error", Error);
     }
 
@@ -280,27 +281,22 @@ public sealed class LuaState
 
         var callable = RequireArgument(arguments, 0, "pcall");
         var callArguments = arguments.Count > 1 ? arguments.Skip(1).ToArray() : Array.Empty<LuaValue>();
+        return ExecuteProtectedCall(state, callable, callArguments, messageHandler: null);
+    }
 
-        try
-        {
-            var results = state.InvokeCallable(callable, callArguments);
-            var protectedResults = new LuaValue[results.Length + 1];
-            protectedResults[0] = LuaValue.FromBoolean(true);
-            for (var index = 0; index < results.Length; index++)
-            {
-                protectedResults[index + 1] = results[index];
-            }
+    private static LuaValue[] ExtendedProtectedCall(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        _ = closure;
 
-            return protectedResults;
-        }
-        catch (LuaRuntimeException ex)
+        var callable = RequireArgument(arguments, 0, "xpcall");
+        var messageHandler = RequireArgument(arguments, 1, "xpcall");
+        if (messageHandler.Kind != LuaValueKind.Function)
         {
-            return [LuaValue.FromBoolean(false), ex.ErrorObject];
+            throw CreateArgumentTypeError("xpcall", 2, "function", messageHandler);
         }
-        catch (Exception ex)
-        {
-            return [LuaValue.FromBoolean(false), LuaValue.FromString(ex.Message)];
-        }
+
+        var callArguments = arguments.Count > 2 ? arguments.Skip(2).ToArray() : Array.Empty<LuaValue>();
+        return ExecuteProtectedCall(state, callable, callArguments, messageHandler);
     }
 
     private static LuaValue[] Error(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
@@ -440,6 +436,63 @@ public sealed class LuaState
     private static LuaRuntimeException CreateRuntimeError(string message)
     {
         return new LuaRuntimeException(LuaValue.FromString(message));
+    }
+
+    private static LuaValue[] ExecuteProtectedCall(
+        LuaState state,
+        LuaValue callable,
+        IReadOnlyList<LuaValue> callArguments,
+        LuaValue? messageHandler)
+    {
+        try
+        {
+            var results = state.InvokeCallable(callable, callArguments);
+            return PrependSuccessResult(results);
+        }
+        catch (Exception ex)
+        {
+            var errorObject = GetErrorObject(ex);
+            if (messageHandler is not null)
+            {
+                errorObject = InvokeMessageHandler(state, messageHandler.Value, errorObject);
+            }
+
+            return [LuaValue.FromBoolean(false), errorObject];
+        }
+    }
+
+    private static LuaValue[] PrependSuccessResult(IReadOnlyList<LuaValue> results)
+    {
+        var protectedResults = new LuaValue[results.Count + 1];
+        protectedResults[0] = LuaValue.FromBoolean(true);
+        for (var index = 0; index < results.Count; index++)
+        {
+            protectedResults[index + 1] = results[index];
+        }
+
+        return protectedResults;
+    }
+
+    private static LuaValue InvokeMessageHandler(LuaState state, LuaValue messageHandler, LuaValue errorObject)
+    {
+        try
+        {
+            var handledResults = state.InvokeCallable(messageHandler, [errorObject]);
+            return handledResults.Length == 0 ? LuaValue.Nil : handledResults[0];
+        }
+        catch
+        {
+            return LuaValue.FromString("error in error handling");
+        }
+    }
+
+    private static LuaValue GetErrorObject(Exception exception)
+    {
+        return exception switch
+        {
+            LuaRuntimeException runtimeException => runtimeException.ErrorObject,
+            _ => LuaValue.FromString(exception.Message)
+        };
     }
 
     private static string GetTypeName(LuaValue value)

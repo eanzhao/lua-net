@@ -1692,6 +1692,34 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleXPCallChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var metatable = new LuaTable();
+
+        metatable.SetValue(
+            LuaValue.FromString("__call"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__call",
+                static (_, _, arguments) => [LuaValue.FromInteger(arguments[1].AsInteger() + 1)])));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+
+        var results = vm.Execute(ReadFixtureChunk("xpcall_chunk.luac"));
+
+        results.Length.ShouldBe(6);
+        results[0].AsInteger().ShouldBe(42);
+        results[1].AsInteger().ShouldBe(42);
+        results[2].AsInteger().ShouldBe(0);
+        results[3].AsString().ShouldBe("handled:boom");
+        results[4].AsInteger().ShouldBe(0);
+        results[5].AsString().ShouldBe("error in error handling");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Call_ShouldWrapClrExceptionsFromNativeClosures()
     {
         var closure = new LuaClosure(
