@@ -53,6 +53,8 @@
 - 补上 `UNM` / `BNOT` 与最小 `__call` 路径
 - 补上 table `__index` / `__newindex` 的第一版表访问元方法分发路径
 - 补上 `LuaUserData` 的 metatable 承载与第一版 userdata 元方法分发路径
+- 补上 `_ENV.getmetatable`、`rawget`、`rawset`、`rawlen`、`rawequal`
+- 补上 `setmetatable` 的 protected metatable 语义
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -95,11 +97,13 @@
 - 跑通真实 `userdata_index_chunk.luac`、`userdata_newindex_chunk.luac` 的 userdata 表访问元方法结果
 - 跑通真实 `userdata_call_chunk.luac`、`userdata_len_chunk.luac`、`userdata_unm_chunk.luac` 的 userdata `__call`、`__len`、`__unm` 结果
 - 跑通真实 `userdata_eq_chunk.luac`、`userdata_close_chunk.luac` 的 userdata `__eq`、`__close` 结果
+- 跑通真实 `raw_metatable_chunk.luac` 的 `getmetatable` / `rawget` / `rawset` / `rawlen` / `rawequal` 结果
+- 跑通真实 `protected_metatable_chunk.luac`、`userdata_getmetatable_chunk.luac` 的 protected metatable 与 userdata `getmetatable` 结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 121 个测试通过
+- 129 个测试通过
 
 ## 仓库结构
 
@@ -159,6 +163,7 @@
 - [docs/023-step-04-unary-call-metamethods.md](docs/023-step-04-unary-call-metamethods.md)
 - [docs/024-step-04-table-metamethods.md](docs/024-step-04-table-metamethods.md)
 - [docs/025-step-04-userdata-metamethods.md](docs/025-step-04-userdata-metamethods.md)
+- [docs/026-step-06-base-metatable-raw-functions.md](docs/026-step-06-base-metatable-raw-functions.md)
 
 这些文档对应的是：
 
@@ -187,6 +192,7 @@
 - 第 4 步补充：一元元方法与最小 `__call`
 - 第 4 步补充：表访问元方法分发
 - 第 4 步补充：userdata 元方法分发
+- 第 6 步：基础库第一批元表与 raw 函数
 
 ## 开发方式
 
@@ -333,6 +339,7 @@ ls references/lua-5.5.0/src
 - 真实一元元方法与 `__call` chunk 的基础执行闭环
 - 真实 `__index` / `__newindex` chunk 的基础执行闭环
 - 真实 userdata 元方法 chunk 的基础执行闭环
+- 真实基础库 `getmetatable` / `raw*` chunk 的基础执行闭环
 
 ## 下一步
 
@@ -340,6 +347,7 @@ ls references/lua-5.5.0/src
 
 - 补上更完整的对象访问错误细节和剩余元方法组合
 - 扩展 userdata 的宿主接入与标准库路径
+- 补上 `type` / `assert` / `select` / `pcall` 这批基础库函数
 - 补上更多控制流与标准库配套路径
 - 补上更完整的全局声明与相关语义
 - 补上更完整的 to-be-closed 生命周期和错误恢复路径

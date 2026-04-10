@@ -56,6 +56,109 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void LuaState_ShouldPreloadMetatableAndRawHelpers()
+    {
+        var state = new LuaState();
+
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("getmetatable")).AsFunction().DebugName.ShouldBe("getmetatable");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("rawequal")).AsFunction().DebugName.ShouldBe("rawequal");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("rawlen")).AsFunction().DebugName.ShouldBe("rawlen");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("rawget")).AsFunction().DebugName.ShouldBe("rawget");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("rawset")).AsFunction().DebugName.ShouldBe("rawset");
+    }
+
+    [Fact]
+    public void GetMetatable_ShouldRespectProtectedFieldForTableAndUserData()
+    {
+        var state = new LuaState();
+        var getMetatable = GetBaseFunction(state, "getmetatable");
+        var protectedTable = new LuaTable();
+        var tableMetatable = new LuaTable();
+        var userData = new LuaUserData(new object());
+        var userDataMetatable = new LuaTable();
+
+        tableMetatable.SetValue(LuaValue.FromString("__metatable"), LuaValue.FromString("locked-table"));
+        protectedTable.SetMetatable(tableMetatable);
+        userDataMetatable.SetValue(LuaValue.FromString("__metatable"), LuaValue.FromBoolean(false));
+        userData.SetMetatable(userDataMetatable);
+
+        InvokeBaseFunction(state, getMetatable, LuaValue.FromTable(protectedTable))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("locked-table");
+
+        InvokeBaseFunction(state, getMetatable, LuaValue.FromUserData(userData))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SetMetatable_ShouldRejectProtectedMetatable()
+    {
+        var state = new LuaState();
+        var setMetatable = GetBaseFunction(state, "setmetatable");
+        var table = new LuaTable();
+        var metatable = new LuaTable();
+
+        metatable.SetValue(LuaValue.FromString("__metatable"), LuaValue.FromString("locked"));
+        table.SetMetatable(metatable);
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, setMetatable, LuaValue.FromTable(table), LuaValue.FromTable(new LuaTable())));
+
+        exception.ErrorObject.AsString().ShouldBe("cannot change a protected metatable");
+    }
+
+    [Fact]
+    public void RawGet_ShouldReturnNilForNilAndNaNKeys()
+    {
+        var state = new LuaState();
+        var rawGet = GetBaseFunction(state, "rawget");
+        var table = new LuaTable();
+
+        table.SetValue(LuaValue.FromString("answer"), LuaValue.FromInteger(42));
+
+        InvokeBaseFunction(state, rawGet, LuaValue.FromTable(table), LuaValue.Nil)
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
+
+        InvokeBaseFunction(state, rawGet, LuaValue.FromTable(table), LuaValue.FromFloat(double.NaN))
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void RawSetRawLenAndRawEqual_ShouldUseRawSemantics()
+    {
+        var state = new LuaState();
+        var rawSet = GetBaseFunction(state, "rawset");
+        var rawLen = GetBaseFunction(state, "rawlen");
+        var rawEqual = GetBaseFunction(state, "rawequal");
+        var table = new LuaTable();
+
+        table.SetValue(LuaValue.FromInteger(1), LuaValue.FromString("a"));
+        table.SetValue(LuaValue.FromInteger(2), LuaValue.FromString("b"));
+
+        InvokeBaseFunction(state, rawSet, LuaValue.FromTable(table), LuaValue.FromString("answer"), LuaValue.FromInteger(42))
+            .ShouldHaveSingleItem()
+            .AsTable().ShouldBeSameAs(table);
+        table.GetValue(LuaValue.FromString("answer")).AsInteger().ShouldBe(42);
+
+        InvokeBaseFunction(state, rawLen, LuaValue.FromTable(table))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(2);
+        InvokeBaseFunction(state, rawLen, LuaValue.FromString("lua"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(3);
+
+        InvokeBaseFunction(state, rawEqual, LuaValue.FromInteger(1), LuaValue.FromFloat(1.0))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeTrue();
+        InvokeBaseFunction(state, rawEqual, LuaValue.FromTable(table), LuaValue.FromTable(new LuaTable()))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
     public void CallFrame_ShouldAdvanceAndJump()
     {
         var frame = new CallFrame(new LuaClosure("main"), baseIndex: 0, expectedResults: 0);
@@ -109,5 +212,15 @@ public class LuaStateTests
         frame.SetRegisterTop(5);
 
         frame.RegisterTop.ShouldBe(5);
+    }
+
+    private static LuaClosure GetBaseFunction(LuaState state, string name)
+    {
+        return state.GlobalEnvironment.GetValue(LuaValue.FromString(name)).AsFunction();
+    }
+
+    private static LuaValue[] InvokeBaseFunction(LuaState state, LuaClosure closure, params LuaValue[] arguments)
+    {
+        return ((LuaNativeClosureBody)closure.Body!).Function(state, closure, arguments);
     }
 }

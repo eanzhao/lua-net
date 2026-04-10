@@ -1577,6 +1577,56 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleRawMetatableChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("raw_metatable_chunk.luac"));
+
+        results.Length.ShouldBe(8);
+        results[0].AsInteger().ShouldBe(41);
+        results[1].AsInteger().ShouldBe(42);
+        results[2].IsNil.ShouldBeTrue();
+        results[3].AsInteger().ShouldBe(2);
+        results[4].AsInteger().ShouldBe(3);
+        results[5].AsInteger().ShouldBe(1);
+        results[6].AsInteger().ShouldBe(1);
+        results[7].AsInteger().ShouldBe(1);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleProtectedMetatableChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("protected_metatable_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("locked");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataGetMetatableChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var metatable = new LuaTable();
+
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("mt"), LuaValue.FromTable(metatable));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_getmetatable_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(1);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Call_ShouldWrapClrExceptionsFromNativeClosures()
     {
         var closure = new LuaClosure(
