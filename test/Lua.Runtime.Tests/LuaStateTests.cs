@@ -68,6 +68,8 @@ public class LuaStateTests
         state.GlobalEnvironment.GetValue(LuaValue.FromString("type")).AsFunction().DebugName.ShouldBe("type");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("assert")).AsFunction().DebugName.ShouldBe("assert");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("select")).AsFunction().DebugName.ShouldBe("select");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("tonumber")).AsFunction().DebugName.ShouldBe("tonumber");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("tostring")).AsFunction().DebugName.ShouldBe("tostring");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("pcall")).AsFunction().DebugName.ShouldBe("pcall");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("xpcall")).AsFunction().DebugName.ShouldBe("xpcall");
     }
@@ -308,6 +310,96 @@ public class LuaStateTests
         handlerFailure.Length.ShouldBe(2);
         handlerFailure[0].AsBoolean().ShouldBeFalse();
         handlerFailure[1].AsString().ShouldBe("error in error handling");
+    }
+
+    [Fact]
+    public void ToNumber_ShouldHandleStandardAndBaseConversions()
+    {
+        var state = new LuaState();
+        var tonumber = GetBaseFunction(state, "tonumber");
+
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString(" 0x10 "))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(16);
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString("0x1.8p1"))
+            .ShouldHaveSingleItem()
+            .AsFloat().ShouldBe(3.0d);
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString("3.5"))
+            .ShouldHaveSingleItem()
+            .AsFloat().ShouldBe(3.5d);
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString("ff"), LuaValue.FromInteger(16))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(255);
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString("-10"), LuaValue.FromInteger(2))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(-2);
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString("19"), LuaValue.FromInteger(8))
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
+        InvokeBaseFunction(state, tonumber, LuaValue.FromBoolean(true))
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ToString_ShouldRespectMetamethodsAndFallbackFormatting()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var tostring = GetBaseFunction(state, "tostring");
+        var namedTable = new LuaTable();
+        var namedMetatable = new LuaTable();
+        var customTable = new LuaTable();
+        var customMetatable = new LuaTable();
+        var badTable = new LuaTable();
+        var badMetatable = new LuaTable();
+
+        namedMetatable.SetValue(LuaValue.FromString("__name"), LuaValue.FromString("vec"));
+        namedTable.SetMetatable(namedMetatable);
+
+        customMetatable.SetValue(
+            LuaValue.FromString("__tostring"),
+            LuaValue.FromFunction(new LuaClosure(
+                "__tostring",
+                body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromString("custom")] ))));
+        customTable.SetMetatable(customMetatable);
+
+        badMetatable.SetValue(
+            LuaValue.FromString("__tostring"),
+            LuaValue.FromFunction(new LuaClosure(
+                "__tostring",
+                body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromInteger(42)] ))));
+        badTable.SetMetatable(badMetatable);
+
+        InvokeBaseFunction(state, tostring, LuaValue.FromFloat(3.0d))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("3.0");
+        InvokeBaseFunction(state, tostring, LuaValue.FromTable(customTable))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("custom");
+
+        var namedResult = InvokeBaseFunction(state, tostring, LuaValue.FromTable(namedTable))
+            .ShouldHaveSingleItem()
+            .AsString();
+        namedResult.ShouldStartWith("vec: 0x");
+
+        var functionResult = InvokeBaseFunction(
+                state,
+                tostring,
+                LuaValue.FromFunction(new LuaClosure("demo")))
+            .ShouldHaveSingleItem()
+            .AsString();
+        functionResult.ShouldStartWith("function: 0x");
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, tostring, LuaValue.FromTable(badTable)));
+        exception.ErrorObject.AsString().ShouldBe("'__tostring' must return a string");
     }
 
     [Fact]

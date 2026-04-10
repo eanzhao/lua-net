@@ -57,6 +57,7 @@
 - 用真实 `raw_metatable_chunk.luac`、`protected_metatable_chunk.luac`、`userdata_getmetatable_chunk.luac` 验证第一批基础库元表与 `raw*` 行为
 - 用真实 `type_chunk.luac`、`select_chunk.luac`、`pcall_chunk.luac` 验证第一批基础库核心函数行为
 - 用真实 `xpcall_chunk.luac` 验证受保护调用与 message handler 行为
+- 用真实 `tonumber_chunk.luac`、`tostring_chunk.luac` 验证数值与字符串转换行为
 
 ## 设计原则
 
@@ -241,6 +242,7 @@ Lua 完整调用协议里有不少复杂点：
 - `TFORCALL` 沿用同一套最小 callable 解析
 - `pcall` 也已经通过 `LuaState.InvokeCallable` 接回同一套 callable 解析路径
 - `xpcall` 也已经通过 `LuaState.InvokeCallable` 接回同一套 callable 解析路径
+- `tostring` 也已经通过 `LuaState.InvokeCallable` 走最小 `__tostring` 路径
 - `__call` chain 放到后续阶段
 
 当前 `_ENV` 里也已经预置了第一批最小基础库函数：
@@ -256,6 +258,8 @@ Lua 完整调用协议里有不少复杂点：
 - `select`
 - `pcall`
 - `xpcall`
+- `tonumber`
+- `tostring`
 - `error`
 
 ## 模型说明
@@ -342,6 +346,7 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `raw_metatable_chunk.luac`、`protected_metatable_chunk.luac`、`userdata_getmetatable_chunk.luac` 验证第一批基础库元表与 `raw*` 结果
 - [x] 用真实 `type_chunk.luac`、`select_chunk.luac`、`pcall_chunk.luac` 验证第一批基础库核心函数结果
 - [x] 用真实 `xpcall_chunk.luac` 验证受保护调用与 message handler 结果
+- [x] 用真实 `tonumber_chunk.luac`、`tostring_chunk.luac` 验证数值与字符串转换结果
 
 ## 完成标准
 
@@ -379,6 +384,7 @@ Lua 完整调用协议里有不少复杂点：
 - 第一批基础库元表与 `raw*` 函数已经拆到 `docs/026-step-06-base-metatable-raw-functions.md`
 - 第一批基础库核心函数已经拆到 `docs/027-step-06-base-core-functions.md`
 - 基础库受保护调用补充已经拆到 `docs/028-step-06-xpcall.md`
+- 基础库数值与字符串转换已经拆到 `docs/029-step-06-number-string-conversion.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合

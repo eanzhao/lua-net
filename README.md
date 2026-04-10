@@ -59,6 +59,9 @@
 - 让 `pcall` 复用当前统一 callable 解析路径
 - 补上 `_ENV.xpcall`
 - 把 `pcall` / `xpcall` 收到统一受保护调用路径里
+- 补上 `_ENV.tonumber`、`tostring`
+- 补上 `tonumber` 的十进制、十六进制和进制整数转换路径
+- 补上 `tostring` 的 `__tostring` / `__name` 路径
 - 建立 `Lua.Runtime.Tests`
 - 建立 `Lua.Bytecode.Tests`
 - 建立 `Lua.VM.Tests`
@@ -107,11 +110,13 @@
 - 跑通真实 `select_chunk.luac` 的 `assert` / `select` 结果
 - 跑通真实 `pcall_chunk.luac` 的受保护调用结果
 - 跑通真实 `xpcall_chunk.luac` 的 message handler 与受保护调用结果
+- 跑通真实 `tonumber_chunk.luac` 的数值转换结果
+- 跑通真实 `tostring_chunk.luac` 的字符串转换结果
 
 当前主线测试结果：
 
 - `dotnet test lua-net.sln`
-- 136 个测试通过
+- 140 个测试通过
 
 ## 仓库结构
 
@@ -174,6 +179,7 @@
 - [docs/026-step-06-base-metatable-raw-functions.md](docs/026-step-06-base-metatable-raw-functions.md)
 - [docs/027-step-06-base-core-functions.md](docs/027-step-06-base-core-functions.md)
 - [docs/028-step-06-xpcall.md](docs/028-step-06-xpcall.md)
+- [docs/029-step-06-number-string-conversion.md](docs/029-step-06-number-string-conversion.md)
 
 这些文档对应的是：
 
@@ -205,6 +211,7 @@
 - 第 6 步：基础库第一批元表与 raw 函数
 - 第 6 步：基础库第一批核心函数
 - 第 6 步：基础库受保护调用补充
+- 第 6 步：基础库数值与字符串转换
 
 ## 开发方式
 
@@ -313,10 +320,12 @@ ls references/lua-5.5.0/src
 - `_ENV.rawget` / `_ENV.rawset` / `_ENV.rawlen` / `_ENV.rawequal`
 - `_ENV.type` / `_ENV.assert` / `_ENV.select` / `_ENV.pcall`
 - `_ENV.xpcall`
+- `_ENV.tonumber` / `_ENV.tostring`
 - `_ENV.error`
 - table metatable 上的最小 `__call`
 - `pcall` 复用统一 callable 解析路径
 - `xpcall` 复用统一 callable 解析路径
+- `tostring` 的 `__tostring` / `__name` 路径
 - `JMP`
 - `EQ` / `LT` / `LE` / `EQK`
 - `EQI` / `LTI` / `LEI` / `GTI` / `GEI`
@@ -360,6 +369,7 @@ ls references/lua-5.5.0/src
 - 真实基础库 `getmetatable` / `raw*` chunk 的基础执行闭环
 - 真实基础库 `type` / `assert` / `select` / `pcall` chunk 的基础执行闭环
 - 真实基础库 `xpcall` chunk 的基础执行闭环
+- 真实基础库 `tonumber` / `tostring` chunk 的基础执行闭环
 
 ## 下一步
 
@@ -367,7 +377,7 @@ ls references/lua-5.5.0/src
 
 - 补上更完整的对象访问错误细节和剩余元方法组合
 - 扩展 userdata 的宿主接入与标准库路径
-- 补上 `tonumber`、`tostring`、`next` / `pairs` / `ipairs`
+- 补上 `next` / `pairs` / `ipairs`
 - 补上更多控制流与标准库配套路径
 - 补上更完整的全局声明与相关语义
 - 补上更完整的 to-be-closed 生命周期和错误恢复路径

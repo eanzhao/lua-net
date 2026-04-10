@@ -1,5 +1,6 @@
 using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Lua.Runtime.Execution;
@@ -35,6 +36,8 @@ public sealed class LuaState
         RegisterBaseFunction("type", Type);
         RegisterBaseFunction("assert", Assert);
         RegisterBaseFunction("select", Select);
+        RegisterBaseFunction("tonumber", ToNumber);
+        RegisterBaseFunction("tostring", ToString);
         RegisterBaseFunction("pcall", ProtectedCall);
         RegisterBaseFunction("xpcall", ExtendedProtectedCall);
         RegisterBaseFunction("error", Error);
@@ -284,6 +287,59 @@ public sealed class LuaState
         return ExecuteProtectedCall(state, callable, callArguments, messageHandler: null);
     }
 
+    private static LuaValue[] ToNumber(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        _ = state;
+        _ = closure;
+
+        var value = RequireArgument(arguments, 0, "tonumber");
+        if (arguments.Count < 2 || arguments[1].IsNil)
+        {
+            return TryConvertToNumber(value, out var number)
+                ? [number]
+                : [LuaValue.Nil];
+        }
+
+        if (value.Kind != LuaValueKind.String)
+        {
+            throw CreateArgumentTypeError("tonumber", 1, "string", value);
+        }
+
+        var baseValue = arguments[1];
+        if (!TryGetInteger(baseValue, out var numberBase))
+        {
+            throw CreateArgumentTypeError("tonumber", 2, "integer", baseValue);
+        }
+
+        if (numberBase is < 2 or > 36)
+        {
+            throw CreateArgumentError("tonumber", 2, "base out of range");
+        }
+
+        return TryParseIntegerWithBase(value.AsString(), (int)numberBase, out var integer)
+            ? [LuaValue.FromInteger(integer)]
+            : [LuaValue.Nil];
+    }
+
+    private static LuaValue[] ToString(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        _ = closure;
+
+        var value = RequireArgument(arguments, 0, "tostring");
+        if (TryGetMetamethod(value, "__tostring", out var metamethod))
+        {
+            var results = state.InvokeCallable(metamethod, [value]);
+            if (results.Length == 0 || results[0].Kind != LuaValueKind.String)
+            {
+                throw CreateRuntimeError("'__tostring' must return a string");
+            }
+
+            return [results[0]];
+        }
+
+        return [LuaValue.FromString(FormatLuaValue(value))];
+    }
+
     private static LuaValue[] ExtendedProtectedCall(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         _ = closure;
@@ -332,6 +388,16 @@ public sealed class LuaState
                 metatable = null;
                 return false;
         }
+    }
+
+    private static bool TryGetMetamethod(LuaValue value, string metamethodName, out LuaValue metamethod)
+    {
+        return value.Kind switch
+        {
+            LuaValueKind.Table => value.AsTable().TryGetMetamethod(metamethodName, out metamethod),
+            LuaValueKind.UserData => value.AsUserData().TryGetMetamethod(metamethodName, out metamethod),
+            _ => FailMetamethodLookup(out metamethod)
+        };
     }
 
     private static bool TryGetProtectedMetatableValue(LuaTable? metatable, out LuaValue value)
@@ -400,6 +466,242 @@ public sealed class LuaState
         }
     }
 
+    private static bool TryConvertToNumber(LuaValue value, out LuaValue result)
+    {
+        switch (value.Kind)
+        {
+            case LuaValueKind.Integer:
+            case LuaValueKind.Float:
+                result = value;
+                return true;
+            case LuaValueKind.String:
+                return TryParseLuaStringNumber(value.AsString(), out result);
+            default:
+                result = LuaValue.Nil;
+                return false;
+        }
+    }
+
+    private static bool TryParseLuaStringNumber(string text, out LuaValue result)
+    {
+        var span = text.AsSpan().Trim();
+        if (span.IsEmpty)
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        if (TryParseLuaHexNumber(span, out result))
+        {
+            return true;
+        }
+
+        if (TryParseLuaDecimalNumber(span, out result))
+        {
+            return true;
+        }
+
+        result = LuaValue.Nil;
+        return false;
+    }
+
+    private static bool TryParseLuaDecimalNumber(ReadOnlySpan<char> text, out LuaValue result)
+    {
+        var treatsAsFloat = text.IndexOfAny('.', 'e', 'E') >= 0;
+        if (!treatsAsFloat &&
+            long.TryParse(text, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var integer))
+        {
+            result = LuaValue.FromInteger(integer);
+            return true;
+        }
+
+        if (double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number))
+        {
+            result = LuaValue.FromFloat(number);
+            return true;
+        }
+
+        result = LuaValue.Nil;
+        return false;
+    }
+
+    private static bool TryParseLuaHexNumber(ReadOnlySpan<char> text, out LuaValue result)
+    {
+        var index = 0;
+        var negative = false;
+        if (text[index] is '+' or '-')
+        {
+            negative = text[index] == '-';
+            index++;
+        }
+
+        if (index + 2 > text.Length ||
+            text[index] != '0' ||
+            (text[index + 1] != 'x' && text[index + 1] != 'X'))
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        index += 2;
+        if (index >= text.Length)
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        var digitsStart = index;
+        var integerPart = 0d;
+        while (index < text.Length && TryGetHexDigit(text[index], out var integerDigit))
+        {
+            integerPart = (integerPart * 16d) + integerDigit;
+            index++;
+        }
+
+        var fractionPart = 0d;
+        var fractionDivisor = 16d;
+        if (index < text.Length && text[index] == '.')
+        {
+            index++;
+            while (index < text.Length && TryGetHexDigit(text[index], out var fractionDigit))
+            {
+                fractionPart += fractionDigit / fractionDivisor;
+                fractionDivisor *= 16d;
+                index++;
+            }
+        }
+
+        var hasDigits = index > digitsStart;
+        if (!hasDigits)
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        var exponent = 0;
+        var hasExponent = false;
+        if (index < text.Length && (text[index] == 'p' || text[index] == 'P'))
+        {
+            hasExponent = true;
+            index++;
+            if (index >= text.Length)
+            {
+                result = LuaValue.Nil;
+                return false;
+            }
+
+            var exponentNegative = false;
+            if (text[index] is '+' or '-')
+            {
+                exponentNegative = text[index] == '-';
+                index++;
+            }
+
+            if (index >= text.Length || !char.IsAsciiDigit(text[index]))
+            {
+                result = LuaValue.Nil;
+                return false;
+            }
+
+            while (index < text.Length && char.IsAsciiDigit(text[index]))
+            {
+                exponent = (exponent * 10) + (text[index] - '0');
+                index++;
+            }
+
+            if (exponentNegative)
+            {
+                exponent = -exponent;
+            }
+        }
+
+        if (index != text.Length)
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        if (!hasExponent && fractionPart == 0d)
+        {
+            return TryParseHexInteger(text, negative, out result);
+        }
+
+        var number = (integerPart + fractionPart) * Math.Pow(2d, exponent);
+        if (negative)
+        {
+            number = -number;
+        }
+
+        result = LuaValue.FromFloat(number);
+        return true;
+    }
+
+    private static bool TryParseHexInteger(ReadOnlySpan<char> text, bool negative, out LuaValue result)
+    {
+        var prefixStart = text[0] is '+' or '-' ? 3 : 2;
+        var digits = text[prefixStart..];
+        if (!ulong.TryParse(digits, System.Globalization.NumberStyles.AllowHexSpecifier, System.Globalization.CultureInfo.InvariantCulture, out var number))
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        result = negative
+            ? LuaValue.FromInteger(unchecked((long)(0UL - number)))
+            : LuaValue.FromInteger(unchecked((long)number));
+        return true;
+    }
+
+    private static bool TryParseIntegerWithBase(string text, int numberBase, out long result)
+    {
+        var span = text.AsSpan().Trim();
+        if (span.IsEmpty)
+        {
+            result = default;
+            return false;
+        }
+
+        var index = 0;
+        var negative = false;
+        if (span[index] is '+' or '-')
+        {
+            negative = span[index] == '-';
+            index++;
+        }
+
+        if (index >= span.Length)
+        {
+            result = default;
+            return false;
+        }
+
+        ulong value = 0;
+        var sawDigit = false;
+        while (index < span.Length)
+        {
+            if (!TryGetBaseDigit(span[index], numberBase, out var digit))
+            {
+                result = default;
+                return false;
+            }
+
+            sawDigit = true;
+            value = unchecked((value * (uint)numberBase) + (uint)digit);
+            index++;
+        }
+
+        if (!sawDigit)
+        {
+            result = default;
+            return false;
+        }
+
+        result = negative
+            ? unchecked((long)(0UL - value))
+            : unchecked((long)value);
+        return true;
+    }
+
     private static bool IsNaNKey(LuaValue value)
     {
         return value.Kind == LuaValueKind.Float && double.IsNaN(value.AsFloat());
@@ -436,6 +738,109 @@ public sealed class LuaState
     private static LuaRuntimeException CreateRuntimeError(string message)
     {
         return new LuaRuntimeException(LuaValue.FromString(message));
+    }
+
+    private static string FormatLuaValue(LuaValue value)
+    {
+        return value.Kind switch
+        {
+            LuaValueKind.Nil => "nil",
+            LuaValueKind.Boolean => value.AsBoolean() ? "true" : "false",
+            LuaValueKind.Integer => value.AsInteger().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            LuaValueKind.Float => FormatLuaFloat(value.AsFloat()),
+            LuaValueKind.String => value.AsString(),
+            LuaValueKind.Table => FormatObjectValue(GetDisplayTypeName(value), value.AsTable()),
+            LuaValueKind.Function => FormatObjectValue("function", value.AsFunction()),
+            LuaValueKind.Thread => FormatObjectValue("thread", value.AsThread()),
+            LuaValueKind.UserData => FormatObjectValue(GetDisplayTypeName(value), value.AsUserData()),
+            _ => value.Kind.ToString().ToLowerInvariant()
+        };
+    }
+
+    private static string FormatLuaFloat(double value)
+    {
+        var text = value.ToString("G17", System.Globalization.CultureInfo.InvariantCulture);
+        if (!double.IsFinite(value) ||
+            text.Contains('.') ||
+            text.Contains('E') ||
+            text.Contains('e'))
+        {
+            return text;
+        }
+
+        return text + ".0";
+    }
+
+    private static string FormatObjectValue(string typeName, object reference)
+    {
+        return $"{typeName}: 0x{RuntimeHelpers.GetHashCode(reference):x}";
+    }
+
+    private static string GetDisplayTypeName(LuaValue value)
+    {
+        if (TryGetRawMetatable(value, out var metatable) &&
+            metatable is not null &&
+            metatable.TryGetValue(LuaValue.FromString("__name"), out var nameValue) &&
+            nameValue.Kind == LuaValueKind.String)
+        {
+            return nameValue.AsString();
+        }
+
+        return GetTypeName(value);
+    }
+
+    private static bool TryGetHexDigit(char c, out int digit)
+    {
+        if (c is >= '0' and <= '9')
+        {
+            digit = c - '0';
+            return true;
+        }
+
+        if (c is >= 'a' and <= 'f')
+        {
+            digit = (c - 'a') + 10;
+            return true;
+        }
+
+        if (c is >= 'A' and <= 'F')
+        {
+            digit = (c - 'A') + 10;
+            return true;
+        }
+
+        digit = default;
+        return false;
+    }
+
+    private static bool TryGetBaseDigit(char c, int numberBase, out int digit)
+    {
+        if (c is >= '0' and <= '9')
+        {
+            digit = c - '0';
+            return digit < numberBase;
+        }
+
+        if (c is >= 'a' and <= 'z')
+        {
+            digit = (c - 'a') + 10;
+            return digit < numberBase;
+        }
+
+        if (c is >= 'A' and <= 'Z')
+        {
+            digit = (c - 'A') + 10;
+            return digit < numberBase;
+        }
+
+        digit = default;
+        return false;
+    }
+
+    private static bool FailMetamethodLookup(out LuaValue metamethod)
+    {
+        metamethod = LuaValue.Nil;
+        return false;
     }
 
     private static LuaValue[] ExecuteProtectedCall(

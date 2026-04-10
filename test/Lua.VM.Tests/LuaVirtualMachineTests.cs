@@ -1720,6 +1720,39 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleToNumberChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("tonumber_chunk.luac"));
+
+        results.Length.ShouldBe(7);
+        results[0].AsInteger().ShouldBe(16);
+        results[1].AsFloat().ShouldBe(3.0d);
+        results[2].AsFloat().ShouldBe(3.5d);
+        results[3].AsInteger().ShouldBe(255);
+        results[4].AsInteger().ShouldBe(-2);
+        results[5].AsString().ShouldBe("nil");
+        results[6].AsString().ShouldBe("nil");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleToStringChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("tostring_chunk.luac"));
+
+        results.Length.ShouldBe(4);
+        results[0].AsString().ShouldBe("3.0");
+        results[1].AsString().ShouldStartWith("vec: 0x");
+        results[2].AsString().ShouldBe("custom");
+        results[3].AsString().ShouldStartWith("function: 0x");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Call_ShouldWrapClrExceptionsFromNativeClosures()
     {
         var closure = new LuaClosure(
