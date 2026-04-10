@@ -56,7 +56,7 @@ public class LuaStateTests
     }
 
     [Fact]
-    public void LuaState_ShouldPreloadMetatableAndRawHelpers()
+    public void LuaState_ShouldPreloadBaseLibraryFunctions()
     {
         var state = new LuaState();
 
@@ -65,6 +65,10 @@ public class LuaStateTests
         state.GlobalEnvironment.GetValue(LuaValue.FromString("rawlen")).AsFunction().DebugName.ShouldBe("rawlen");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("rawget")).AsFunction().DebugName.ShouldBe("rawget");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("rawset")).AsFunction().DebugName.ShouldBe("rawset");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("type")).AsFunction().DebugName.ShouldBe("type");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("assert")).AsFunction().DebugName.ShouldBe("assert");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("select")).AsFunction().DebugName.ShouldBe("select");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("pcall")).AsFunction().DebugName.ShouldBe("pcall");
     }
 
     [Fact]
@@ -156,6 +160,93 @@ public class LuaStateTests
         InvokeBaseFunction(state, rawEqual, LuaValue.FromTable(table), LuaValue.FromTable(new LuaTable()))
             .ShouldHaveSingleItem()
             .AsBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
+    public void TypeAssertAndSelect_ShouldUseLuaSemantics()
+    {
+        var state = new LuaState();
+        var type = GetBaseFunction(state, "type");
+        var assert = GetBaseFunction(state, "assert");
+        var select = GetBaseFunction(state, "select");
+        var userData = new LuaUserData(new object());
+
+        InvokeBaseFunction(state, type, LuaValue.Nil)
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("nil");
+        InvokeBaseFunction(state, type, LuaValue.FromInteger(1))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("number");
+        InvokeBaseFunction(state, type, LuaValue.FromUserData(userData))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("userdata");
+
+        var assertResults = InvokeBaseFunction(
+            state,
+            assert,
+            LuaValue.FromString("ok"),
+            LuaValue.FromInteger(1),
+            LuaValue.FromInteger(2));
+        assertResults.Length.ShouldBe(3);
+        assertResults[0].AsString().ShouldBe("ok");
+        assertResults[1].AsInteger().ShouldBe(1);
+        assertResults[2].AsInteger().ShouldBe(2);
+
+        var assertException = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, assert, LuaValue.FromBoolean(false), LuaValue.FromString("boom")));
+        assertException.ErrorObject.AsString().ShouldBe("boom");
+
+        InvokeBaseFunction(
+                state,
+                select,
+                LuaValue.FromString("#"),
+                LuaValue.FromInteger(10),
+                LuaValue.FromInteger(20),
+                LuaValue.FromInteger(30))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(3);
+
+        var selectedValues = InvokeBaseFunction(
+            state,
+            select,
+            LuaValue.FromInteger(-2),
+            LuaValue.FromInteger(10),
+            LuaValue.FromInteger(20),
+            LuaValue.FromInteger(30));
+        selectedValues.Length.ShouldBe(2);
+        selectedValues[0].AsInteger().ShouldBe(20);
+        selectedValues[1].AsInteger().ShouldBe(30);
+    }
+
+    [Fact]
+    public void PCall_ShouldReturnStatusAndResults()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var pcall = GetBaseFunction(state, "pcall");
+        var okClosure = new LuaClosure(
+            "ok",
+            body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromInteger(41), LuaValue.FromInteger(42)]));
+        var errorClosure = new LuaClosure(
+            "boom",
+            body: new LuaNativeClosureBody(static (_, _, _) => throw new LuaRuntimeException(LuaValue.FromString("boom"))));
+
+        var success = InvokeBaseFunction(state, pcall, LuaValue.FromFunction(okClosure));
+        success.Length.ShouldBe(3);
+        success[0].AsBoolean().ShouldBeTrue();
+        success[1].AsInteger().ShouldBe(41);
+        success[2].AsInteger().ShouldBe(42);
+
+        var failure = InvokeBaseFunction(state, pcall, LuaValue.FromFunction(errorClosure));
+        failure.Length.ShouldBe(2);
+        failure[0].AsBoolean().ShouldBeFalse();
+        failure[1].AsString().ShouldBe("boom");
     }
 
     [Fact]

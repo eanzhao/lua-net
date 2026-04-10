@@ -1627,6 +1627,71 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleTypeChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(new LuaUserData(new object())));
+
+        var results = vm.Execute(ReadFixtureChunk("type_chunk.luac"));
+
+        results.Length.ShouldBe(6);
+        results[0].AsString().ShouldBe("nil");
+        results[1].AsString().ShouldBe("number");
+        results[2].AsString().ShouldBe("string");
+        results[3].AsString().ShouldBe("table");
+        results[4].AsString().ShouldBe("function");
+        results[5].AsString().ShouldBe("userdata");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleAssertAndSelectChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("select_chunk.luac"));
+
+        results.Length.ShouldBe(7);
+        results[0].AsInteger().ShouldBe(3);
+        results[1].AsString().ShouldBe("ok");
+        results[2].AsInteger().ShouldBe(10);
+        results[3].AsInteger().ShouldBe(20);
+        results[4].AsInteger().ShouldBe(10);
+        results[5].AsInteger().ShouldBe(20);
+        results[6].AsInteger().ShouldBe(20);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandlePCallChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var metatable = new LuaTable();
+
+        metatable.SetValue(
+            LuaValue.FromString("__call"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__call",
+                static (_, _, arguments) => [LuaValue.FromInteger(arguments[1].AsInteger() + 1)])));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+
+        var results = vm.Execute(ReadFixtureChunk("pcall_chunk.luac"));
+
+        results.Length.ShouldBe(6);
+        results[0].AsInteger().ShouldBe(42);
+        results[1].AsInteger().ShouldBe(42);
+        results[2].AsInteger().ShouldBe(0);
+        results[3].AsString().ShouldBe("boom");
+        results[4].AsInteger().ShouldBe(0);
+        results[5].AsString().ShouldBe("assert-fail");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Call_ShouldWrapClrExceptionsFromNativeClosures()
     {
         var closure = new LuaClosure(

@@ -55,6 +55,7 @@
 - 用真实 `meta_newindex_table_chunk.luac`、`meta_newindex_function_chunk.luac`、`meta_newindex_existing_chunk.luac` 验证 `__newindex` 表访问元方法行为
 - 用真实 `userdata_index_chunk.luac`、`userdata_newindex_chunk.luac`、`userdata_call_chunk.luac`、`userdata_len_chunk.luac`、`userdata_unm_chunk.luac`、`userdata_eq_chunk.luac`、`userdata_close_chunk.luac` 验证 userdata 元方法行为
 - 用真实 `raw_metatable_chunk.luac`、`protected_metatable_chunk.luac`、`userdata_getmetatable_chunk.luac` 验证第一批基础库元表与 `raw*` 行为
+- 用真实 `type_chunk.luac`、`select_chunk.luac`、`pcall_chunk.luac` 验证第一批基础库核心函数行为
 
 ## 设计原则
 
@@ -237,6 +238,7 @@ Lua 完整调用协议里有不少复杂点：
 
 - `CALL` / `TAILCALL` 现在除函数外，也支持 table / userdata metatable 上的 `__call`
 - `TFORCALL` 沿用同一套最小 callable 解析
+- `pcall` 也已经通过 `LuaState.InvokeCallable` 接回同一套 callable 解析路径
 - `__call` chain 放到后续阶段
 
 当前 `_ENV` 里也已经预置了第一批最小基础库函数：
@@ -247,6 +249,10 @@ Lua 完整调用协议里有不少复杂点：
 - `rawset`
 - `rawlen`
 - `rawequal`
+- `type`
+- `assert`
+- `select`
+- `pcall`
 - `error`
 
 ## 模型说明
@@ -331,6 +337,7 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `meta_newindex_table_chunk.luac`、`meta_newindex_function_chunk.luac`、`meta_newindex_existing_chunk.luac` 验证 `__newindex` 结果
 - [x] 用真实 `userdata_index_chunk.luac`、`userdata_newindex_chunk.luac`、`userdata_call_chunk.luac`、`userdata_len_chunk.luac`、`userdata_unm_chunk.luac`、`userdata_eq_chunk.luac`、`userdata_close_chunk.luac` 验证 userdata 元方法结果
 - [x] 用真实 `raw_metatable_chunk.luac`、`protected_metatable_chunk.luac`、`userdata_getmetatable_chunk.luac` 验证第一批基础库元表与 `raw*` 结果
+- [x] 用真实 `type_chunk.luac`、`select_chunk.luac`、`pcall_chunk.luac` 验证第一批基础库核心函数结果
 
 ## 完成标准
 
@@ -366,6 +373,7 @@ Lua 完整调用协议里有不少复杂点：
 - 表访问元方法分发已经拆到 `docs/024-step-04-table-metamethods.md`
 - userdata 元方法分发已经拆到 `docs/025-step-04-userdata-metamethods.md`
 - 第一批基础库元表与 `raw*` 函数已经拆到 `docs/026-step-06-base-metatable-raw-functions.md`
+- 第一批基础库核心函数已经拆到 `docs/027-step-06-base-core-functions.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合

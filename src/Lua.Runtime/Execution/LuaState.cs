@@ -7,6 +7,7 @@ namespace Lua.Runtime.Execution;
 public sealed class LuaState
 {
     private readonly List<CallFrame> _frames = [];
+    private Func<LuaValue, IReadOnlyList<LuaValue>, LuaValue[]>? _callableInvoker;
 
     public LuaState()
     {
@@ -31,6 +32,10 @@ public sealed class LuaState
         RegisterBaseFunction("rawlen", RawLen);
         RegisterBaseFunction("rawget", RawGet);
         RegisterBaseFunction("rawset", RawSet);
+        RegisterBaseFunction("type", Type);
+        RegisterBaseFunction("assert", Assert);
+        RegisterBaseFunction("select", Select);
+        RegisterBaseFunction("pcall", ProtectedCall);
         RegisterBaseFunction("error", Error);
     }
 
@@ -61,6 +66,28 @@ public sealed class LuaState
         var frame = _frames[lastIndex];
         _frames.RemoveAt(lastIndex);
         return frame;
+    }
+
+    public void SetCallableInvoker(Func<LuaValue, IReadOnlyList<LuaValue>, LuaValue[]> callableInvoker)
+    {
+        ArgumentNullException.ThrowIfNull(callableInvoker);
+        _callableInvoker = callableInvoker;
+    }
+
+    public LuaValue[] InvokeCallable(LuaValue callable, IReadOnlyList<LuaValue> arguments)
+    {
+        if (_callableInvoker is not null)
+        {
+            return _callableInvoker(callable, arguments);
+        }
+
+        if (callable.Kind == LuaValueKind.Function &&
+            callable.AsFunction().Body is LuaNativeClosureBody body)
+        {
+            return body.Function(this, callable.AsFunction(), arguments);
+        }
+
+        throw new InvalidOperationException("Callable invoker is not configured.");
     }
 
     private static LuaValue[] SetMetatable(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
@@ -178,6 +205,104 @@ public sealed class LuaState
         return [tableValue];
     }
 
+    private static LuaValue[] Type(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        _ = state;
+        _ = closure;
+
+        var value = RequireArgument(arguments, 0, "type");
+        return [LuaValue.FromString(GetTypeName(value))];
+    }
+
+    private static LuaValue[] Assert(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        _ = state;
+        _ = closure;
+
+        var condition = RequireArgument(arguments, 0, "assert");
+        if (IsTruthy(condition))
+        {
+            return arguments.ToArray();
+        }
+
+        var errorObject = arguments.Count >= 2
+            ? arguments[1]
+            : LuaValue.FromString("assertion failed!");
+        throw new LuaRuntimeException(errorObject);
+    }
+
+    private static LuaValue[] Select(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        _ = state;
+        _ = closure;
+
+        var selector = RequireArgument(arguments, 0, "select");
+        var count = arguments.Count;
+
+        if (selector.Kind == LuaValueKind.String &&
+            selector.AsString().Length > 0 &&
+            selector.AsString()[0] == '#')
+        {
+            return [LuaValue.FromInteger(count - 1)];
+        }
+
+        if (!TryGetInteger(selector, out var index))
+        {
+            throw CreateArgumentTypeError("select", 1, "number", selector);
+        }
+
+        if (index < 0)
+        {
+            index = count + index;
+        }
+        else if (index > count)
+        {
+            index = count;
+        }
+
+        if (index < 1)
+        {
+            throw CreateArgumentError("select", 1, "index out of range");
+        }
+
+        var resultStart = (int)index;
+        if (resultStart >= arguments.Count)
+        {
+            return [];
+        }
+
+        return arguments.Skip(resultStart).ToArray();
+    }
+
+    private static LuaValue[] ProtectedCall(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        _ = closure;
+
+        var callable = RequireArgument(arguments, 0, "pcall");
+        var callArguments = arguments.Count > 1 ? arguments.Skip(1).ToArray() : Array.Empty<LuaValue>();
+
+        try
+        {
+            var results = state.InvokeCallable(callable, callArguments);
+            var protectedResults = new LuaValue[results.Length + 1];
+            protectedResults[0] = LuaValue.FromBoolean(true);
+            for (var index = 0; index < results.Length; index++)
+            {
+                protectedResults[index + 1] = results[index];
+            }
+
+            return protectedResults;
+        }
+        catch (LuaRuntimeException ex)
+        {
+            return [LuaValue.FromBoolean(false), ex.ErrorObject];
+        }
+        catch (Exception ex)
+        {
+            return [LuaValue.FromBoolean(false), LuaValue.FromString(ex.Message)];
+        }
+    }
+
     private static LuaValue[] Error(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         _ = state;
@@ -236,6 +361,33 @@ public sealed class LuaState
                leftNumber.Equals(rightNumber);
     }
 
+    private static bool TryGetInteger(LuaValue value, out long result)
+    {
+        switch (value.Kind)
+        {
+            case LuaValueKind.Integer:
+                result = value.AsInteger();
+                return true;
+            case LuaValueKind.Float:
+            {
+                var number = value.AsFloat();
+                if (double.IsFinite(number) &&
+                    number >= long.MinValue &&
+                    number <= long.MaxValue &&
+                    Math.Truncate(number) == number)
+                {
+                    result = (long)number;
+                    return true;
+                }
+
+                break;
+            }
+        }
+
+        result = default;
+        return false;
+    }
+
     private static bool TryGetNumber(LuaValue value, out double result)
     {
         switch (value.Kind)
@@ -280,6 +432,11 @@ public sealed class LuaState
             $"bad argument #{argumentIndex} to '{functionName}' ({expected} expected, got {GetTypeName(actual)})");
     }
 
+    private static LuaRuntimeException CreateArgumentError(string functionName, int argumentIndex, string message)
+    {
+        return CreateRuntimeError($"bad argument #{argumentIndex} to '{functionName}' ({message})");
+    }
+
     private static LuaRuntimeException CreateRuntimeError(string message)
     {
         return new LuaRuntimeException(LuaValue.FromString(message));
@@ -298,6 +455,16 @@ public sealed class LuaState
             LuaValueKind.Thread => "thread",
             LuaValueKind.UserData => "userdata",
             _ => value.Kind.ToString().ToLowerInvariant()
+        };
+    }
+
+    private static bool IsTruthy(LuaValue value)
+    {
+        return value.Kind switch
+        {
+            LuaValueKind.Nil => false,
+            LuaValueKind.Boolean => value.AsBoolean(),
+            _ => true
         };
     }
 }

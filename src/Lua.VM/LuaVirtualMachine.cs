@@ -40,6 +40,7 @@ public sealed class LuaVirtualMachine
     public LuaVirtualMachine()
     {
         State = new LuaState();
+        State.SetCallableInvoker(CallValue);
     }
 
     public LuaState State { get; }
