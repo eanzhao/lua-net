@@ -229,7 +229,7 @@ public sealed class LuaVirtualMachine
 
             if (!TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
             {
-                throw new NotImplementedException("Table access semantics beyond tables are not implemented yet.");
+                throw CreateTypeError(currentTarget, "index");
             }
 
             if (nextMetamethod.Kind == LuaValueKind.Function)
@@ -277,7 +277,7 @@ public sealed class LuaVirtualMachine
 
             if (!TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
             {
-                throw new NotImplementedException("Table assignment semantics beyond tables are not implemented yet.");
+                throw CreateTypeError(currentTarget, "index");
             }
 
             if (nextMetamethod.Kind == LuaValueKind.Function)
@@ -377,7 +377,7 @@ public sealed class LuaVirtualMachine
             return;
         }
 
-        throw new NotImplementedException("Length semantics beyond strings, tables, and '__len' metamethods are not implemented yet.");
+        throw CreateTypeError(value, "get length of");
     }
 
     private void ExecuteToBeClosed(CallFrame frame, LuaInstruction instruction)
@@ -919,7 +919,7 @@ public sealed class LuaVirtualMachine
 
             if (!TryGetMetamethod(currentCallable, GetMetamethodName(CallMetamethodEvent), out var metamethod))
             {
-                throw new LuaRuntimeException(LuaValue.FromString($"attempt to call a {currentCallable.Kind} value"));
+                throw CreateTypeError(currentCallable, "call");
             }
 
             currentArguments = PrependArgument(currentCallable, currentArguments);
@@ -1359,13 +1359,9 @@ public sealed class LuaVirtualMachine
 
     private static LuaValue GetCloseMethod(LuaValue value)
     {
-        return value.Kind switch
-        {
-            LuaValueKind.Table => value.AsTable().TryGetMetamethod("__close", out var metamethod)
-                ? metamethod
-                : LuaValue.Nil,
-            _ => throw new NotImplementedException("To-be-closed values currently support tables only.")
-        };
+        return TryGetMetamethod(value, "__close", out var metamethod)
+            ? metamethod
+            : LuaValue.Nil;
     }
 
     private static LuaValue ConvertConstant(LuaConstant constant)
@@ -1734,7 +1730,29 @@ public sealed class LuaVirtualMachine
         return value.Kind switch
         {
             LuaValueKind.Table => value.AsTable().TryGetMetamethod(metamethodName, out metamethod),
+            LuaValueKind.UserData => value.AsUserData().TryGetMetamethod(metamethodName, out metamethod),
             _ => ReturnMissingMetamethod(out metamethod)
+        };
+    }
+
+    private static LuaRuntimeException CreateTypeError(LuaValue value, string operation)
+    {
+        return new LuaRuntimeException(LuaValue.FromString($"attempt to {operation} a {GetTypeName(value)} value"));
+    }
+
+    private static string GetTypeName(LuaValue value)
+    {
+        return value.Kind switch
+        {
+            LuaValueKind.Nil => "nil",
+            LuaValueKind.Boolean => "boolean",
+            LuaValueKind.Integer or LuaValueKind.Float => "number",
+            LuaValueKind.String => "string",
+            LuaValueKind.Table => "table",
+            LuaValueKind.Function => "function",
+            LuaValueKind.Thread => "thread",
+            LuaValueKind.UserData => "userdata",
+            _ => value.Kind.ToString().ToLowerInvariant()
         };
     }
 

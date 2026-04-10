@@ -1358,6 +1358,225 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleUserDataIndexWithTableMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var fallback = new LuaTable();
+        var metatable = new LuaTable();
+
+        fallback.SetValue(LuaValue.FromString("answer"), LuaValue.FromInteger(42));
+        metatable.SetValue(LuaValue.FromString("__index"), LuaValue.FromTable(fallback));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_index_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataIndexWithFunctionMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var metatable = new LuaTable();
+
+        metatable.SetValue(
+            LuaValue.FromString("__index"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__index",
+                static (_, _, arguments) => [LuaValue.FromString(arguments[1].AsString() + "-value")])));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_index_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("answer-value");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataNewIndexWithTableMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var sink = new LuaTable();
+        var metatable = new LuaTable();
+
+        metatable.SetValue(LuaValue.FromString("__newindex"), LuaValue.FromTable(sink));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("sink"), LuaValue.FromTable(sink));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_newindex_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataNewIndexWithFunctionMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var sink = new LuaTable();
+        var metatable = new LuaTable();
+
+        metatable.SetValue(
+            LuaValue.FromString("__newindex"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__newindex",
+                (_, _, arguments) =>
+                {
+                    sink.SetValue(arguments[1], arguments[2]);
+                    return [];
+                })));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("sink"), LuaValue.FromTable(sink));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_newindex_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataCallMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var metatable = new LuaTable();
+
+        metatable.SetValue(
+            LuaValue.FromString("__call"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__call",
+                static (_, _, arguments) => [LuaValue.FromInteger(arguments[1].AsInteger() + 1)])));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_call_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataLengthMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var metatable = new LuaTable();
+
+        metatable.SetValue(
+            LuaValue.FromString("__len"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__len",
+                static (_, _, _) => [LuaValue.FromInteger(42)])));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_len_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataUnaryMinusMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var metatable = new LuaTable();
+
+        metatable.SetValue(
+            LuaValue.FromString("__unm"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__unm",
+                static (_, _, _) => [LuaValue.FromInteger(42)])));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_unm_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataEqualityMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var left = new LuaUserData("left");
+        var right = new LuaUserData("right");
+        var metatable = new LuaTable();
+
+        metatable.SetValue(
+            LuaValue.FromString("__eq"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__eq",
+                static (_, _, _) => [LuaValue.FromBoolean(true)])));
+        left.SetMetatable(metatable);
+        right.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(left));
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud2"), LuaValue.FromUserData(right));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_eq_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(1);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUserDataCloseMetamethod()
+    {
+        var vm = new LuaVirtualMachine();
+        var userData = new LuaUserData(new object());
+        var metatable = new LuaTable();
+        var closed = false;
+
+        metatable.SetValue(
+            LuaValue.FromString("__close"),
+            LuaValue.FromFunction(CreateNativeClosure(
+                "__close",
+                (_, _, arguments) =>
+                {
+                    arguments[0].Kind.ShouldBe(LuaValueKind.UserData);
+                    closed = true;
+                    return [];
+                })));
+        userData.SetMetatable(metatable);
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("ud"), LuaValue.FromUserData(userData));
+
+        var results = vm.Execute(ReadFixtureChunk("userdata_close_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+        closed.ShouldBeTrue();
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Call_ShouldWrapClrExceptionsFromNativeClosures()
     {
         var closure = new LuaClosure(
@@ -1374,6 +1593,17 @@ public class LuaVirtualMachineTests
     private static string GetFixturePath(string folder, string fileName)
     {
         return Path.Combine(AppContext.BaseDirectory, "fixtures", "lua55", folder, fileName);
+    }
+
+    private static LuaChunk ReadFixtureChunk(string fileName)
+    {
+        var reader = new LuaChunkReader();
+        return reader.Read(File.ReadAllBytes(GetFixturePath("chunks", fileName)), fileName);
+    }
+
+    private static LuaClosure CreateNativeClosure(string debugName, LuaNativeFunction function)
+    {
+        return new LuaClosure(debugName, body: new LuaNativeClosureBody(function));
     }
 
     private static uint EncodeAbc(LuaOpcode opcode, int a, int b, int c, int k = 0)

@@ -53,6 +53,7 @@
 - 用真实 `meta_call_chunk.luac`、`meta_tailcall_chunk.luac` 验证最小 `__call` 行为
 - 用真实 `meta_index_table_chunk.luac`、`meta_index_function_chunk.luac` 验证 `__index` 表访问元方法行为
 - 用真实 `meta_newindex_table_chunk.luac`、`meta_newindex_function_chunk.luac`、`meta_newindex_existing_chunk.luac` 验证 `__newindex` 表访问元方法行为
+- 用真实 `userdata_index_chunk.luac`、`userdata_newindex_chunk.luac`、`userdata_call_chunk.luac`、`userdata_len_chunk.luac`、`userdata_unm_chunk.luac`、`userdata_eq_chunk.luac`、`userdata_close_chunk.luac` 验证 userdata 元方法行为
 
 ## 设计原则
 
@@ -204,14 +205,14 @@ Lua 完整调用协议里有不少复杂点：
 
 当前字符串原语也先支持最小快速路径：
 
-- `LEN` 先支持字符串长度，以及 table metatable 上的 `__len`
-- `CONCAT` 先支持字符串和数值拼接，也支持 table metatable 上的 `__concat`
-- userdata 和更完整的对象语义放到后续阶段
+- `LEN` 先支持字符串长度，以及 table / userdata metatable 上的 `__len`
+- `CONCAT` 先支持字符串和数值拼接，也支持 table / userdata metatable 上的 `__concat`
+- 更完整的对象语义和标准库路径放到后续阶段
 
 当前表访问也先支持最小元方法路径：
 
-- `GETTABUP` / `GETTABLE` / `GETI` / `GETFIELD` 现在在原始 miss 时，也支持 table metatable 上的 `__index`
-- `SETTABUP` / `SETTABLE` / `SETI` / `SETFIELD` 现在在原始 miss 时，也支持 table metatable 上的 `__newindex`
+- `GETTABUP` / `GETTABLE` / `GETI` / `GETFIELD` 现在在原始 miss 时，也支持 table / userdata metatable 上的 `__index`
+- `SETTABUP` / `SETTABLE` / `SETI` / `SETFIELD` 现在在原始 miss 时，也支持 table / userdata metatable 上的 `__newindex`
 - `__index` / `__newindex` 先支持 table fallback 和 function fallback
 - 已有原始键命中时，会绕过 `__newindex`
 
@@ -220,22 +221,22 @@ Lua 完整调用协议里有不少复杂点：
 - `BANDK` / `BORK` / `BXORK` 与寄存器版本先支持整数运算
 - `SHLI` / `SHRI` / `SHL` / `SHR` 先对齐 Lua 的移位规则
 - 二元位运算快速路径失败时，也会通过 `MMBIN` / `MMBINI` / `MMBINK` 走 `__band`、`__bor`、`__bxor`、`__shl`、`__shr`
-- `BNOT` 先支持整数路径，也补上了 table metatable 上的 `__bnot`
+- `BNOT` 先支持整数路径，也补上了 table / userdata metatable 上的 `__bnot`
 
 当前分支和比较也只先支持最小快速路径：
 
 - `TEST` 走 Lua 的真假值规则
 - `TESTSET` 走 Lua 的短路规则
-- `EQ` / `EQK` 先走原始比较快速路径，并补上 table metatable 上的 `__eq`
-- `LT` / `LE` 先支持数值和字符串顺序比较，并补上 table metatable 上的 `__lt` / `__le`
-- `LTI` / `LEI` / `GTI` / `GEI` 先支持数值路径，也补上 table metatable 的立即数比较元方法路径
-- userdata 和更复杂的比较行为放到后续阶段
+- `EQ` / `EQK` 先走原始比较快速路径，并补上 table / userdata metatable 上的 `__eq`
+- `LT` / `LE` 先支持数值和字符串顺序比较，并补上 table / userdata metatable 上的 `__lt` / `__le`
+- `LTI` / `LEI` / `GTI` / `GEI` 先支持数值路径，也补上 table / userdata metatable 的立即数比较元方法路径
+- 更复杂的比较行为放到后续阶段
 
 当前调用协议也先支持最小可调用对象路径：
 
-- `CALL` / `TAILCALL` 现在除函数外，也支持 table metatable 上的 `__call`
+- `CALL` / `TAILCALL` 现在除函数外，也支持 table / userdata metatable 上的 `__call`
 - `TFORCALL` 沿用同一套最小 callable 解析
-- `__call` chain 和 userdata 可调用对象放到后续阶段
+- `__call` chain 放到后续阶段
 
 ## 模型说明
 
@@ -317,6 +318,7 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `meta_call_chunk.luac`、`meta_tailcall_chunk.luac` 验证最小 `__call` 结果
 - [x] 用真实 `meta_index_table_chunk.luac`、`meta_index_function_chunk.luac` 验证 `__index` 结果
 - [x] 用真实 `meta_newindex_table_chunk.luac`、`meta_newindex_function_chunk.luac`、`meta_newindex_existing_chunk.luac` 验证 `__newindex` 结果
+- [x] 用真实 `userdata_index_chunk.luac`、`userdata_newindex_chunk.luac`、`userdata_call_chunk.luac`、`userdata_len_chunk.luac`、`userdata_unm_chunk.luac`、`userdata_eq_chunk.luac`、`userdata_close_chunk.luac` 验证 userdata 元方法结果
 
 ## 完成标准
 
@@ -350,6 +352,7 @@ Lua 完整调用协议里有不少复杂点：
 - 长度、拼接与比较元方法分发已经拆到 `docs/022-step-04-length-concat-compare-metamethods.md`
 - 一元元方法与最小 `__call` 已经拆到 `docs/023-step-04-unary-call-metamethods.md`
 - 表访问元方法分发已经拆到 `docs/024-step-04-table-metamethods.md`
+- userdata 元方法分发已经拆到 `docs/025-step-04-userdata-metamethods.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合
