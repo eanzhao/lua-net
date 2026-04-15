@@ -100,8 +100,8 @@
 
 当前这一轮还没有展开的是：
 
-- `pcall` / `xpcall`
-- `type` / `assert` / `select`
+- `pcall` / `xpcall`（已拆到 `docs/028-step-07-xpcall.md`）
+- `type` / `assert` / `select`（已拆到 `docs/027-step-07-base-core-functions.md`）
 - 更完整的基础库错误对象和栈信息
 - 更大的标准库模块拆分
 

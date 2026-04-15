@@ -73,11 +73,10 @@ Lua 里 `xpcall` 的 message handler 不是普通的“失败回调”，而是�
 
 当前这一轮还没有展开的是：
 
-- `xpcall` 更完整的 traceback 与调试信息
-- `debug.traceback`
-- `tonumber` / `tostring`
-- `next` / `pairs` / `ipairs`
-- 更系统的 `Lua.StandardLib` 模块拆分
+- `tonumber` / `tostring`（已拆到 `docs/029-step-07-number-string-conversion.md`）
+- `next` / `pairs` / `ipairs`（已拆到 `docs/030-step-07-table-iteration-functions.md`）
+- 更完整的 traceback 与调试信息
+- 更系统的标准库模块拆分
 
 ## 真实 fixture
 

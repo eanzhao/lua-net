@@ -58,7 +58,7 @@ test/Lua.*.Tests      单元测试、夹具测试、兼容性测试
 正确读取 Lua 5.5 二进制块，并输出结构化结果。
 
 - chunk 头部解析
-- 指令格式和 90 个 opcode 元数据表
+- 指令格式和 85 个 opcode 元数据表
 - 可读的反汇编输出
 
 ### 第 4 步：VM 骨架与指令执行 ✅
@@ -67,7 +67,7 @@ test/Lua.*.Tests      单元测试、夹具测试、兼容性测试
 
 - 取指、解码、执行循环
 - 算术运算、比较、跳转、表构造、循环
-- 90 个 opcode 全部实现基础路径
+- 85 个 opcode 全部实现基础路径
 
 ### 第 5 步：调用、闭包、上值、可变参数 ✅
 
@@ -100,10 +100,10 @@ test/Lua.*.Tests      单元测试、夹具测试、兼容性测试
 - `type` / `assert` / `select`
 - `tonumber` / `tostring`（含 `__tostring` / `__name`）
 - `pcall` / `xpcall` / `error`
+- `print` / `warn`
 
 **待补充：**
 
-- `print` / `warn`
 - `load` / `dofile` / `loadfile`
 - `collectgarbage`（最小版本）
 - `require`（最小版本，依赖 Step 14 的完整 package 系统）

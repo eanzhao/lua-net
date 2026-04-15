@@ -53,9 +53,9 @@ dotnet sln lua-net.sln list
 
 ### 第 7 步当前覆盖范围
 
-**已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`
+**已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`、`print` / `warn`
 
-**待补充：** `print` / `warn`、`load` / `dofile`、字符串元表与算术元方法
+**待补充：** `load` / `dofile`、字符串元表与算术元方法
 
 ## 仓库结构
 
@@ -67,7 +67,7 @@ src/
 │   └── Execution/            LuaState, LuaStack, CallFrame, LuaUpvalue
 ├── Lua.Bytecode/             Lua 5.5 字节码格式与反汇编
 │   ├── Chunks/               LuaChunk, LuaPrototype, LuaChunkReader
-│   ├── Instructions/         LuaOpcode(90), LuaInstruction, 指令格式与布局
+│   ├── Instructions/         LuaOpcode(85), LuaInstruction, 指令格式与布局
 │   └── Disassembly/          LuaDisassembler, LuaLineInfoResolver
 ├── Lua.VM/                   虚拟机执行引擎（按职责拆分为 partial class）
 │   ├── LuaVirtualMachine.cs            核心执行循环与公共 API
@@ -81,12 +81,12 @@ src/
 └── Lua.Core/                 共享二进制 chunk 工具（早期遗留）
 
 test/
-├── Lua.Runtime.Tests/        运行时单元测试
-├── Lua.Bytecode.Tests/       字节码解析测试
-├── Lua.VM.Tests/             VM 集成测试（使用真实 Lua 5.5 chunk fixture）
+├── Lua.Runtime.Tests/        运行时单元测试（57 个）
+├── Lua.Bytecode.Tests/       字节码解析测试（13 个）
+├── Lua.VM.Tests/             VM 集成测试（92 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（30 份）
+docs/                         阶段规划和设计文档（31 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -156,6 +156,7 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 028 | [xpcall](docs/028-step-07-xpcall.md) | xpcall 与 message handler |
 | 029 | [number-string-conversion](docs/029-step-07-number-string-conversion.md) | tonumber / tostring |
 | 030 | [table-iteration-functions](docs/030-step-07-table-iteration-functions.md) | next / pairs / ipairs |
+| 031 | [print-warn-functions](docs/031-step-07-print-warn-functions.md) | print / warn |
 
 ## 开发方式
 

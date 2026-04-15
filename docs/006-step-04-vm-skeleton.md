@@ -245,7 +245,7 @@ Lua 完整调用协议里有不少复杂点：
 - `tostring` 也已经通过 `LuaState.InvokeCallable` 走最小 `__tostring` 路径
 - `__call` chain 放到后续阶段
 
-当前 `_ENV` 里也已经预置了第一批最小基础库函数：
+当前 `_ENV` 里已经预置了以下基础库函数：
 
 - `setmetatable`
 - `getmetatable`
@@ -253,13 +253,18 @@ Lua 完整调用协议里有不少复杂点：
 - `rawset`
 - `rawlen`
 - `rawequal`
+- `next`
+- `pairs`
+- `ipairs`
+- `print`
+- `warn`
 - `type`
 - `assert`
 - `select`
-- `pcall`
-- `xpcall`
 - `tonumber`
 - `tostring`
+- `pcall`
+- `xpcall`
 - `error`
 
 ## 模型说明
@@ -347,6 +352,8 @@ Lua 完整调用协议里有不少复杂点：
 - [x] 用真实 `type_chunk.luac`、`select_chunk.luac`、`pcall_chunk.luac` 验证第一批基础库核心函数结果
 - [x] 用真实 `xpcall_chunk.luac` 验证受保护调用与 message handler 结果
 - [x] 用真实 `tonumber_chunk.luac`、`tostring_chunk.luac` 验证数值与字符串转换结果
+- [x] 用真实 `iterators_chunk.luac` 验证 `next` / `pairs` / `ipairs` 结果
+- [x] 用真实 `print_warn_chunk.luac` 验证 `print` / `warn` 结果
 
 ## 完成标准
 
@@ -385,8 +392,5 @@ Lua 完整调用协议里有不少复杂点：
 - 第一批基础库核心函数已经拆到 `docs/027-step-07-base-core-functions.md`
 - 基础库受保护调用补充已经拆到 `docs/028-step-07-xpcall.md`
 - 基础库数值与字符串转换已经拆到 `docs/029-step-07-number-string-conversion.md`
-- 更完整的调用协议
-- 更完整的跳转与条件分支
-- `EQI` / `LEI` / `GEI` 之外更多比较组合
-- `and` / `or` 之外更复杂的短路场景
-- 更一般的元方法调度
+- 基础库表迭代函数已经拆到 `docs/030-step-07-table-iteration-functions.md`
+- 基础库 print / warn 已经拆到 `docs/031-step-07-print-warn-functions.md`

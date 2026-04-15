@@ -80,10 +80,10 @@ Lua 里的 `tostring` 不只是简单打印类型名。
 
 当前这一轮还没有展开的是：
 
-- 更完整的 `tostring` 地址格式细节
+- `next` / `pairs` / `ipairs`（已拆到 `docs/030-step-07-table-iteration-functions.md`）
+- `print` / `warn`（已拆到 `docs/031-step-07-print-warn-functions.md`）
 - 更完整的 traceback 与调试信息
-- `next` / `pairs` / `ipairs`
-- 更系统的 `Lua.StandardLib` 模块拆分
+- 更系统的标准库模块拆分
 
 ## 真实 fixture
 

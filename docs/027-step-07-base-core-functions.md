@@ -97,10 +97,9 @@
 
 当前这一轮还没有展开的是：
 
-- `xpcall`
-- 更完整的错误处理级别与 traceback
-- `tonumber` / `tostring`
-- `next` / `pairs` / `ipairs`
+- `xpcall`（已拆到 `docs/028-step-07-xpcall.md`）
+- `tonumber` / `tostring`（已拆到 `docs/029-step-07-number-string-conversion.md`）
+- `next` / `pairs` / `ipairs`（已拆到 `docs/030-step-07-table-iteration-functions.md`）
 - 更系统的 `Lua.StandardLib` 模块拆分
 
 ## 真实 fixture
