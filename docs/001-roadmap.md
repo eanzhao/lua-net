@@ -175,7 +175,7 @@ string 库函数数量多，模式匹配引擎是独立的复杂子系统。
 - `coroutine.close`（Lua 5.4+ 新增，与 `__close` 配合）
 - `coroutine.running`
 
-### 第 11 步：词法分析
+### 第 11 步：词法分析 ✅
 
 支持直接输入 Lua 源码。
 
