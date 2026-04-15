@@ -2,7 +2,7 @@ using Lua.Runtime.Values;
 
 namespace Lua.Runtime.Objects;
 
-public sealed class LuaTable
+public sealed class LuaTable : IMetatableOwner
 {
     private readonly Dictionary<LuaValue, LuaValue> _entries;
 
@@ -42,20 +42,6 @@ public sealed class LuaTable
     public void SetMetatable(LuaTable? metatable)
     {
         Metatable = metatable;
-    }
-
-    public bool TryGetMetamethod(string name, out LuaValue value)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(name);
-
-        if (Metatable is null)
-        {
-            value = LuaValue.Nil;
-            return false;
-        }
-
-        value = Metatable.GetValue(LuaValue.FromString(name));
-        return !value.IsNil;
     }
 
     public long GetSequenceLength()

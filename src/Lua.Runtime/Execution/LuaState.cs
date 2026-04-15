@@ -2,6 +2,7 @@ using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
 using System.Runtime.CompilerServices;
 using System.Text;
+using static Lua.Runtime.Values.LuaValueHelper;
 
 namespace Lua.Runtime.Execution;
 
@@ -96,8 +97,6 @@ public sealed class LuaState
 
     private static LuaValue[] SetMetatable(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var tableValue = RequireArgument(arguments, 0, "setmetatable");
         if (tableValue.Kind != LuaValueKind.Table)
@@ -130,8 +129,6 @@ public sealed class LuaState
 
     private static LuaValue[] GetMetatable(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var value = RequireArgument(arguments, 0, "getmetatable");
         if (!TryGetRawMetatable(value, out var metatable) || metatable is null)
@@ -149,8 +146,6 @@ public sealed class LuaState
 
     private static LuaValue[] RawEqual(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var left = RequireArgument(arguments, 0, "rawequal");
         var right = RequireArgument(arguments, 1, "rawequal");
@@ -159,8 +154,6 @@ public sealed class LuaState
 
     private static LuaValue[] RawLen(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var value = RequireArgument(arguments, 0, "rawlen");
         return value.Kind switch
@@ -173,8 +166,6 @@ public sealed class LuaState
 
     private static LuaValue[] RawGet(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var tableValue = RequireArgument(arguments, 0, "rawget");
         if (tableValue.Kind != LuaValueKind.Table)
@@ -193,8 +184,6 @@ public sealed class LuaState
 
     private static LuaValue[] RawSet(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var tableValue = RequireArgument(arguments, 0, "rawset");
         if (tableValue.Kind != LuaValueKind.Table)
@@ -211,8 +200,6 @@ public sealed class LuaState
 
     private static LuaValue[] Type(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var value = RequireArgument(arguments, 0, "type");
         return [LuaValue.FromString(GetTypeName(value))];
@@ -220,8 +207,6 @@ public sealed class LuaState
 
     private static LuaValue[] Assert(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var condition = RequireArgument(arguments, 0, "assert");
         if (IsTruthy(condition))
@@ -237,8 +222,6 @@ public sealed class LuaState
 
     private static LuaValue[] Select(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var selector = RequireArgument(arguments, 0, "select");
         var count = arguments.Count;
@@ -280,7 +263,6 @@ public sealed class LuaState
 
     private static LuaValue[] ProtectedCall(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = closure;
 
         var callable = RequireArgument(arguments, 0, "pcall");
         var callArguments = arguments.Count > 1 ? arguments.Skip(1).ToArray() : Array.Empty<LuaValue>();
@@ -289,8 +271,6 @@ public sealed class LuaState
 
     private static LuaValue[] ToNumber(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var value = RequireArgument(arguments, 0, "tonumber");
         if (arguments.Count < 2 || arguments[1].IsNil)
@@ -323,7 +303,6 @@ public sealed class LuaState
 
     private static LuaValue[] ToString(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = closure;
 
         var value = RequireArgument(arguments, 0, "tostring");
         if (TryGetMetamethod(value, "__tostring", out var metamethod))
@@ -342,7 +321,6 @@ public sealed class LuaState
 
     private static LuaValue[] ExtendedProtectedCall(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = closure;
 
         var callable = RequireArgument(arguments, 0, "xpcall");
         var messageHandler = RequireArgument(arguments, 1, "xpcall");
@@ -357,8 +335,6 @@ public sealed class LuaState
 
     private static LuaValue[] Error(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        _ = state;
-        _ = closure;
 
         var errorObject = arguments.Count == 0 ? LuaValue.Nil : arguments[0];
         throw new LuaRuntimeException(errorObject);
@@ -390,15 +366,6 @@ public sealed class LuaState
         }
     }
 
-    private static bool TryGetMetamethod(LuaValue value, string metamethodName, out LuaValue metamethod)
-    {
-        return value.Kind switch
-        {
-            LuaValueKind.Table => value.AsTable().TryGetMetamethod(metamethodName, out metamethod),
-            LuaValueKind.UserData => value.AsUserData().TryGetMetamethod(metamethodName, out metamethod),
-            _ => FailMetamethodLookup(out metamethod)
-        };
-    }
 
     private static bool TryGetProtectedMetatableValue(LuaTable? metatable, out LuaValue value)
     {
@@ -423,48 +390,6 @@ public sealed class LuaState
                leftNumber.Equals(rightNumber);
     }
 
-    private static bool TryGetInteger(LuaValue value, out long result)
-    {
-        switch (value.Kind)
-        {
-            case LuaValueKind.Integer:
-                result = value.AsInteger();
-                return true;
-            case LuaValueKind.Float:
-            {
-                var number = value.AsFloat();
-                if (double.IsFinite(number) &&
-                    number >= long.MinValue &&
-                    number <= long.MaxValue &&
-                    Math.Truncate(number) == number)
-                {
-                    result = (long)number;
-                    return true;
-                }
-
-                break;
-            }
-        }
-
-        result = default;
-        return false;
-    }
-
-    private static bool TryGetNumber(LuaValue value, out double result)
-    {
-        switch (value.Kind)
-        {
-            case LuaValueKind.Integer:
-                result = value.AsInteger();
-                return true;
-            case LuaValueKind.Float:
-                result = value.AsFloat();
-                return true;
-            default:
-                result = default;
-                return false;
-        }
-    }
 
     private static bool TryConvertToNumber(LuaValue value, out LuaValue result)
     {
@@ -702,11 +627,6 @@ public sealed class LuaState
         return true;
     }
 
-    private static bool IsNaNKey(LuaValue value)
-    {
-        return value.Kind == LuaValueKind.Float && double.IsNaN(value.AsFloat());
-    }
-
     private static void ValidateTableAssignmentKey(LuaValue key)
     {
         if (key.IsNil)
@@ -837,12 +757,6 @@ public sealed class LuaState
         return false;
     }
 
-    private static bool FailMetamethodLookup(out LuaValue metamethod)
-    {
-        metamethod = LuaValue.Nil;
-        return false;
-    }
-
     private static LuaValue[] ExecuteProtectedCall(
         LuaState state,
         LuaValue callable,
@@ -900,29 +814,4 @@ public sealed class LuaState
         };
     }
 
-    private static string GetTypeName(LuaValue value)
-    {
-        return value.Kind switch
-        {
-            LuaValueKind.Nil => "nil",
-            LuaValueKind.Boolean => "boolean",
-            LuaValueKind.Integer or LuaValueKind.Float => "number",
-            LuaValueKind.String => "string",
-            LuaValueKind.Table => "table",
-            LuaValueKind.Function => "function",
-            LuaValueKind.Thread => "thread",
-            LuaValueKind.UserData => "userdata",
-            _ => value.Kind.ToString().ToLowerInvariant()
-        };
-    }
-
-    private static bool IsTruthy(LuaValue value)
-    {
-        return value.Kind switch
-        {
-            LuaValueKind.Nil => false,
-            LuaValueKind.Boolean => value.AsBoolean(),
-            _ => true
-        };
-    }
 }
