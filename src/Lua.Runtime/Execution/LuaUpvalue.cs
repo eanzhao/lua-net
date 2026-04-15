@@ -4,8 +4,8 @@ namespace Lua.Runtime.Execution;
 
 public sealed class LuaUpvalue
 {
-    private CallFrame? _openFrame;
-    private int _registerIndex;
+    private LuaStack? _openStack;
+    private int _openIndex;
     private LuaValue _closedValue;
 
     public LuaUpvalue(LuaValue value)
@@ -13,50 +13,48 @@ public sealed class LuaUpvalue
         _closedValue = value;
     }
 
-    public LuaUpvalue(CallFrame frame, int registerIndex)
+    public LuaUpvalue(LuaStack stack, int absoluteIndex)
     {
-        ArgumentNullException.ThrowIfNull(frame);
-        ArgumentOutOfRangeException.ThrowIfNegative(registerIndex);
+        ArgumentNullException.ThrowIfNull(stack);
+        ArgumentOutOfRangeException.ThrowIfNegative(absoluteIndex);
 
-        _openFrame = frame;
-        _registerIndex = registerIndex;
+        _openStack = stack;
+        _openIndex = absoluteIndex;
     }
 
-    public bool IsOpen => _openFrame is not null;
+    public bool IsOpen => _openStack is not null;
 
     public LuaValue GetValue(LuaState state)
     {
         ArgumentNullException.ThrowIfNull(state);
 
-        return _openFrame is null
+        return _openStack is null
             ? _closedValue
-            : state.Stack[_openFrame.BaseIndex + _registerIndex];
+            : _openStack[_openIndex];
     }
 
     public void SetValue(LuaState state, LuaValue value)
     {
         ArgumentNullException.ThrowIfNull(state);
 
-        if (_openFrame is null)
+        if (_openStack is null)
         {
             _closedValue = value;
             return;
         }
 
-        state.Stack[_openFrame.BaseIndex + _registerIndex] = value;
+        _openStack[_openIndex] = value;
     }
 
-    public void Close(LuaState state)
+    public void Close()
     {
-        ArgumentNullException.ThrowIfNull(state);
-
-        if (_openFrame is null)
+        if (_openStack is null)
         {
             return;
         }
 
-        _closedValue = state.Stack[_openFrame.BaseIndex + _registerIndex];
-        _openFrame = null;
-        _registerIndex = 0;
+        _closedValue = _openStack[_openIndex];
+        _openStack = null;
+        _openIndex = 0;
     }
 }

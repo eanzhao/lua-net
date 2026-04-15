@@ -14,7 +14,8 @@ public sealed class CallFrame
         int expectedResults,
         int programCounter = 0,
         int registerTop = 0,
-        IReadOnlyList<LuaValue>? varargs = null)
+        IReadOnlyList<LuaValue>? varargs = null,
+        LuaCallReturnTarget? returnTarget = null)
     {
         ArgumentNullException.ThrowIfNull(closure);
         ArgumentOutOfRangeException.ThrowIfNegative(baseIndex);
@@ -28,6 +29,7 @@ public sealed class CallFrame
         ProgramCounter = programCounter;
         RegisterTop = registerTop;
         Varargs = varargs ?? Array.Empty<LuaValue>();
+        ReturnTarget = returnTarget ?? LuaCallReturnTarget.None;
     }
 
     public LuaClosure Closure { get; }
@@ -41,6 +43,25 @@ public sealed class CallFrame
     public int RegisterTop { get; private set; }
 
     public IReadOnlyList<LuaValue> Varargs { get; }
+
+    public LuaCallReturnTarget ReturnTarget { get; }
+
+    public LuaPendingCall? PendingCall { get; private set; }
+
+    public void SetPendingCall(int registerIndex, int resultCount)
+    {
+        PendingCall = LuaPendingCall.ForRegisters(registerIndex, resultCount);
+    }
+
+    public void SetPendingTailReturn()
+    {
+        PendingCall = LuaPendingCall.ForTailReturn();
+    }
+
+    public void ClearPendingCall()
+    {
+        PendingCall = null;
+    }
 
     public void SetRegisterTop(int registerTop)
     {
@@ -86,8 +107,9 @@ public sealed class CallFrame
         return registers;
     }
 
-    public LuaUpvalue GetOrCreateOpenUpvalue(int registerIndex)
+    public LuaUpvalue GetOrCreateOpenUpvalue(LuaStack stack, int registerIndex)
     {
+        ArgumentNullException.ThrowIfNull(stack);
         ArgumentOutOfRangeException.ThrowIfNegative(registerIndex);
 
         if (_openUpvalues.TryGetValue(registerIndex, out var upvalue))
@@ -95,19 +117,35 @@ public sealed class CallFrame
             return upvalue;
         }
 
-        upvalue = new LuaUpvalue(this, registerIndex);
+        upvalue = new LuaUpvalue(stack, BaseIndex + registerIndex);
         _openUpvalues.Add(registerIndex, upvalue);
         return upvalue;
     }
 
-    public void CloseOpenUpvalues(LuaState state)
-    {
-        CloseOpenUpvaluesFrom(state, 0);
-    }
-
-    public void CloseOpenUpvaluesFrom(LuaState state, int registerIndex)
+    public LuaUpvalue GetOrCreateOpenUpvalue(LuaState state, int registerIndex)
     {
         ArgumentNullException.ThrowIfNull(state);
+        return GetOrCreateOpenUpvalue(state.Stack, registerIndex);
+    }
+
+    public LuaUpvalue GetOrCreateOpenUpvalue(int registerIndex)
+    {
+        throw new InvalidOperationException("An explicit stack or state is required to create an open upvalue.");
+    }
+
+    public void CloseOpenUpvalues()
+    {
+        CloseOpenUpvaluesFrom(0);
+    }
+
+    public void CloseOpenUpvalues(LuaState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        CloseOpenUpvalues();
+    }
+
+    public void CloseOpenUpvaluesFrom(int registerIndex)
+    {
         ArgumentOutOfRangeException.ThrowIfNegative(registerIndex);
 
         if (_openUpvalues.Count == 0)
@@ -129,7 +167,7 @@ public sealed class CallFrame
 
         foreach (var key in keysToClose)
         {
-            _openUpvalues[key].Close(state);
+            _openUpvalues[key].Close();
             _openUpvalues.Remove(key);
         }
     }

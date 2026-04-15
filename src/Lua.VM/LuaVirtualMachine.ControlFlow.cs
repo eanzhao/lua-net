@@ -3,6 +3,8 @@ using Lua.Bytecode.Instructions;
 using Lua.Runtime.Execution;
 using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
+using Lua.VM.Closures;
+using System.Runtime.ExceptionServices;
 using static Lua.Runtime.Values.LuaValueHelper;
 
 namespace Lua.VM;
@@ -13,22 +15,95 @@ public sealed partial class LuaVirtualMachine
     {
         var callable = GetRegister(frame, instruction.A);
         var arguments = ReadArguments(frame, instruction.A, instruction.B);
-        var results = CallValue(callable, arguments);
+        var resolved = ResolveCallable(callable, arguments);
+        var resultCount = instruction.C == 0 ? -1 : instruction.C - 1;
 
-        if (instruction.C == 0)
+        switch (resolved.Closure.Body)
         {
-            WriteOpenResults(frame, instruction.A, results);
-            return;
-        }
+            case LuaBytecodeClosureBody body:
+                PushBytecodeFrame(
+                    resolved.Closure,
+                    body.Prototype,
+                    resolved.Arguments,
+                    LuaCallReturnTarget.ForRegisters(frame, instruction.A, resultCount));
+                return;
+            case LuaNativeClosureBody body:
+                frame.SetPendingCall(instruction.A, resultCount);
+                try
+                {
+                    var results = ExecuteNativeClosure(resolved.Closure, body, resolved.Arguments);
+                    WriteCallResults(frame, instruction.A, resultCount, results);
+                    frame.ClearPendingCall();
+                    return;
+                }
+                catch (LuaYieldException ex) when (ReferenceEquals(ex.Thread, State.CurrentThread))
+                {
+                    throw;
+                }
+                catch
+                {
+                    if (frame.PendingCall?.Kind == LuaPendingCallKind.Registers)
+                    {
+                        frame.ClearPendingCall();
+                    }
 
-        WriteResults(frame, instruction.A, instruction.C - 1, results);
+                    throw;
+                }
+            case null:
+                throw new InvalidOperationException("The closure does not contain an executable body.");
+            default:
+                throw new InvalidOperationException($"Unsupported closure body type '{resolved.Closure.Body.GetType().Name}'.");
+        }
     }
 
-    private LuaValue[] ExecuteTailCall(CallFrame frame, LuaInstruction instruction)
+    private bool ExecuteTailCall(CallFrame frame, LuaInstruction instruction, int hostCallId, out LuaValue[] completedResults)
     {
+        completedResults = [];
+
         var callable = GetRegister(frame, instruction.A);
         var arguments = ReadArguments(frame, instruction.A, instruction.B);
-        return CallValue(callable, arguments);
+        var resolved = ResolveCallable(callable, arguments);
+
+        switch (resolved.Closure.Body)
+        {
+            case LuaBytecodeClosureBody body:
+                var returnTarget = frame.ReturnTarget;
+                var pendingException = CloseResourcesFrom(frame, 0);
+                if (pendingException is not null)
+                {
+                    ExceptionDispatchInfo.Capture(pendingException).Throw();
+                }
+
+                State.PopFrame();
+                State.Stack.SetTop(frame.BaseIndex);
+                PushBytecodeFrame(resolved.Closure, body.Prototype, resolved.Arguments, returnTarget);
+                return false;
+            case LuaNativeClosureBody nativeBody:
+                frame.SetPendingTailReturn();
+                try
+                {
+                    var results = ExecuteNativeClosure(resolved.Closure, nativeBody, resolved.Arguments);
+                    frame.ClearPendingCall();
+                    return TryCompleteFrame(frame, results, hostCallId, out completedResults);
+                }
+                catch (LuaYieldException ex) when (ReferenceEquals(ex.Thread, State.CurrentThread))
+                {
+                    throw;
+                }
+                catch
+                {
+                    if (frame.PendingCall?.Kind == LuaPendingCallKind.TailReturn)
+                    {
+                        frame.ClearPendingCall();
+                    }
+
+                    throw;
+                }
+            case null:
+                throw new InvalidOperationException("The closure does not contain an executable body.");
+            default:
+                throw new InvalidOperationException($"Unsupported closure body type '{resolved.Closure.Body.GetType().Name}'.");
+        }
     }
 
     private LuaValue[] ExecuteReturn(CallFrame frame, LuaInstruction instruction)
@@ -250,14 +325,31 @@ public sealed partial class LuaVirtualMachine
         SetRegister(frame, instruction.A + 3, GetRegister(frame, instruction.A));
 
         var iterator = GetRegister(frame, instruction.A + 3);
-        var results = CallValue(
-            iterator,
-            [
-                GetRegister(frame, instruction.A + 4),
-                GetRegister(frame, instruction.A + 5)
-            ]);
+        LuaValue[] arguments =
+        [
+            GetRegister(frame, instruction.A + 4),
+            GetRegister(frame, instruction.A + 5)
+        ];
+        var resolved = ResolveCallable(iterator, arguments);
 
-        WriteResults(frame, instruction.A + 3, instruction.C, results);
+        switch (resolved.Closure.Body)
+        {
+            case LuaBytecodeClosureBody body:
+                PushBytecodeFrame(
+                    resolved.Closure,
+                    body.Prototype,
+                    resolved.Arguments,
+                    LuaCallReturnTarget.ForRegisters(frame, instruction.A + 3, instruction.C));
+                return;
+            case LuaNativeClosureBody nativeBody:
+                var results = ExecuteNativeClosure(resolved.Closure, nativeBody, resolved.Arguments);
+                WriteResults(frame, instruction.A + 3, instruction.C, results);
+                return;
+            case null:
+                throw new InvalidOperationException("The closure does not contain an executable body.");
+            default:
+                throw new InvalidOperationException($"Unsupported closure body type '{resolved.Closure.Body.GetType().Name}'.");
+        }
     }
 
     private void ExecuteTForLoop(CallFrame frame, LuaInstruction instruction)

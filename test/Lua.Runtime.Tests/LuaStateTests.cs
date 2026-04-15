@@ -106,6 +106,26 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void LuaState_ShouldPreloadCoroutineLibrary()
+    {
+        var state = new LuaState();
+
+        var coroutineValue = state.GlobalEnvironment.GetValue(LuaValue.FromString("coroutine"));
+        coroutineValue.Kind.ShouldBe(LuaValueKind.Table);
+
+        var coroutineTable = coroutineValue.AsTable();
+        coroutineTable.ShouldBeSameAs(state.CoroutineLibrary);
+        coroutineTable.GetValue(LuaValue.FromString("create")).AsFunction().DebugName.ShouldBe("coroutine.create");
+        coroutineTable.GetValue(LuaValue.FromString("resume")).AsFunction().DebugName.ShouldBe("coroutine.resume");
+        coroutineTable.GetValue(LuaValue.FromString("yield")).AsFunction().DebugName.ShouldBe("coroutine.yield");
+        coroutineTable.GetValue(LuaValue.FromString("wrap")).AsFunction().DebugName.ShouldBe("coroutine.wrap");
+        coroutineTable.GetValue(LuaValue.FromString("status")).AsFunction().DebugName.ShouldBe("coroutine.status");
+        coroutineTable.GetValue(LuaValue.FromString("isyieldable")).AsFunction().DebugName.ShouldBe("coroutine.isyieldable");
+        coroutineTable.GetValue(LuaValue.FromString("close")).AsFunction().DebugName.ShouldBe("coroutine.close");
+        coroutineTable.GetValue(LuaValue.FromString("running")).AsFunction().DebugName.ShouldBe("coroutine.running");
+    }
+
+    [Fact]
     public void LuaState_ShouldPreloadMinimalStringLibraryAndMetatable()
     {
         var state = new LuaState();

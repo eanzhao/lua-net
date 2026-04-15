@@ -21,11 +21,12 @@ public sealed partial class LuaState
         Continue
     }
 
-    private readonly List<CallFrame> _frames = [];
     private readonly Dictionary<LuaValueKind, LuaTable> _typeMetatables = [];
     private readonly StringBuilder _warningBuffer = new();
     private BinaryChunkLoader? _binaryChunkLoader;
     private Func<LuaValue, IReadOnlyList<LuaValue>, LuaValue[]>? _callableInvoker;
+    private Func<LuaThread, IReadOnlyList<LuaValue>, LuaValue[]>? _coroutineResumer;
+    private Func<LuaThread, LuaValue[]>? _coroutineCloser;
     private bool _gcRunning = true;
     private WarningMode _warningMode = WarningMode.Off;
     private static readonly LuaValue IPairsAuxFunction = LuaValue.FromFunction(
@@ -48,12 +49,14 @@ public sealed partial class LuaState
 
     public LuaState()
     {
-        Stack = new LuaStack();
+        MainThread = new LuaThread("main", isMainThread: true);
+        CurrentThread = MainThread;
         GlobalEnvironment = new LuaTable("_ENV");
         StringLibrary = new LuaTable("string");
         TableLibrary = new LuaTable("table");
         MathLibrary = new LuaTable("math");
         Utf8Library = new LuaTable("utf8");
+        CoroutineLibrary = new LuaTable("coroutine");
         PackageLibrary = new LuaTable("package");
         PackageLoaded = new LuaTable("package.loaded");
         PackagePreload = new LuaTable("package.preload");
@@ -63,10 +66,15 @@ public sealed partial class LuaState
         RegisterTableSupport();
         RegisterMathSupport();
         RegisterUtf8Support();
+        RegisterCoroutineSupport();
         RegisterPackageSupport();
     }
 
-    public LuaStack Stack { get; }
+    public LuaThread MainThread { get; }
+
+    public LuaThread CurrentThread { get; private set; }
+
+    public LuaStack Stack => CurrentThread.Stack;
 
     public LuaTable GlobalEnvironment { get; }
 
@@ -77,6 +85,8 @@ public sealed partial class LuaState
     public LuaTable MathLibrary { get; }
 
     public LuaTable Utf8Library { get; }
+
+    public LuaTable CoroutineLibrary { get; }
 
     public LuaTable PackageLibrary { get; }
 
@@ -92,9 +102,9 @@ public sealed partial class LuaState
 
     public Func<string, byte[]> FileReader { get; set; } = static path => File.ReadAllBytes(path);
 
-    public IReadOnlyList<CallFrame> Frames => _frames;
+    public IReadOnlyList<CallFrame> Frames => CurrentThread.Frames;
 
-    public CallFrame? CurrentFrame => _frames.Count == 0 ? null : _frames[^1];
+    public CallFrame? CurrentFrame => CurrentThread.CurrentFrame;
 
     private void RegisterBaseFunctions()
     {
@@ -121,6 +131,20 @@ public sealed partial class LuaState
         RegisterBaseFunction("pcall", ProtectedCall);
         RegisterBaseFunction("xpcall", ExtendedProtectedCall);
         RegisterBaseFunction("error", Error);
+    }
+
+    private void RegisterCoroutineSupport()
+    {
+        RegisterLibraryFunction(CoroutineLibrary, "create", CoroutineCreate, "coroutine.create");
+        RegisterLibraryFunction(CoroutineLibrary, "resume", CoroutineResume, "coroutine.resume");
+        RegisterLibraryFunction(CoroutineLibrary, "yield", CoroutineYield, "coroutine.yield");
+        RegisterLibraryFunction(CoroutineLibrary, "wrap", CoroutineWrap, "coroutine.wrap");
+        RegisterLibraryFunction(CoroutineLibrary, "status", CoroutineStatus, "coroutine.status");
+        RegisterLibraryFunction(CoroutineLibrary, "isyieldable", CoroutineIsYieldable, "coroutine.isyieldable");
+        RegisterLibraryFunction(CoroutineLibrary, "close", CoroutineClose, "coroutine.close");
+        RegisterLibraryFunction(CoroutineLibrary, "running", CoroutineRunning, "coroutine.running");
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("coroutine"), LuaValue.FromTable(CoroutineLibrary));
     }
 
     private void RegisterPackageSupport()
@@ -261,20 +285,12 @@ public sealed partial class LuaState
     public void PushFrame(CallFrame frame)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        _frames.Add(frame);
+        CurrentThread.PushFrame(frame);
     }
 
     public CallFrame PopFrame()
     {
-        if (_frames.Count == 0)
-        {
-            throw new InvalidOperationException("Cannot pop from an empty frame stack.");
-        }
-
-        var lastIndex = _frames.Count - 1;
-        var frame = _frames[lastIndex];
-        _frames.RemoveAt(lastIndex);
-        return frame;
+        return CurrentThread.PopFrame();
     }
 
     public void SetCallableInvoker(Func<LuaValue, IReadOnlyList<LuaValue>, LuaValue[]> callableInvoker)
@@ -287,6 +303,27 @@ public sealed partial class LuaState
     {
         ArgumentNullException.ThrowIfNull(binaryChunkLoader);
         _binaryChunkLoader = binaryChunkLoader;
+    }
+
+    public void SetCoroutineResumer(Func<LuaThread, IReadOnlyList<LuaValue>, LuaValue[]> coroutineResumer)
+    {
+        ArgumentNullException.ThrowIfNull(coroutineResumer);
+        _coroutineResumer = coroutineResumer;
+    }
+
+    public void SetCoroutineCloser(Func<LuaThread, LuaValue[]> coroutineCloser)
+    {
+        ArgumentNullException.ThrowIfNull(coroutineCloser);
+        _coroutineCloser = coroutineCloser;
+    }
+
+    public LuaThread SwitchCurrentThread(LuaThread thread)
+    {
+        ArgumentNullException.ThrowIfNull(thread);
+
+        var previous = CurrentThread;
+        CurrentThread = thread;
+        return previous;
     }
 
     public LuaValue[] InvokeCallable(LuaValue callable, IReadOnlyList<LuaValue> arguments)

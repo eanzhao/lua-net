@@ -25,6 +25,7 @@ public sealed partial class LuaVirtualMachine
     private const int CallMetamethodEvent = 23;
     private const int MaxCallMetamethodDepth = 32;
     private const int MaxTableAccessMetamethodDepth = 2000;
+    private int _nextHostCallId = 1;
     private static readonly string[] MetamethodNames =
     [
         "__index", "__newindex",
@@ -41,6 +42,8 @@ public sealed partial class LuaVirtualMachine
         State = new LuaState();
         State.SetCallableInvoker(CallValue);
         State.SetBinaryChunkLoader(LoadBinaryChunk);
+        State.SetCoroutineResumer(ResumeCoroutine);
+        State.SetCoroutineCloser(CloseCoroutine);
     }
 
     public LuaState State { get; }
@@ -86,57 +89,31 @@ public sealed partial class LuaVirtualMachine
     private LuaValue[] ExecuteClosure(LuaClosure closure, LuaPrototype prototype, IReadOnlyList<LuaValue> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-
-        var baseIndex = State.Stack.Count;
-        var fixedArgumentCount = Math.Min(arguments.Count, prototype.NumberOfParameters);
-        var frameSize = Math.Max(prototype.MaxStackSize, prototype.NumberOfParameters);
-
-        State.Stack.SetTop(baseIndex + frameSize);
-        InitializeRegisters(baseIndex, arguments, fixedArgumentCount);
-
-        var frame = new CallFrame(
-            closure,
-            baseIndex,
-            expectedResults: 0,
-            registerTop: fixedArgumentCount,
-            varargs: GetVarargs(prototype, arguments, fixedArgumentCount));
-        State.PushFrame(frame);
-        LuaValue[] results = [];
-        Exception? pendingException = null;
+        var hostCallId = CreateHostCallId();
+        var frameDepth = State.Frames.Count;
+        PushBytecodeFrame(closure, prototype, arguments, LuaCallReturnTarget.ForHostCall(hostCallId));
 
         try
         {
-            results = RunClosure(frame, prototype);
+            return RunInterpreter(hostCallId);
         }
         catch (Exception ex)
         {
-            pendingException = ex;
+            AbortFramesToDepth(frameDepth, ex);
+            throw;
         }
-        finally
-        {
-            try
-            {
-                pendingException = CloseResourcesFrom(frame, 0, pendingException);
-            }
-            finally
-            {
-                State.PopFrame();
-                State.Stack.SetTop(baseIndex);
-            }
-        }
-
-        if (pendingException is not null)
-        {
-            ExceptionDispatchInfo.Capture(pendingException).Throw();
-        }
-
-        return results;
     }
 
     private LuaValue[] CallValue(LuaValue callable, IReadOnlyList<LuaValue> arguments)
     {
         var resolved = ResolveCallable(callable, arguments);
-        return Call(resolved.Closure, resolved.Arguments);
+        return resolved.Closure.Body switch
+        {
+            LuaBytecodeClosureBody body => ExecuteClosure(resolved.Closure, body.Prototype, resolved.Arguments),
+            LuaNativeClosureBody body => ExecuteNativeClosure(resolved.Closure, body, resolved.Arguments),
+            null => throw new InvalidOperationException("The closure does not contain an executable body."),
+            _ => throw new InvalidOperationException($"Unsupported closure body type '{resolved.Closure.Body.GetType().Name}'.")
+        };
     }
 
     private LuaClosure CreateClosure(LuaPrototype prototype, CallFrame parentFrame, string? debugName = null)
@@ -160,9 +137,25 @@ public sealed partial class LuaVirtualMachine
 
     private LuaValue[] ExecuteNativeClosure(LuaClosure closure, LuaNativeClosureBody body, IReadOnlyList<LuaValue> arguments)
     {
+        var shouldTrackBoundary =
+            !string.Equals(closure.DebugName, "coroutine.yield", StringComparison.Ordinal) &&
+            !string.Equals(closure.DebugName, "coroutine.isyieldable", StringComparison.Ordinal);
         try
         {
+            if (shouldTrackBoundary)
+            {
+                State.CurrentThread.EnterNonYieldableCall();
+            }
+
             return body.Function(State, closure, arguments);
+        }
+        catch (LuaYieldException)
+        {
+            throw;
+        }
+        catch (LuaThreadCloseException)
+        {
+            throw;
         }
         catch (LuaRuntimeException)
         {
@@ -172,12 +165,43 @@ public sealed partial class LuaVirtualMachine
         {
             throw new LuaRuntimeException(LuaValue.FromString(ex.Message), ex);
         }
+        finally
+        {
+            if (shouldTrackBoundary && State.CurrentThread.NonYieldableCallDepth > 0)
+            {
+                State.CurrentThread.ExitNonYieldableCall();
+            }
+        }
     }
 
-    private LuaValue[] RunClosure(CallFrame frame, LuaPrototype prototype)
+    private LuaValue[] RunInterpreter(int hostCallId)
     {
-        while (frame.ProgramCounter < prototype.Code.Length)
+        while (true)
         {
+            var frame = State.CurrentFrame
+                ?? throw new InvalidOperationException("The interpreter has no active call frame.");
+            var prototype = GetCurrentPrototype(frame);
+
+            if (TryResumePendingCall(frame, hostCallId, out var resumedCompleted, out var resumedResults))
+            {
+                if (resumedCompleted)
+                {
+                    return resumedResults;
+                }
+
+                continue;
+            }
+
+            if (frame.ProgramCounter >= prototype.Code.Length)
+            {
+                if (TryCompleteFrame(frame, [], hostCallId, out var finishedResults))
+                {
+                    return finishedResults;
+                }
+
+                continue;
+            }
+
             var instruction = LuaInstruction.FromRaw(prototype.Code[frame.ProgramCounter]);
             frame.Advance();
 
@@ -347,13 +371,33 @@ public sealed partial class LuaVirtualMachine
                     ExecuteCall(frame, instruction);
                     break;
                 case LuaOpcode.TailCall:
-                    return ExecuteTailCall(frame, instruction);
+                    if (ExecuteTailCall(frame, instruction, hostCallId, out var tailCallResults))
+                    {
+                        return tailCallResults;
+                    }
+
+                    break;
                 case LuaOpcode.Return:
-                    return ExecuteReturn(frame, instruction);
+                    if (TryCompleteFrame(frame, ExecuteReturn(frame, instruction), hostCallId, out var returnResults))
+                    {
+                        return returnResults;
+                    }
+
+                    break;
                 case LuaOpcode.Return0:
-                    return [];
+                    if (TryCompleteFrame(frame, [], hostCallId, out var return0Results))
+                    {
+                        return return0Results;
+                    }
+
+                    break;
                 case LuaOpcode.Return1:
-                    return [GetRegister(frame, instruction.A)];
+                    if (TryCompleteFrame(frame, [GetRegister(frame, instruction.A)], hostCallId, out var return1Results))
+                    {
+                        return return1Results;
+                    }
+
+                    break;
                 case LuaOpcode.ForLoop:
                     ExecuteForLoop(frame, instruction);
                     break;
@@ -436,8 +480,138 @@ public sealed partial class LuaVirtualMachine
                     throw new NotImplementedException($"Opcode '{instruction.Name}' is not implemented yet.");
             }
         }
+    }
 
-        return [];
+    private int CreateHostCallId()
+    {
+        return _nextHostCallId++;
+    }
+
+    private CallFrame PushBytecodeFrame(
+        LuaClosure closure,
+        LuaPrototype prototype,
+        IReadOnlyList<LuaValue> arguments,
+        LuaCallReturnTarget returnTarget)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        var baseIndex = State.Stack.Count;
+        var fixedArgumentCount = Math.Min(arguments.Count, prototype.NumberOfParameters);
+        var frameSize = Math.Max(prototype.MaxStackSize, prototype.NumberOfParameters);
+
+        State.Stack.SetTop(baseIndex + frameSize);
+        InitializeRegisters(baseIndex, arguments, fixedArgumentCount);
+
+        var frame = new CallFrame(
+            closure,
+            baseIndex,
+            expectedResults: 0,
+            registerTop: fixedArgumentCount,
+            varargs: GetVarargs(prototype, arguments, fixedArgumentCount),
+            returnTarget: returnTarget);
+        State.PushFrame(frame);
+        return frame;
+    }
+
+    private bool TryResumePendingCall(
+        CallFrame frame,
+        int hostCallId,
+        out bool completedFrame,
+        out LuaValue[] completedResults)
+    {
+        completedFrame = false;
+        completedResults = [];
+
+        if (frame.PendingCall is null || !State.CurrentThread.HasResumeValues())
+        {
+            return false;
+        }
+
+        var resumeValues = State.CurrentThread.ConsumeResumeValues();
+        if (frame.PendingCall.Kind == LuaPendingCallKind.TailReturn)
+        {
+            frame.ClearPendingCall();
+            completedFrame = TryCompleteFrame(frame, resumeValues, hostCallId, out completedResults);
+            return true;
+        }
+
+        WriteCallResults(frame, frame.PendingCall.RegisterIndex, frame.PendingCall.ResultCount, resumeValues);
+        frame.ClearPendingCall();
+        return true;
+    }
+
+    private bool TryCompleteFrame(
+        CallFrame frame,
+        IReadOnlyList<LuaValue> results,
+        int hostCallId,
+        out LuaValue[] completedResults)
+    {
+        completedResults = [];
+
+        var pendingException = CloseResourcesFrom(frame, 0);
+        if (pendingException is not null)
+        {
+            ExceptionDispatchInfo.Capture(pendingException).Throw();
+        }
+
+        State.PopFrame();
+        State.Stack.SetTop(frame.BaseIndex);
+
+        switch (frame.ReturnTarget.Kind)
+        {
+            case LuaCallReturnTargetKind.HostCall:
+                if (frame.ReturnTarget.HostCallId == hostCallId)
+                {
+                    completedResults = results.ToArray();
+                    return true;
+                }
+
+                throw new InvalidOperationException($"Unexpected host call id '{frame.ReturnTarget.HostCallId}'.");
+            case LuaCallReturnTargetKind.ThreadRoot:
+                State.CurrentThread.MarkCompleted();
+                completedResults = results.ToArray();
+                return true;
+            case LuaCallReturnTargetKind.Registers:
+                var callerFrame = frame.ReturnTarget.CallerFrame
+                    ?? throw new InvalidOperationException("Register return target is missing the caller frame.");
+                WriteCallResults(callerFrame, frame.ReturnTarget.RegisterIndex, frame.ReturnTarget.ResultCount, results);
+                return false;
+            case LuaCallReturnTargetKind.None:
+                return false;
+            default:
+                throw new InvalidOperationException($"Unknown return target kind '{frame.ReturnTarget.Kind}'.");
+        }
+    }
+
+    private void WriteCallResults(CallFrame frame, int registerIndex, int resultCount, IReadOnlyList<LuaValue> results)
+    {
+        if (resultCount < 0)
+        {
+            WriteOpenResults(frame, registerIndex, results);
+            return;
+        }
+
+        WriteResults(frame, registerIndex, resultCount, results);
+    }
+
+    private void AbortFramesToDepth(int frameDepth, Exception pendingException)
+    {
+        pendingException = CleanupFramesToDepth(frameDepth, pendingException) ?? pendingException;
+        ExceptionDispatchInfo.Capture(pendingException).Throw();
+    }
+
+    private Exception? CleanupFramesToDepth(int frameDepth, Exception? pendingException = null)
+    {
+        while (State.Frames.Count > frameDepth)
+        {
+            var frame = State.CurrentFrame
+                ?? throw new InvalidOperationException("The interpreter has no active call frame.");
+            pendingException = CloseResourcesFrom(frame, 0, pendingException);
+            State.PopFrame();
+            State.Stack.SetTop(frame.BaseIndex);
+        }
+
+        return pendingException;
     }
 
     private void ExecuteLoadNil(CallFrame frame, LuaInstruction instruction)

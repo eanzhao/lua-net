@@ -17,7 +17,7 @@ public class LuaUpvalueTests
         var frame = new CallFrame(new LuaClosure("outer"), baseIndex: 0, expectedResults: 0);
         state.PushFrame(frame);
 
-        var upvalue = frame.GetOrCreateOpenUpvalue(0);
+        var upvalue = frame.GetOrCreateOpenUpvalue(state, 0);
         upvalue.GetValue(state).AsInteger().ShouldBe(40);
 
         state.Stack[0] = LuaValue.FromInteger(41);

@@ -228,7 +228,7 @@ public sealed partial class LuaVirtualMachine
 
             if (descriptor.InStack != 0)
             {
-                upvalues[index] = parentFrame.GetOrCreateOpenUpvalue(descriptor.Index);
+                upvalues[index] = parentFrame.GetOrCreateOpenUpvalue(State.Stack, descriptor.Index);
             }
             else
             {
@@ -305,7 +305,7 @@ public sealed partial class LuaVirtualMachine
         }
         finally
         {
-            frame.CloseOpenUpvaluesFrom(State, registerIndex);
+            frame.CloseOpenUpvaluesFrom(registerIndex);
         }
     }
 

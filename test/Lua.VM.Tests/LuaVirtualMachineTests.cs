@@ -1956,6 +1956,50 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleCoroutineChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("coroutine_chunk.luac"));
+
+        results.Length.ShouldBe(33);
+        results[0].AsString().ShouldBe("thread");
+        results[1].AsInteger().ShouldBe(1);
+        results[2].AsInteger().ShouldBe(0);
+        results[3].AsString().ShouldBe("suspended");
+        results[4].AsInteger().ShouldBe(1);
+        results[5].AsInteger().ShouldBe(41);
+        results[6].AsString().ShouldBe("running");
+        results[7].AsString().ShouldBe("normal");
+        results[8].AsInteger().ShouldBe(0);
+        results[9].AsInteger().ShouldBe(1);
+        results[10].AsString().ShouldBe("suspended");
+        results[11].AsInteger().ShouldBe(1);
+        results[12].AsString().ShouldBe("x");
+        results[13].AsString().ShouldBe("y");
+        results[14].AsString().ShouldBe("running");
+        results[15].AsString().ShouldBe("dead");
+        results[16].AsString().ShouldBe("wrap-yield");
+        results[17].AsString().ShouldBe("wrap-done");
+        results[18].AsInteger().ShouldBe(1);
+        results[19].AsString().ShouldBe("pause");
+        results[20].AsString().ShouldBe("suspended");
+        results[21].AsInteger().ShouldBe(1);
+        results[22].AsString().ShouldBe("dead");
+        results[23].AsInteger().ShouldBe(1);
+        results[24].AsInteger().ShouldBe(1);
+        results[25].AsInteger().ShouldBe(7);
+        results[26].AsInteger().ShouldBe(1);
+        results[27].AsInteger().ShouldBe(0);
+        results[28].AsString().ShouldBe("co-boom");
+        results[29].AsInteger().ShouldBe(0);
+        results[30].AsString().ShouldBe("co-boom");
+        results[31].AsInteger().ShouldBe(1);
+        results[32].AsString().ShouldBe("dead");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Execute_ShouldHandleTableLibraryChunkFixture()
     {
         var vm = new LuaVirtualMachine();

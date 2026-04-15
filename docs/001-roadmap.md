@@ -144,7 +144,7 @@ test/Lua.*.Tests      单元测试、夹具测试、兼容性测试
 
 - `utf8.charpattern` 这一轮已经预置常量，实际消费路径要等 Step 09 的字符串模式匹配一起展开
 
-### 第 9 步：string 库与模式匹配
+### 第 9 步：string 库与模式匹配 ✅
 
 string 库函数数量多，模式匹配引擎是独立的复杂子系统。
 
@@ -166,7 +166,7 @@ string 库函数数量多，模式匹配引擎是独立的复杂子系统。
 
 - `string.pack` / `string.packsize` / `string.unpack`
 
-### 第 10 步：coroutine 库
+### 第 10 步：coroutine 库 ✅
 
 需要改造 VM 调用栈以支持挂起和恢复。
 
