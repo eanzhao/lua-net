@@ -10,6 +10,10 @@ public sealed class LuaState
 {
     private readonly List<CallFrame> _frames = [];
     private Func<LuaValue, IReadOnlyList<LuaValue>, LuaValue[]>? _callableInvoker;
+    private static readonly LuaValue IPairsAuxFunction = LuaValue.FromFunction(
+        new LuaClosure(
+            "ipairsaux",
+            body: new LuaNativeClosureBody(IPairsAux)));
 
     public LuaState()
     {
@@ -34,6 +38,9 @@ public sealed class LuaState
         RegisterBaseFunction("rawlen", RawLen);
         RegisterBaseFunction("rawget", RawGet);
         RegisterBaseFunction("rawset", RawSet);
+        RegisterBaseFunction("next", Next);
+        RegisterBaseFunction("pairs", Pairs);
+        RegisterBaseFunction("ipairs", IPairs);
         RegisterBaseFunction("type", Type);
         RegisterBaseFunction("assert", Assert);
         RegisterBaseFunction("select", Select);
@@ -196,6 +203,68 @@ public sealed class LuaState
 
         tableValue.AsTable().SetValue(key, RequireArgument(arguments, 2, "rawset"));
         return [tableValue];
+    }
+
+    private static LuaValue[] Next(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var tableValue = RequireArgument(arguments, 0, "next");
+        if (tableValue.Kind != LuaValueKind.Table)
+        {
+            throw CreateArgumentTypeError("next", 1, "table", tableValue);
+        }
+
+        var currentKey = arguments.Count >= 2 ? arguments[1] : LuaValue.Nil;
+        return tableValue.AsTable().TryGetNextEntry(currentKey, out var nextKey, out var nextValue)
+            ? [nextKey, nextValue]
+            : [LuaValue.Nil];
+    }
+
+    private static LuaValue[] Pairs(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var value = RequireArgument(arguments, 0, "pairs");
+        if (TryGetMetamethod(value, "__pairs", out var metamethod))
+        {
+            return NormalizeResults(state.InvokeCallable(metamethod, [value]), 4);
+        }
+
+        return
+        [
+            GetBaseFunctionValue(state, "next"),
+            value,
+            LuaValue.Nil,
+            LuaValue.Nil
+        ];
+    }
+
+    private static LuaValue[] IPairs(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var value = RequireArgument(arguments, 0, "ipairs");
+        return [IPairsAuxFunction, value, LuaValue.FromInteger(0)];
+    }
+
+    private static LuaValue[] IPairsAux(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var tableValue = RequireArgument(arguments, 0, "ipairsaux");
+        if (tableValue.Kind != LuaValueKind.Table)
+        {
+            throw CreateArgumentTypeError("ipairsaux", 1, "table", tableValue);
+        }
+
+        var indexValue = RequireArgument(arguments, 1, "ipairsaux");
+        if (!TryGetInteger(indexValue, out var index))
+        {
+            throw CreateArgumentTypeError("ipairsaux", 2, "integer", indexValue);
+        }
+
+        var nextIndex = unchecked(index + 1);
+        var nextValue = tableValue.AsTable().GetValue(LuaValue.FromInteger(nextIndex));
+        return nextValue.IsNil
+            ? [LuaValue.Nil]
+            : [LuaValue.FromInteger(nextIndex), nextValue];
     }
 
     private static LuaValue[] Type(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
@@ -658,6 +727,22 @@ public sealed class LuaState
     private static LuaRuntimeException CreateRuntimeError(string message)
     {
         return new LuaRuntimeException(LuaValue.FromString(message));
+    }
+
+    private static LuaValue GetBaseFunctionValue(LuaState state, string name)
+    {
+        return state.GlobalEnvironment.GetValue(LuaValue.FromString(name));
+    }
+
+    private static LuaValue[] NormalizeResults(IReadOnlyList<LuaValue> results, int count)
+    {
+        var normalized = new LuaValue[count];
+        for (var index = 0; index < count; index++)
+        {
+            normalized[index] = index < results.Count ? results[index] : LuaValue.Nil;
+        }
+
+        return normalized;
     }
 
     private static string FormatLuaValue(LuaValue value)

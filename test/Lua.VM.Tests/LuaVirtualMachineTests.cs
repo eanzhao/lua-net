@@ -1753,6 +1753,26 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleIteratorChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("iterators_chunk.luac"));
+
+        results.Length.ShouldBe(9);
+        results[0].AsString().ShouldBe("only");
+        results[1].AsInteger().ShouldBe(42);
+        results[2].AsInteger().ShouldBe(1);
+        results[3].AsInteger().ShouldBe(3);
+        results[4].AsInteger().ShouldBe(60);
+        results[5].AsString().ShouldBe("tag");
+        results[6].AsInteger().ShouldBe(99);
+        results[7].AsInteger().ShouldBe(2);
+        results[8].AsInteger().ShouldBe(33);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Call_ShouldWrapClrExceptionsFromNativeClosures()
     {
         var closure = new LuaClosure(

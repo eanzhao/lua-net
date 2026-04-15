@@ -98,6 +98,23 @@ public class LuaTableTests
     }
 
     [Fact]
+    public void TryGetNextEntry_ShouldNormalizeIntegralFloatKeys()
+    {
+        var table = new LuaTable();
+
+        table.SetValue(LuaValue.FromString("first"), LuaValue.FromInteger(1));
+        table.SetValue(LuaValue.FromFloat(2.0), LuaValue.FromInteger(2));
+
+        table.TryGetNextEntry(LuaValue.Nil, out var firstKey, out var firstValue).ShouldBeTrue();
+        firstKey.AsString().ShouldBe("first");
+        firstValue.AsInteger().ShouldBe(1);
+
+        table.TryGetNextEntry(firstKey, out var secondKey, out var secondValue).ShouldBeTrue();
+        secondKey.AsInteger().ShouldBe(2);
+        secondValue.AsInteger().ShouldBe(2);
+    }
+
+    [Fact]
     public void SetMetatable_ShouldExposeMetamethodLookup()
     {
         var table = new LuaTable();

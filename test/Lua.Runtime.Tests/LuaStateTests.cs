@@ -65,6 +65,9 @@ public class LuaStateTests
         state.GlobalEnvironment.GetValue(LuaValue.FromString("rawlen")).AsFunction().DebugName.ShouldBe("rawlen");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("rawget")).AsFunction().DebugName.ShouldBe("rawget");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("rawset")).AsFunction().DebugName.ShouldBe("rawset");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("next")).AsFunction().DebugName.ShouldBe("next");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("pairs")).AsFunction().DebugName.ShouldBe("pairs");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("ipairs")).AsFunction().DebugName.ShouldBe("ipairs");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("type")).AsFunction().DebugName.ShouldBe("type");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("assert")).AsFunction().DebugName.ShouldBe("assert");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("select")).AsFunction().DebugName.ShouldBe("select");
@@ -219,6 +222,106 @@ public class LuaStateTests
         selectedValues.Length.ShouldBe(2);
         selectedValues[0].AsInteger().ShouldBe(20);
         selectedValues[1].AsInteger().ShouldBe(30);
+    }
+
+    [Fact]
+    public void NextPairsAndIPairs_ShouldUseLuaSemantics()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var next = GetBaseFunction(state, "next");
+        var pairs = GetBaseFunction(state, "pairs");
+        var ipairs = GetBaseFunction(state, "ipairs");
+        var single = new LuaTable();
+        var customTable = new LuaTable();
+        var customMetatable = new LuaTable();
+        var array = new LuaTable();
+
+        single.SetValue(LuaValue.FromString("only"), LuaValue.FromInteger(42));
+
+        var nextResults = InvokeBaseFunction(state, next, LuaValue.FromTable(single));
+        nextResults.Length.ShouldBe(2);
+        nextResults[0].AsString().ShouldBe("only");
+        nextResults[1].AsInteger().ShouldBe(42);
+
+        InvokeBaseFunction(state, next, LuaValue.FromTable(single), nextResults[0])
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
+
+        var pairResults = InvokeBaseFunction(state, pairs, LuaValue.FromTable(single));
+        pairResults.Length.ShouldBe(4);
+        pairResults[0].AsFunction().DebugName.ShouldBe("next");
+        pairResults[1].ShouldBe(LuaValue.FromTable(single));
+        pairResults[2].IsNil.ShouldBeTrue();
+        pairResults[3].IsNil.ShouldBeTrue();
+
+        customMetatable.SetValue(
+            LuaValue.FromString("__pairs"),
+            LuaValue.FromFunction(new LuaClosure(
+                "__pairs",
+                body: new LuaNativeClosureBody(static (_, _, arguments) =>
+                [
+                    LuaValue.FromFunction(new LuaClosure(
+                        "custom-iter",
+                        body: new LuaNativeClosureBody(static (_, _, iterArguments) => iterArguments[1].IsNil
+                            ? [LuaValue.FromString("tag"), LuaValue.FromInteger(99)]
+                            : [LuaValue.Nil]))),
+                    arguments[0],
+                    LuaValue.Nil
+                ]))));
+        customTable.SetMetatable(customMetatable);
+
+        var customPairResults = InvokeBaseFunction(state, pairs, LuaValue.FromTable(customTable));
+        customPairResults.Length.ShouldBe(4);
+        customPairResults[0].AsFunction().DebugName.ShouldBe("custom-iter");
+        customPairResults[1].ShouldBe(LuaValue.FromTable(customTable));
+        customPairResults[2].IsNil.ShouldBeTrue();
+        customPairResults[3].IsNil.ShouldBeTrue();
+
+        array.SetValue(LuaValue.FromInteger(1), LuaValue.FromInteger(10));
+        array.SetValue(LuaValue.FromInteger(2), LuaValue.FromInteger(20));
+        array.SetValue(LuaValue.FromInteger(4), LuaValue.FromInteger(40));
+
+        var ipairsResults = InvokeBaseFunction(state, ipairs, LuaValue.FromTable(array));
+        ipairsResults.Length.ShouldBe(3);
+        ipairsResults[0].AsFunction().DebugName.ShouldBe("ipairsaux");
+        ipairsResults[1].ShouldBe(LuaValue.FromTable(array));
+        ipairsResults[2].AsInteger().ShouldBe(0);
+
+        var first = state.InvokeCallable(ipairsResults[0], [ipairsResults[1], ipairsResults[2]]);
+        first.Length.ShouldBe(2);
+        first[0].AsInteger().ShouldBe(1);
+        first[1].AsInteger().ShouldBe(10);
+
+        var second = state.InvokeCallable(ipairsResults[0], [ipairsResults[1], first[0]]);
+        second.Length.ShouldBe(2);
+        second[0].AsInteger().ShouldBe(2);
+        second[1].AsInteger().ShouldBe(20);
+
+        state.InvokeCallable(ipairsResults[0], [ipairsResults[1], second[0]])
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Next_ShouldRejectInvalidCurrentKey()
+    {
+        var state = new LuaState();
+        var next = GetBaseFunction(state, "next");
+        var table = new LuaTable();
+
+        table.SetValue(LuaValue.FromString("only"), LuaValue.FromInteger(42));
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, next, LuaValue.FromTable(table), LuaValue.FromString("missing")));
+
+        exception.ErrorObject.AsString().ShouldBe("invalid key to 'next'");
     }
 
     [Fact]
