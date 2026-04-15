@@ -1,0 +1,28 @@
+local ip, fp = math.modf(-3.75)
+
+return
+  math.abs(-5),
+  math.abs(-2.5),
+  math.ceil(2.2),
+  math.floor(2.8),
+  math.max(1, 9, 3),
+  math.min(1, 9, 3),
+  math.sqrt(81),
+  math.log(math.exp(3)),
+  math.sin(math.pi / 2),
+  math.cos(0),
+  math.tan(0),
+  math.asin(1),
+  math.acos(1),
+  math.atan(1, 1),
+  math.deg(math.pi),
+  math.rad(180),
+  math.fmod(17, 5),
+  ip, fp,
+  math.tointeger(9.0),
+  math.type(1),
+  math.type(1.5),
+  math.ult(0, -1),
+  math.huge > 1e300,
+  math.maxinteger,
+  math.mininteger

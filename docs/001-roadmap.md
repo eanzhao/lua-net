@@ -118,27 +118,31 @@ test/Lua.*.Tests      单元测试、夹具测试、兼容性测试
 - 完整 package 系统、C module 与 `loadlib` 仍然留在 Step 14
 - `collectgarbage` 的更完整模式参数留待后续扩展
 
-### 第 8 步：table 库与 math 库
+### 第 8 步：`table` / `math` / `utf8` 基础库 ✅
 
 补上最常用的两个标准库。
 
-**table 库：**
+**已实现：**
 
 - `table.concat` / `table.insert` / `table.remove` / `table.move`
 - `table.sort`
 - `table.pack` / `table.unpack`
-
-**math 库：**
-
 - 基础函数：`abs` / `ceil` / `floor` / `max` / `min` / `sqrt` / `log` / `exp`
 - 三角函数：`sin` / `cos` / `tan` / `asin` / `acos` / `atan`
 - 转换：`deg` / `rad` / `fmod` / `modf` / `tointeger` / `type`
 - 常量：`pi` / `huge` / `maxinteger` / `mininteger`
 - 位相关：`ult`
-
-**utf8 库：**
-
 - `utf8.offset` / `utf8.codepoint` / `utf8.char` / `utf8.len` / `utf8.codes`
+
+**待补充：**
+
+- `table.create`
+- `math.random` / `math.randomseed`
+- `math.frexp` / `math.ldexp`
+
+说明：
+
+- `utf8.charpattern` 这一轮已经预置常量，实际消费路径要等 Step 09 的字符串模式匹配一起展开
 
 ### 第 9 步：string 库与模式匹配
 

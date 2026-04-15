@@ -41,7 +41,7 @@ dotnet sln lua-net.sln list
 | 第 5 步 | 调用、闭包、上值、可变参数 | 已完成 |
 | 第 6 步 | 表与元表 | 已完成 |
 | 第 7 步 | 基础库核心函数 | 已完成 |
-| 第 8 步 | table 库与 math 库 | 未开始 |
+| 第 8 步 | `table` / `math` / `utf8` 基础库 | 已完成 |
 | 第 9 步 | string 库与模式匹配 | 未开始 |
 | 第 10 步 | coroutine 库 | 未开始 |
 | 第 11 步 | 词法分析 | 未开始 |
@@ -56,6 +56,12 @@ dotnet sln lua-net.sln list
 **已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`collectgarbage`（最小版本）、`load` / `loadfile` / `dofile`（先覆盖二进制 chunk 路径）、最小 `package` / `require`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`、`print` / `warn`、最小 `string` 表（`upper` / `lower` / `len`）、字符串元表 `__index`、字符串算术元方法
 
 **后续扩展：** `load` / `loadfile` 的文本源码路径、完整 `package` / `loadlib`、完整 GC 模式参数会在后续阶段继续展开。
+
+### 第 8 步当前覆盖范围
+
+**已实现：** `table.concat` / `table.insert` / `table.remove` / `table.move` / `table.sort` / `table.pack` / `table.unpack`，`math.abs` / `ceil` / `floor` / `max` / `min` / `sqrt` / `log` / `exp` / `sin` / `cos` / `tan` / `asin` / `acos` / `atan` / `deg` / `rad` / `fmod` / `modf` / `tointeger` / `type` / `ult`，`math.pi` / `huge` / `maxinteger` / `mininteger`，`utf8.offset` / `utf8.codepoint` / `utf8.char` / `utf8.len` / `utf8.codes` / `utf8.charpattern`
+
+**后续扩展：** `table.create`、`math.random` / `math.randomseed`、更完整的字符串/模式匹配消费路径会在后续阶段继续展开。
 
 ## 仓库结构
 
@@ -86,7 +92,7 @@ test/
 ├── Lua.VM.Tests/             VM 集成测试（97 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（34 份）
+docs/                         阶段规划和设计文档（35 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -160,6 +166,12 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 032 | [string-metamethods](docs/032-step-07-string-metamethods.md) | 最小 string 表、字符串元表与字符串算术 |
 | 033 | [load-dofile-functions](docs/033-step-07-load-dofile-functions.md) | load / loadfile / dofile 的二进制 chunk 路径 |
 | 034 | [collectgarbage-require-functions](docs/034-step-07-collectgarbage-require-functions.md) | collectgarbage 与最小 require / package |
+
+### 第 8 步：`table` / `math` / `utf8` 基础库
+
+| 编号 | 文档 | 主题 |
+|------|------|------|
+| 035 | [table-math-utf8-libraries](docs/035-step-08-table-math-utf8-libraries.md) | `table` / `math` / `utf8` 基础库 |
 
 ## 开发方式
 

@@ -129,6 +129,32 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void LuaState_ShouldPreloadTableMathAndUtf8Libraries()
+    {
+        var state = new LuaState();
+
+        var tableTable = state.GlobalEnvironment.GetValue(LuaValue.FromString("table")).AsTable();
+        tableTable.ShouldBeSameAs(state.TableLibrary);
+        tableTable.GetValue(LuaValue.FromString("concat")).AsFunction().DebugName.ShouldBe("table.concat");
+        tableTable.GetValue(LuaValue.FromString("sort")).AsFunction().DebugName.ShouldBe("table.sort");
+        tableTable.GetValue(LuaValue.FromString("unpack")).AsFunction().DebugName.ShouldBe("table.unpack");
+
+        var mathTable = state.GlobalEnvironment.GetValue(LuaValue.FromString("math")).AsTable();
+        mathTable.ShouldBeSameAs(state.MathLibrary);
+        mathTable.GetValue(LuaValue.FromString("abs")).AsFunction().DebugName.ShouldBe("math.abs");
+        mathTable.GetValue(LuaValue.FromString("atan")).AsFunction().DebugName.ShouldBe("math.atan");
+        mathTable.GetValue(LuaValue.FromString("pi")).AsFloat().ShouldBe(Math.PI, 1e-12);
+        mathTable.GetValue(LuaValue.FromString("maxinteger")).AsInteger().ShouldBe(long.MaxValue);
+        mathTable.GetValue(LuaValue.FromString("mininteger")).AsInteger().ShouldBe(long.MinValue);
+
+        var utf8Table = state.GlobalEnvironment.GetValue(LuaValue.FromString("utf8")).AsTable();
+        utf8Table.ShouldBeSameAs(state.Utf8Library);
+        utf8Table.GetValue(LuaValue.FromString("offset")).AsFunction().DebugName.ShouldBe("utf8.offset");
+        utf8Table.GetValue(LuaValue.FromString("codes")).AsFunction().DebugName.ShouldBe("utf8.codes");
+        utf8Table.GetValue(LuaValue.FromString("charpattern")).AsString().ShouldNotBeEmpty();
+    }
+
+    [Fact]
     public void GetMetatable_ShouldRespectProtectedFieldForTableAndUserData()
     {
         var state = new LuaState();
@@ -358,6 +384,235 @@ public class LuaStateTests
         state.InvokeCallable(ipairsResults[0], [ipairsResults[1], second[0]])
             .ShouldHaveSingleItem()
             .IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void TableLibrary_ShouldSupportCoreOperations()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var concat = state.TableLibrary.GetValue(LuaValue.FromString("concat")).AsFunction();
+        var insert = state.TableLibrary.GetValue(LuaValue.FromString("insert")).AsFunction();
+        var remove = state.TableLibrary.GetValue(LuaValue.FromString("remove")).AsFunction();
+        var move = state.TableLibrary.GetValue(LuaValue.FromString("move")).AsFunction();
+        var sort = state.TableLibrary.GetValue(LuaValue.FromString("sort")).AsFunction();
+        var pack = state.TableLibrary.GetValue(LuaValue.FromString("pack")).AsFunction();
+        var unpack = state.TableLibrary.GetValue(LuaValue.FromString("unpack")).AsFunction();
+
+        var concatTable = new LuaTable();
+        concatTable.SetValue(LuaValue.FromInteger(1), LuaValue.FromString("a"));
+        concatTable.SetValue(LuaValue.FromInteger(2), LuaValue.FromString("b"));
+        concatTable.SetValue(LuaValue.FromInteger(3), LuaValue.FromInteger(3));
+        InvokeBaseFunction(state, concat, LuaValue.FromTable(concatTable), LuaValue.FromString("-"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("a-b-3");
+
+        var sequence = new LuaTable();
+        sequence.SetValue(LuaValue.FromInteger(1), LuaValue.FromInteger(10));
+        sequence.SetValue(LuaValue.FromInteger(2), LuaValue.FromInteger(20));
+        sequence.SetValue(LuaValue.FromInteger(3), LuaValue.FromInteger(30));
+
+        InvokeBaseFunction(state, insert, LuaValue.FromTable(sequence), LuaValue.FromInteger(2), LuaValue.FromInteger(15));
+        sequence.GetValue(LuaValue.FromInteger(1)).AsInteger().ShouldBe(10);
+        sequence.GetValue(LuaValue.FromInteger(2)).AsInteger().ShouldBe(15);
+        sequence.GetValue(LuaValue.FromInteger(3)).AsInteger().ShouldBe(20);
+        sequence.GetValue(LuaValue.FromInteger(4)).AsInteger().ShouldBe(30);
+
+        InvokeBaseFunction(state, remove, LuaValue.FromTable(sequence), LuaValue.FromInteger(4))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(30);
+        sequence.GetValue(LuaValue.FromInteger(3)).AsInteger().ShouldBe(20);
+        sequence.GetValue(LuaValue.FromInteger(4)).IsNil.ShouldBeTrue();
+
+        var destination = new LuaTable();
+        InvokeBaseFunction(
+                state,
+                move,
+                LuaValue.FromTable(sequence),
+                LuaValue.FromInteger(1),
+                LuaValue.FromInteger(3),
+                LuaValue.FromInteger(2),
+                LuaValue.FromTable(destination))
+            .ShouldHaveSingleItem()
+            .AsTable().ShouldBeSameAs(destination);
+        destination.GetValue(LuaValue.FromInteger(2)).AsInteger().ShouldBe(10);
+        destination.GetValue(LuaValue.FromInteger(3)).AsInteger().ShouldBe(15);
+        destination.GetValue(LuaValue.FromInteger(4)).AsInteger().ShouldBe(20);
+
+        var sortable = new LuaTable();
+        sortable.SetValue(LuaValue.FromInteger(1), LuaValue.FromInteger(5));
+        sortable.SetValue(LuaValue.FromInteger(2), LuaValue.FromInteger(2));
+        sortable.SetValue(LuaValue.FromInteger(3), LuaValue.FromInteger(8));
+        sortable.SetValue(LuaValue.FromInteger(4), LuaValue.FromInteger(1));
+        var descending = new LuaClosure(
+            "descending",
+            body: new LuaNativeClosureBody(static (_, _, arguments) =>
+            [
+                LuaValue.FromBoolean(arguments[0].AsInteger() > arguments[1].AsInteger())
+            ]));
+
+        InvokeBaseFunction(state, sort, LuaValue.FromTable(sortable), LuaValue.FromFunction(descending));
+        sortable.GetValue(LuaValue.FromInteger(1)).AsInteger().ShouldBe(8);
+        sortable.GetValue(LuaValue.FromInteger(2)).AsInteger().ShouldBe(5);
+        sortable.GetValue(LuaValue.FromInteger(3)).AsInteger().ShouldBe(2);
+        sortable.GetValue(LuaValue.FromInteger(4)).AsInteger().ShouldBe(1);
+
+        var packed = InvokeBaseFunction(
+                state,
+                pack,
+                LuaValue.FromString("x"),
+                LuaValue.Nil,
+                LuaValue.FromString("z"))
+            .ShouldHaveSingleItem()
+            .AsTable();
+        packed.GetValue(LuaValue.FromString("n")).AsInteger().ShouldBe(3);
+
+        var unpacked = InvokeBaseFunction(
+            state,
+            unpack,
+            LuaValue.FromTable(packed),
+            LuaValue.FromInteger(1),
+            LuaValue.FromInteger(3));
+        unpacked.Length.ShouldBe(3);
+        unpacked[0].AsString().ShouldBe("x");
+        unpacked[1].IsNil.ShouldBeTrue();
+        unpacked[2].AsString().ShouldBe("z");
+    }
+
+    [Fact]
+    public void MathLibrary_ShouldSupportCoreOperations()
+    {
+        var state = new LuaState();
+        var abs = state.MathLibrary.GetValue(LuaValue.FromString("abs")).AsFunction();
+        var ceil = state.MathLibrary.GetValue(LuaValue.FromString("ceil")).AsFunction();
+        var floor = state.MathLibrary.GetValue(LuaValue.FromString("floor")).AsFunction();
+        var max = state.MathLibrary.GetValue(LuaValue.FromString("max")).AsFunction();
+        var min = state.MathLibrary.GetValue(LuaValue.FromString("min")).AsFunction();
+        var sqrt = state.MathLibrary.GetValue(LuaValue.FromString("sqrt")).AsFunction();
+        var log = state.MathLibrary.GetValue(LuaValue.FromString("log")).AsFunction();
+        var sin = state.MathLibrary.GetValue(LuaValue.FromString("sin")).AsFunction();
+        var atan = state.MathLibrary.GetValue(LuaValue.FromString("atan")).AsFunction();
+        var fmod = state.MathLibrary.GetValue(LuaValue.FromString("fmod")).AsFunction();
+        var modf = state.MathLibrary.GetValue(LuaValue.FromString("modf")).AsFunction();
+        var tointeger = state.MathLibrary.GetValue(LuaValue.FromString("tointeger")).AsFunction();
+        var type = state.MathLibrary.GetValue(LuaValue.FromString("type")).AsFunction();
+        var ult = state.MathLibrary.GetValue(LuaValue.FromString("ult")).AsFunction();
+
+        InvokeBaseFunction(state, abs, LuaValue.FromInteger(-5))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(5);
+        InvokeBaseFunction(state, ceil, LuaValue.FromFloat(2.2))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(3);
+        InvokeBaseFunction(state, floor, LuaValue.FromFloat(2.8))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(2);
+        InvokeBaseFunction(state, max, LuaValue.FromInteger(1), LuaValue.FromInteger(9), LuaValue.FromInteger(3))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(9);
+        InvokeBaseFunction(state, min, LuaValue.FromInteger(1), LuaValue.FromInteger(9), LuaValue.FromInteger(3))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(1);
+        InvokeBaseFunction(state, sqrt, LuaValue.FromInteger(81))
+            .ShouldHaveSingleItem()
+            .AsFloat().ShouldBe(9d, 1e-12);
+        InvokeBaseFunction(state, log, LuaValue.FromFloat(Math.Exp(3d)))
+            .ShouldHaveSingleItem()
+            .AsFloat().ShouldBe(3d, 1e-12);
+        InvokeBaseFunction(state, sin, LuaValue.FromFloat(Math.PI / 2d))
+            .ShouldHaveSingleItem()
+            .AsFloat().ShouldBe(1d, 1e-12);
+        InvokeBaseFunction(state, atan, LuaValue.FromInteger(1), LuaValue.FromInteger(1))
+            .ShouldHaveSingleItem()
+            .AsFloat().ShouldBe(Math.PI / 4d, 1e-12);
+        InvokeBaseFunction(state, fmod, LuaValue.FromInteger(17), LuaValue.FromInteger(5))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(2);
+
+        var modfResults = InvokeBaseFunction(state, modf, LuaValue.FromFloat(-3.75));
+        modfResults.Length.ShouldBe(2);
+        modfResults[0].AsInteger().ShouldBe(-3);
+        modfResults[1].AsFloat().ShouldBe(-0.75, 1e-12);
+
+        InvokeBaseFunction(state, tointeger, LuaValue.FromFloat(9d))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(9);
+        InvokeBaseFunction(state, type, LuaValue.FromInteger(1))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("integer");
+        InvokeBaseFunction(state, type, LuaValue.FromFloat(1.5))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("float");
+        InvokeBaseFunction(state, ult, LuaValue.FromInteger(0), LuaValue.FromInteger(-1))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeTrue();
+
+        state.MathLibrary.GetValue(LuaValue.FromString("huge")).AsFloat().ShouldBe(double.PositiveInfinity);
+        state.MathLibrary.GetValue(LuaValue.FromString("maxinteger")).AsInteger().ShouldBe(long.MaxValue);
+        state.MathLibrary.GetValue(LuaValue.FromString("mininteger")).AsInteger().ShouldBe(long.MinValue);
+    }
+
+    [Fact]
+    public void Utf8Library_ShouldSupportCoreOperations()
+    {
+        var state = new LuaState();
+        var offset = state.Utf8Library.GetValue(LuaValue.FromString("offset")).AsFunction();
+        var codepoint = state.Utf8Library.GetValue(LuaValue.FromString("codepoint")).AsFunction();
+        var charFunction = state.Utf8Library.GetValue(LuaValue.FromString("char")).AsFunction();
+        var len = state.Utf8Library.GetValue(LuaValue.FromString("len")).AsFunction();
+        var codes = state.Utf8Library.GetValue(LuaValue.FromString("codes")).AsFunction();
+        var text = LuaValue.FromString("Aπ文");
+
+        var firstOffset = InvokeBaseFunction(state, offset, text, LuaValue.FromInteger(1), LuaValue.FromInteger(1));
+        firstOffset.Length.ShouldBe(2);
+        firstOffset[0].AsInteger().ShouldBe(1);
+        firstOffset[1].AsInteger().ShouldBe(1);
+
+        var secondOffset = InvokeBaseFunction(state, offset, text, LuaValue.FromInteger(2), LuaValue.FromInteger(1));
+        secondOffset.Length.ShouldBe(2);
+        secondOffset[0].AsInteger().ShouldBe(2);
+        secondOffset[1].AsInteger().ShouldBe(3);
+
+        var codepoints = InvokeBaseFunction(state, codepoint, text, LuaValue.FromInteger(1), LuaValue.FromInteger(-1));
+        codepoints.Length.ShouldBe(3);
+        codepoints[0].AsInteger().ShouldBe(65);
+        codepoints[1].AsInteger().ShouldBe(960);
+        codepoints[2].AsInteger().ShouldBe(25991);
+
+        InvokeBaseFunction(state, charFunction, LuaValue.FromInteger(65), LuaValue.FromInteger(960), LuaValue.FromInteger(25991))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("Aπ文");
+
+        InvokeBaseFunction(state, len, text)
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(3);
+
+        var codesState = InvokeBaseFunction(state, codes, text);
+        codesState.Length.ShouldBe(3);
+        var iterator = codesState[0].AsFunction();
+
+        var first = InvokeBaseFunction(state, iterator, text, LuaValue.FromInteger(0));
+        first.Length.ShouldBe(2);
+        first[0].AsInteger().ShouldBe(1);
+        first[1].AsInteger().ShouldBe(65);
+
+        var second = InvokeBaseFunction(state, iterator, text, first[0]);
+        second.Length.ShouldBe(2);
+        second[0].AsInteger().ShouldBe(2);
+        second[1].AsInteger().ShouldBe(960);
+
+        var third = InvokeBaseFunction(state, iterator, text, second[0]);
+        third.Length.ShouldBe(2);
+        third[0].AsInteger().ShouldBe(4);
+        third[1].AsInteger().ShouldBe(25991);
+
+        InvokeBaseFunction(state, iterator, text, third[0]).ShouldBeEmpty();
     }
 
     [Fact]

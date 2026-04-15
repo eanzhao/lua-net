@@ -32,19 +32,37 @@ public sealed class LuaState
         new LuaClosure(
             "ipairsaux",
             body: new LuaNativeClosureBody(IPairsAux)));
+    private static readonly LuaValue Utf8CodesStrictIteratorFunction = LuaValue.FromFunction(
+        new LuaClosure(
+            "utf8.codes.iter",
+            body: new LuaNativeClosureBody(Utf8CodesIteratorStrict)));
+    private static readonly LuaValue Utf8CodesLaxIteratorFunction = LuaValue.FromFunction(
+        new LuaClosure(
+            "utf8.codes.iterlax",
+            body: new LuaNativeClosureBody(Utf8CodesIteratorLax)));
     private static readonly byte[] BinaryChunkSignature = [0x1B, (byte)'L', (byte)'u', (byte)'a'];
+    private static readonly UTF8Encoding StrictUtf8Encoding = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    private const int MaxUnicode = 0x10FFFF;
+    private const string InvalidUtf8CodeMessage = "invalid UTF-8 code";
+    private const string Utf8CharPattern = "[\0-\x7F\xC2-\xFD][\x80-\xBF]*";
 
     public LuaState()
     {
         Stack = new LuaStack();
         GlobalEnvironment = new LuaTable("_ENV");
         StringLibrary = new LuaTable("string");
+        TableLibrary = new LuaTable("table");
+        MathLibrary = new LuaTable("math");
+        Utf8Library = new LuaTable("utf8");
         PackageLibrary = new LuaTable("package");
         PackageLoaded = new LuaTable("package.loaded");
         PackagePreload = new LuaTable("package.preload");
         PackageSearchers = new LuaTable("package.searchers");
         RegisterBaseFunctions();
         RegisterStringSupport();
+        RegisterTableSupport();
+        RegisterMathSupport();
+        RegisterUtf8Support();
         RegisterPackageSupport();
     }
 
@@ -53,6 +71,12 @@ public sealed class LuaState
     public LuaTable GlobalEnvironment { get; }
 
     public LuaTable StringLibrary { get; }
+
+    public LuaTable TableLibrary { get; }
+
+    public LuaTable MathLibrary { get; }
+
+    public LuaTable Utf8Library { get; }
 
     public LuaTable PackageLibrary { get; }
 
@@ -143,6 +167,63 @@ public sealed class LuaState
         RegisterLibraryFunction(metatable, "__unm", StringUnaryMinus, "__unm");
         metatable.SetValue(LuaValue.FromString("__index"), LuaValue.FromTable(StringLibrary));
         SetTypeMetatable(LuaValueKind.String, metatable);
+    }
+
+    private void RegisterTableSupport()
+    {
+        RegisterLibraryFunction(TableLibrary, "concat", TableConcat, "table.concat");
+        RegisterLibraryFunction(TableLibrary, "insert", TableInsert, "table.insert");
+        RegisterLibraryFunction(TableLibrary, "remove", TableRemove, "table.remove");
+        RegisterLibraryFunction(TableLibrary, "move", TableMove, "table.move");
+        RegisterLibraryFunction(TableLibrary, "sort", TableSort, "table.sort");
+        RegisterLibraryFunction(TableLibrary, "pack", TablePack, "table.pack");
+        RegisterLibraryFunction(TableLibrary, "unpack", TableUnpack, "table.unpack");
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("table"), LuaValue.FromTable(TableLibrary));
+    }
+
+    private void RegisterMathSupport()
+    {
+        RegisterLibraryFunction(MathLibrary, "abs", MathAbs, "math.abs");
+        RegisterLibraryFunction(MathLibrary, "ceil", MathCeil, "math.ceil");
+        RegisterLibraryFunction(MathLibrary, "floor", MathFloor, "math.floor");
+        RegisterLibraryFunction(MathLibrary, "max", MathMax, "math.max");
+        RegisterLibraryFunction(MathLibrary, "min", MathMin, "math.min");
+        RegisterLibraryFunction(MathLibrary, "sqrt", MathSqrt, "math.sqrt");
+        RegisterLibraryFunction(MathLibrary, "log", MathLog, "math.log");
+        RegisterLibraryFunction(MathLibrary, "exp", MathExp, "math.exp");
+        RegisterLibraryFunction(MathLibrary, "sin", MathSin, "math.sin");
+        RegisterLibraryFunction(MathLibrary, "cos", MathCos, "math.cos");
+        RegisterLibraryFunction(MathLibrary, "tan", MathTan, "math.tan");
+        RegisterLibraryFunction(MathLibrary, "asin", MathAsin, "math.asin");
+        RegisterLibraryFunction(MathLibrary, "acos", MathAcos, "math.acos");
+        RegisterLibraryFunction(MathLibrary, "atan", MathAtan, "math.atan");
+        RegisterLibraryFunction(MathLibrary, "deg", MathDeg, "math.deg");
+        RegisterLibraryFunction(MathLibrary, "rad", MathRad, "math.rad");
+        RegisterLibraryFunction(MathLibrary, "fmod", MathFMod, "math.fmod");
+        RegisterLibraryFunction(MathLibrary, "modf", MathModF, "math.modf");
+        RegisterLibraryFunction(MathLibrary, "tointeger", MathToInteger, "math.tointeger");
+        RegisterLibraryFunction(MathLibrary, "type", MathType, "math.type");
+        RegisterLibraryFunction(MathLibrary, "ult", MathUnsignedLessThan, "math.ult");
+
+        MathLibrary.SetValue(LuaValue.FromString("pi"), LuaValue.FromFloat(Math.PI));
+        MathLibrary.SetValue(LuaValue.FromString("huge"), LuaValue.FromFloat(double.PositiveInfinity));
+        MathLibrary.SetValue(LuaValue.FromString("maxinteger"), LuaValue.FromInteger(long.MaxValue));
+        MathLibrary.SetValue(LuaValue.FromString("mininteger"), LuaValue.FromInteger(long.MinValue));
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("math"), LuaValue.FromTable(MathLibrary));
+    }
+
+    private void RegisterUtf8Support()
+    {
+        RegisterLibraryFunction(Utf8Library, "offset", Utf8Offset, "utf8.offset");
+        RegisterLibraryFunction(Utf8Library, "codepoint", Utf8CodePoint, "utf8.codepoint");
+        RegisterLibraryFunction(Utf8Library, "char", Utf8Char, "utf8.char");
+        RegisterLibraryFunction(Utf8Library, "len", Utf8Len, "utf8.len");
+        RegisterLibraryFunction(Utf8Library, "codes", Utf8Codes, "utf8.codes");
+        Utf8Library.SetValue(LuaValue.FromString("charpattern"), LuaValue.FromString(Utf8CharPattern));
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("utf8"), LuaValue.FromTable(Utf8Library));
     }
 
     private void RegisterBaseFunction(string name, LuaNativeFunction function)
@@ -710,6 +791,719 @@ public sealed class LuaState
         throw CreateRuntimeError($"attempt to perform arithmetic on a '{GetTypeName(value)}'");
     }
 
+    private static LuaValue[] TableConcat(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var table = RequireTableArgument(arguments, 0, "table.concat");
+        var separator = GetOptionalStringArgument(arguments, 1, string.Empty, "table.concat");
+        var start = GetOptionalIntegerArgument(arguments, 2, 1, "table.concat");
+        var end = GetOptionalIntegerArgument(arguments, 3, table.GetSequenceLength(), "table.concat");
+        if (start > end)
+        {
+            return [LuaValue.FromString(string.Empty)];
+        }
+
+        var builder = new StringBuilder();
+        for (var index = start; index <= end; index++)
+        {
+            var field = table.GetValue(LuaValue.FromInteger(index));
+            if (!TryConvertToStringArgument(field, out var text))
+            {
+                throw CreateRuntimeError(
+                    $"invalid value ({GetTypeName(field)}) at index {index.ToString(System.Globalization.CultureInfo.InvariantCulture)} in table for 'concat'");
+            }
+
+            if (index > start)
+            {
+                builder.Append(separator);
+            }
+
+            builder.Append(text);
+        }
+
+        return [LuaValue.FromString(builder.ToString())];
+    }
+
+    private static LuaValue[] TableInsert(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var table = RequireTableArgument(arguments, 0, "table.insert");
+        var firstEmptyIndex = checked(table.GetSequenceLength() + 1);
+
+        long position;
+        LuaValue value;
+        switch (arguments.Count)
+        {
+            case 2:
+                position = firstEmptyIndex;
+                value = arguments[1];
+                break;
+            case 3:
+                position = RequireIntegerArgument(arguments, 1, "table.insert");
+                if (position < 1 || position > firstEmptyIndex)
+                {
+                    throw CreateArgumentError("table.insert", 2, "position out of bounds");
+                }
+
+                value = arguments[2];
+                for (var index = firstEmptyIndex; index > position; index--)
+                {
+                    table.SetValue(
+                        LuaValue.FromInteger(index),
+                        table.GetValue(LuaValue.FromInteger(index - 1)));
+                }
+
+                break;
+            default:
+                throw CreateRuntimeError("wrong number of arguments to 'insert'");
+        }
+
+        table.SetValue(LuaValue.FromInteger(position), value);
+        return [];
+    }
+
+    private static LuaValue[] TableRemove(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var table = RequireTableArgument(arguments, 0, "table.remove");
+        var size = table.GetSequenceLength();
+        var position = arguments.Count > 1 && !arguments[1].IsNil
+            ? RequireIntegerArgument(arguments, 1, "table.remove")
+            : size;
+
+        if (position != size && (position < 1 || position > size + 1))
+        {
+            throw CreateArgumentError("table.remove", 2, "position out of bounds");
+        }
+
+        var result = table.GetValue(LuaValue.FromInteger(position));
+        var index = position;
+        for (; index < size; index++)
+        {
+            table.SetValue(
+                LuaValue.FromInteger(index),
+                table.GetValue(LuaValue.FromInteger(index + 1)));
+        }
+
+        table.SetValue(LuaValue.FromInteger(index), LuaValue.Nil);
+        return [result];
+    }
+
+    private static LuaValue[] TableMove(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var source = RequireTableArgument(arguments, 0, "table.move");
+        var from = RequireIntegerArgument(arguments, 1, "table.move");
+        var to = RequireIntegerArgument(arguments, 2, "table.move");
+        var target = RequireIntegerArgument(arguments, 3, "table.move");
+        var destination = arguments.Count > 4 && !arguments[4].IsNil
+            ? RequireTableArgument(arguments, 4, "table.move")
+            : source;
+
+        if (to >= from)
+        {
+            long count;
+            try
+            {
+                count = checked(to - from + 1);
+            }
+            catch (OverflowException)
+            {
+                throw CreateArgumentError("table.move", 3, "too many elements to move");
+            }
+
+            try
+            {
+                _ = checked(target + count - 1);
+            }
+            catch (OverflowException)
+            {
+                throw CreateArgumentError("table.move", 4, "destination wrap around");
+            }
+
+            if (!ReferenceEquals(source, destination) || target <= from || target > to)
+            {
+                for (var offset = 0L; offset < count; offset++)
+                {
+                    destination.SetValue(
+                        LuaValue.FromInteger(target + offset),
+                        source.GetValue(LuaValue.FromInteger(from + offset)));
+                }
+            }
+            else
+            {
+                for (var offset = count - 1; offset >= 0; offset--)
+                {
+                    destination.SetValue(
+                        LuaValue.FromInteger(target + offset),
+                        source.GetValue(LuaValue.FromInteger(from + offset)));
+                }
+            }
+        }
+
+        return [LuaValue.FromTable(destination)];
+    }
+
+    private static LuaValue[] TableSort(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var table = RequireTableArgument(arguments, 0, "table.sort");
+        LuaValue? comparator = null;
+        if (arguments.Count > 1 && !arguments[1].IsNil)
+        {
+            if (arguments[1].Kind != LuaValueKind.Function)
+            {
+                throw CreateArgumentTypeError("table.sort", 2, "function", arguments[1]);
+            }
+
+            comparator = arguments[1];
+        }
+
+        var length = table.GetSequenceLength();
+        if (length <= 1)
+        {
+            return [];
+        }
+
+        if (length > int.MaxValue)
+        {
+            throw CreateArgumentError("table.sort", 1, "array too big");
+        }
+
+        var values = new LuaValue[(int)length];
+        for (var index = 0; index < length; index++)
+        {
+            values[index] = table.GetValue(LuaValue.FromInteger(index + 1));
+        }
+
+        Array.Sort(values, (left, right) => CompareTableSortValues(state, left, right, comparator));
+
+        for (var index = 1; index < values.Length; index++)
+        {
+            if (CompareTableSortValues(state, values[index], values[index - 1], comparator) < 0)
+            {
+                throw CreateRuntimeError("invalid order function for sorting");
+            }
+        }
+
+        for (var index = 0; index < values.Length; index++)
+        {
+            table.SetValue(LuaValue.FromInteger(index + 1), values[index]);
+        }
+
+        return [];
+    }
+
+    private static LuaValue[] TablePack(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var table = new LuaTable("table.pack", arrayCapacity: arguments.Count, hashCapacity: 1);
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            table.SetValue(LuaValue.FromInteger(index + 1), arguments[index]);
+        }
+
+        table.SetValue(LuaValue.FromString("n"), LuaValue.FromInteger(arguments.Count));
+        return [LuaValue.FromTable(table)];
+    }
+
+    private static LuaValue[] TableUnpack(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var table = RequireTableArgument(arguments, 0, "table.unpack");
+        var start = GetOptionalIntegerArgument(arguments, 1, 1, "table.unpack");
+        var end = GetOptionalIntegerArgument(arguments, 2, table.GetSequenceLength(), "table.unpack");
+        if (start > end)
+        {
+            return [];
+        }
+
+        long resultCount;
+        try
+        {
+            resultCount = checked(end - start + 1);
+        }
+        catch (OverflowException)
+        {
+            throw CreateRuntimeError("too many results to unpack");
+        }
+
+        if (resultCount > int.MaxValue)
+        {
+            throw CreateRuntimeError("too many results to unpack");
+        }
+
+        var results = new LuaValue[(int)resultCount];
+        for (var index = 0; index < results.Length; index++)
+        {
+            results[index] = table.GetValue(LuaValue.FromInteger(start + index));
+        }
+
+        return results;
+    }
+
+    private static LuaValue[] MathAbs(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireNumberArgument(arguments, 0, "math.abs");
+        if (value.Kind == LuaValueKind.Integer)
+        {
+            var integer = value.AsInteger();
+            if (integer < 0)
+            {
+                integer = unchecked((long)(0UL - (ulong)integer));
+            }
+
+            return [LuaValue.FromInteger(integer)];
+        }
+
+        return [LuaValue.FromFloat(Math.Abs(ToDouble(value)))];
+    }
+
+    private static LuaValue[] MathCeil(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireNumberArgument(arguments, 0, "math.ceil");
+        return value.Kind == LuaValueKind.Integer
+            ? [value]
+            : [CreateNumericResult(Math.Ceiling(ToDouble(value)))];
+    }
+
+    private static LuaValue[] MathFloor(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireNumberArgument(arguments, 0, "math.floor");
+        return value.Kind == LuaValueKind.Integer
+            ? [value]
+            : [CreateNumericResult(Math.Floor(ToDouble(value)))];
+    }
+
+    private static LuaValue[] MathMax(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var best = RequireNumberArgument(arguments, 0, "math.max");
+        var bestNumber = ToDouble(best);
+
+        for (var index = 1; index < arguments.Count; index++)
+        {
+            var candidate = RequireNumberArgument(arguments, index, "math.max");
+            var candidateNumber = ToDouble(candidate);
+            if (candidateNumber > bestNumber)
+            {
+                best = candidate;
+                bestNumber = candidateNumber;
+            }
+        }
+
+        return [best];
+    }
+
+    private static LuaValue[] MathMin(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var best = RequireNumberArgument(arguments, 0, "math.min");
+        var bestNumber = ToDouble(best);
+
+        for (var index = 1; index < arguments.Count; index++)
+        {
+            var candidate = RequireNumberArgument(arguments, index, "math.min");
+            var candidateNumber = ToDouble(candidate);
+            if (candidateNumber < bestNumber)
+            {
+                best = candidate;
+                bestNumber = candidateNumber;
+            }
+        }
+
+        return [best];
+    }
+
+    private static LuaValue[] MathSqrt(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(Math.Sqrt(RequireDoubleArgument(arguments, 0, "math.sqrt")))];
+    }
+
+    private static LuaValue[] MathLog(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireDoubleArgument(arguments, 0, "math.log");
+        double result;
+        if (arguments.Count < 2 || arguments[1].IsNil)
+        {
+            result = Math.Log(value);
+        }
+        else
+        {
+            var numberBase = RequireDoubleArgument(arguments, 1, "math.log");
+            result = numberBase switch
+            {
+                2d => Math.Log2(value),
+                10d => Math.Log10(value),
+                _ => Math.Log(value) / Math.Log(numberBase)
+            };
+        }
+
+        return [LuaValue.FromFloat(result)];
+    }
+
+    private static LuaValue[] MathExp(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(Math.Exp(RequireDoubleArgument(arguments, 0, "math.exp")))];
+    }
+
+    private static LuaValue[] MathSin(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(Math.Sin(RequireDoubleArgument(arguments, 0, "math.sin")))];
+    }
+
+    private static LuaValue[] MathCos(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(Math.Cos(RequireDoubleArgument(arguments, 0, "math.cos")))];
+    }
+
+    private static LuaValue[] MathTan(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(Math.Tan(RequireDoubleArgument(arguments, 0, "math.tan")))];
+    }
+
+    private static LuaValue[] MathAsin(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(Math.Asin(RequireDoubleArgument(arguments, 0, "math.asin")))];
+    }
+
+    private static LuaValue[] MathAcos(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(Math.Acos(RequireDoubleArgument(arguments, 0, "math.acos")))];
+    }
+
+    private static LuaValue[] MathAtan(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var y = RequireDoubleArgument(arguments, 0, "math.atan");
+        var x = arguments.Count > 1 && !arguments[1].IsNil
+            ? RequireDoubleArgument(arguments, 1, "math.atan")
+            : 1d;
+        return [LuaValue.FromFloat(Math.Atan2(y, x))];
+    }
+
+    private static LuaValue[] MathDeg(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(RequireDoubleArgument(arguments, 0, "math.deg") * (180d / Math.PI))];
+    }
+
+    private static LuaValue[] MathRad(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.FromFloat(RequireDoubleArgument(arguments, 0, "math.rad") * (Math.PI / 180d))];
+    }
+
+    private static LuaValue[] MathFMod(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var left = RequireNumberArgument(arguments, 0, "math.fmod");
+        var right = RequireNumberArgument(arguments, 1, "math.fmod");
+        if (left.Kind == LuaValueKind.Integer && right.Kind == LuaValueKind.Integer)
+        {
+            var divisor = right.AsInteger();
+            if (divisor == 0)
+            {
+                throw CreateArgumentError("math.fmod", 2, "zero");
+            }
+
+            if (divisor == -1)
+            {
+                return [LuaValue.FromInteger(0)];
+            }
+
+            return [LuaValue.FromInteger(left.AsInteger() % divisor)];
+        }
+
+        var leftNumber = ToDouble(left);
+        var rightNumber = ToDouble(right);
+        var quotient = Math.Truncate(leftNumber / rightNumber);
+        return [LuaValue.FromFloat(leftNumber - (quotient * rightNumber))];
+    }
+
+    private static LuaValue[] MathModF(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireNumberArgument(arguments, 0, "math.modf");
+        if (value.Kind == LuaValueKind.Integer)
+        {
+            return [value, LuaValue.FromFloat(0d)];
+        }
+
+        var number = ToDouble(value);
+        var integerPart = number < 0d ? Math.Ceiling(number) : Math.Floor(number);
+        return
+        [
+            CreateNumericResult(integerPart),
+            LuaValue.FromFloat(number == integerPart ? 0d : number - integerPart)
+        ];
+    }
+
+    private static LuaValue[] MathToInteger(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireArgument(arguments, 0, "math.tointeger");
+        if (TryConvertToNumber(value, out var number) && TryGetInteger(number, out var integer))
+        {
+            return [LuaValue.FromInteger(integer)];
+        }
+
+        return [LuaValue.Nil];
+    }
+
+    private static LuaValue[] MathType(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireArgument(arguments, 0, "math.type");
+        return value.Kind switch
+        {
+            LuaValueKind.Integer => [LuaValue.FromString("integer")],
+            LuaValueKind.Float => [LuaValue.FromString("float")],
+            _ => [LuaValue.Nil]
+        };
+    }
+
+    private static LuaValue[] MathUnsignedLessThan(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var left = RequireIntegerArgument(arguments, 0, "math.ult");
+        var right = RequireIntegerArgument(arguments, 1, "math.ult");
+        return [LuaValue.FromBoolean(unchecked((ulong)left) < unchecked((ulong)right))];
+    }
+
+    private static LuaValue[] Utf8Offset(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var text = RequireStringArgument(arguments, 0, "utf8.offset");
+        var bytes = GetUtf8Bytes(text);
+        var count = RequireIntegerArgument(arguments, 1, "utf8.offset");
+        var defaultPosition = count >= 0 ? 1L : bytes.Length + 1L;
+        var position = ResolveRelativePosition(
+            arguments.Count > 2 && !arguments[2].IsNil
+                ? RequireIntegerArgument(arguments, 2, "utf8.offset")
+                : defaultPosition,
+            bytes.Length);
+
+        if (position < 1 || position > bytes.Length + 1L)
+        {
+            throw CreateArgumentError("utf8.offset", 3, "position out of bounds");
+        }
+
+        var index = (int)(position - 1);
+        if (count == 0)
+        {
+            while (index > 0 && index < bytes.Length && IsUtf8ContinuationByte(bytes[index]))
+            {
+                index--;
+            }
+        }
+        else
+        {
+            if (index < bytes.Length && IsUtf8ContinuationByte(bytes[index]))
+            {
+                throw CreateRuntimeError("initial position is a continuation byte");
+            }
+
+            if (count < 0)
+            {
+                while (count < 0 && index > 0)
+                {
+                    do
+                    {
+                        index--;
+                    }
+                    while (index > 0 && IsUtf8ContinuationByte(bytes[index]));
+
+                    count++;
+                }
+            }
+            else
+            {
+                count--;
+                while (count > 0 && index < bytes.Length)
+                {
+                    do
+                    {
+                        index++;
+                    }
+                    while (index < bytes.Length && IsUtf8ContinuationByte(bytes[index]));
+
+                    count--;
+                }
+            }
+        }
+
+        if (count != 0)
+        {
+            return [LuaValue.Nil];
+        }
+
+        var start = index + 1;
+        var end = start;
+        if (index < bytes.Length && (bytes[index] & 0x80) != 0)
+        {
+            if (IsUtf8ContinuationByte(bytes[index]))
+            {
+                throw CreateRuntimeError("initial position is a continuation byte");
+            }
+
+            while (index + 1 < bytes.Length && IsUtf8ContinuationByte(bytes[index + 1]))
+            {
+                index++;
+            }
+
+            end = index + 1;
+        }
+
+        return [LuaValue.FromInteger(start), LuaValue.FromInteger(end)];
+    }
+
+    private static LuaValue[] Utf8CodePoint(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var text = RequireStringArgument(arguments, 0, "utf8.codepoint");
+        var bytes = GetUtf8Bytes(text);
+        var start = ResolveRelativePosition(
+            arguments.Count > 1 && !arguments[1].IsNil
+                ? RequireIntegerArgument(arguments, 1, "utf8.codepoint")
+                : 1L,
+            bytes.Length);
+        var end = ResolveRelativePosition(
+            arguments.Count > 2 && !arguments[2].IsNil
+                ? RequireIntegerArgument(arguments, 2, "utf8.codepoint")
+                : start,
+            bytes.Length);
+        var lax = arguments.Count > 3 && IsTruthy(arguments[3]);
+
+        if (start < 1)
+        {
+            throw CreateArgumentError("utf8.codepoint", 2, "out of bounds");
+        }
+
+        if (end > bytes.Length)
+        {
+            throw CreateArgumentError("utf8.codepoint", 3, "out of bounds");
+        }
+
+        if (start > end)
+        {
+            return [];
+        }
+
+        var results = new List<LuaValue>();
+        for (var index = (int)(start - 1); index < end;)
+        {
+            if (!TryDecodeUtf8(bytes, index, strict: !lax, out var nextIndex, out var codePoint))
+            {
+                throw CreateRuntimeError(InvalidUtf8CodeMessage);
+            }
+
+            results.Add(LuaValue.FromInteger(codePoint));
+            index = nextIndex;
+        }
+
+        return results.ToArray();
+    }
+
+    private static LuaValue[] Utf8Char(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var builder = new StringBuilder();
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            var codePoint = RequireIntegerArgument(arguments, index, "utf8.char");
+            if (codePoint < 0 ||
+                codePoint > MaxUnicode ||
+                codePoint is >= 0xD800 and <= 0xDFFF)
+            {
+                throw CreateArgumentError("utf8.char", index + 1, "value out of range");
+            }
+
+            builder.Append(new Rune((int)codePoint));
+        }
+
+        return [LuaValue.FromString(builder.ToString())];
+    }
+
+    private static LuaValue[] Utf8Len(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var text = RequireStringArgument(arguments, 0, "utf8.len");
+        var bytes = GetUtf8Bytes(text);
+        var start = ResolveRelativePosition(
+            arguments.Count > 1 && !arguments[1].IsNil
+                ? RequireIntegerArgument(arguments, 1, "utf8.len")
+                : 1L,
+            bytes.Length);
+        var end = ResolveRelativePosition(
+            arguments.Count > 2 && !arguments[2].IsNil
+                ? RequireIntegerArgument(arguments, 2, "utf8.len")
+                : -1L,
+            bytes.Length);
+        var lax = arguments.Count > 3 && IsTruthy(arguments[3]);
+
+        if (start < 1 || start > bytes.Length + 1L)
+        {
+            throw CreateArgumentError("utf8.len", 2, "initial position out of bounds");
+        }
+
+        if (end > bytes.Length)
+        {
+            throw CreateArgumentError("utf8.len", 3, "final position out of bounds");
+        }
+
+        long count = 0;
+        for (var index = (int)(start - 1); index <= end - 1;)
+        {
+            if (!TryDecodeUtf8(bytes, index, strict: !lax, out var nextIndex, out _))
+            {
+                return [LuaValue.Nil, LuaValue.FromInteger(index + 1)];
+            }
+
+            count++;
+            index = nextIndex;
+        }
+
+        return [LuaValue.FromInteger(count)];
+    }
+
+    private static LuaValue[] Utf8Codes(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var text = RequireStringArgument(arguments, 0, "utf8.codes");
+        var bytes = GetUtf8Bytes(text);
+        if (bytes.Length > 0 && IsUtf8ContinuationByte(bytes[0]))
+        {
+            throw CreateArgumentError("utf8.codes", 1, InvalidUtf8CodeMessage);
+        }
+
+        var lax = arguments.Count > 1 && IsTruthy(arguments[1]);
+        return
+        [
+            lax ? Utf8CodesLaxIteratorFunction : Utf8CodesStrictIteratorFunction,
+            LuaValue.FromString(text),
+            LuaValue.FromInteger(0)
+        ];
+    }
+
+    private static LuaValue[] Utf8CodesIteratorStrict(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return Utf8CodesIterator(arguments, strict: true);
+    }
+
+    private static LuaValue[] Utf8CodesIteratorLax(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return Utf8CodesIterator(arguments, strict: false);
+    }
+
+    private static LuaValue[] Utf8CodesIterator(IReadOnlyList<LuaValue> arguments, bool strict)
+    {
+        var text = RequireStringArgument(arguments, 0, "utf8.codes.iter");
+        var bytes = GetUtf8Bytes(text);
+        var lastIndex = RequireIntegerArgument(arguments, 1, "utf8.codes.iter");
+        var index = unchecked((ulong)lastIndex);
+
+        if (index < (ulong)bytes.Length)
+        {
+            while (index < (ulong)bytes.Length && IsUtf8ContinuationByte(bytes[(int)index]))
+            {
+                index++;
+            }
+        }
+
+        if (index >= (ulong)bytes.Length)
+        {
+            return [];
+        }
+
+        var currentIndex = (int)index;
+        if (!TryDecodeUtf8(bytes, currentIndex, strict, out var nextIndex, out var codePoint) ||
+            (nextIndex < bytes.Length && IsUtf8ContinuationByte(bytes[nextIndex])))
+        {
+            throw CreateRuntimeError(InvalidUtf8CodeMessage);
+        }
+
+        return [LuaValue.FromInteger(currentIndex + 1), LuaValue.FromInteger(codePoint)];
+    }
+
     private static LuaValue[] Assert(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
 
@@ -908,6 +1702,58 @@ public sealed class LuaState
         throw CreateArgumentTypeError(functionName, index + 1, "string", value);
     }
 
+    private static LuaTable RequireTableArgument(IReadOnlyList<LuaValue> arguments, int index, string functionName)
+    {
+        var value = RequireArgument(arguments, index, functionName);
+        if (value.Kind == LuaValueKind.Table)
+        {
+            return value.AsTable();
+        }
+
+        throw CreateArgumentTypeError(functionName, index + 1, "table", value);
+    }
+
+    private static LuaValue RequireNumberArgument(IReadOnlyList<LuaValue> arguments, int index, string functionName)
+    {
+        var value = RequireArgument(arguments, index, functionName);
+        if (TryConvertToNumber(value, out var number))
+        {
+            return number;
+        }
+
+        throw CreateArgumentTypeError(functionName, index + 1, "number", value);
+    }
+
+    private static long RequireIntegerArgument(IReadOnlyList<LuaValue> arguments, int index, string functionName)
+    {
+        var value = RequireArgument(arguments, index, functionName);
+        if (TryConvertToNumber(value, out var number) && TryGetInteger(number, out var integer))
+        {
+            return integer;
+        }
+
+        throw CreateArgumentTypeError(functionName, index + 1, "integer", value);
+    }
+
+    private static long GetOptionalIntegerArgument(
+        IReadOnlyList<LuaValue> arguments,
+        int index,
+        long defaultValue,
+        string functionName)
+    {
+        if (index >= arguments.Count || arguments[index].IsNil)
+        {
+            return defaultValue;
+        }
+
+        return RequireIntegerArgument(arguments, index, functionName);
+    }
+
+    private static double RequireDoubleArgument(IReadOnlyList<LuaValue> arguments, int index, string functionName)
+    {
+        return ToDouble(RequireNumberArgument(arguments, index, functionName));
+    }
+
     private static bool TryConvertToStringArgument(LuaValue value, out string text)
     {
         switch (value.Kind)
@@ -923,6 +1769,162 @@ public sealed class LuaState
                 text = string.Empty;
                 return false;
         }
+    }
+
+    private static int CompareTableSortValues(
+        LuaState state,
+        LuaValue left,
+        LuaValue right,
+        LuaValue? comparator)
+    {
+        if (comparator is not null)
+        {
+            if (IsTruthy(InvokeSortComparator(state, comparator.Value, left, right)))
+            {
+                return -1;
+            }
+
+            if (IsTruthy(InvokeSortComparator(state, comparator.Value, right, left)))
+            {
+                return 1;
+            }
+
+            return 0;
+        }
+
+        return CompareSortableValues(left, right);
+    }
+
+    private static LuaValue InvokeSortComparator(LuaState state, LuaValue comparator, LuaValue left, LuaValue right)
+    {
+        var results = state.InvokeCallable(comparator, [left, right]);
+        return results.Length == 0 ? LuaValue.Nil : results[0];
+    }
+
+    private static int CompareSortableValues(LuaValue left, LuaValue right)
+    {
+        if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
+        {
+            return leftNumber.CompareTo(rightNumber);
+        }
+
+        if (left.Kind == LuaValueKind.String && right.Kind == LuaValueKind.String)
+        {
+            return string.CompareOrdinal(left.AsString(), right.AsString());
+        }
+
+        throw CreateRuntimeError($"attempt to compare {GetTypeName(left)} with {GetTypeName(right)}");
+    }
+
+    private static double ToDouble(LuaValue value)
+    {
+        return value.Kind == LuaValueKind.Integer
+            ? value.AsInteger()
+            : value.AsFloat();
+    }
+
+    private static LuaValue CreateNumericResult(double value)
+    {
+        return double.IsFinite(value) &&
+               value >= long.MinValue &&
+               value <= long.MaxValue &&
+               Math.Truncate(value) == value
+            ? LuaValue.FromInteger((long)value)
+            : LuaValue.FromFloat(value);
+    }
+
+    private static long ResolveRelativePosition(long position, int length)
+    {
+        if (position >= 0)
+        {
+            return position;
+        }
+
+        return 0UL - unchecked((ulong)position) > (ulong)length
+            ? 0
+            : length + position + 1;
+    }
+
+    private static byte[] GetUtf8Bytes(string text)
+    {
+        try
+        {
+            return StrictUtf8Encoding.GetBytes(text);
+        }
+        catch (EncoderFallbackException)
+        {
+            throw CreateRuntimeError(InvalidUtf8CodeMessage);
+        }
+    }
+
+    private static bool IsUtf8ContinuationByte(byte value)
+    {
+        return (value & 0xC0) == 0x80;
+    }
+
+    private static bool TryDecodeUtf8(
+        ReadOnlySpan<byte> bytes,
+        int index,
+        bool strict,
+        out int nextIndex,
+        out int codePoint)
+    {
+        ReadOnlySpan<int> limits = [int.MaxValue, 0x80, 0x800, 0x10000, 0x200000, 0x4000000];
+        if ((uint)index >= (uint)bytes.Length)
+        {
+            nextIndex = default;
+            codePoint = default;
+            return false;
+        }
+
+        var first = bytes[index];
+        var result = 0;
+        var lastIndex = index;
+        if (first < 0x80)
+        {
+            result = first;
+        }
+        else
+        {
+            var leading = first;
+            var count = 0;
+            while ((leading & 0x40) != 0)
+            {
+                count++;
+                var continuationIndex = index + count;
+                if ((uint)continuationIndex >= (uint)bytes.Length || !IsUtf8ContinuationByte(bytes[continuationIndex]))
+                {
+                    nextIndex = default;
+                    codePoint = default;
+                    return false;
+                }
+
+                result = (result << 6) | (bytes[continuationIndex] & 0x3F);
+                leading <<= 1;
+            }
+
+            result |= (leading & 0x7F) << (count * 5);
+            if (count > 5 || result > 0x7FFFFFFF || result < limits[count])
+            {
+                nextIndex = default;
+                codePoint = default;
+                return false;
+            }
+
+            lastIndex += count;
+        }
+
+        if (strict &&
+            (result > MaxUnicode || result is >= 0xD800 and <= 0xDFFF))
+        {
+            nextIndex = default;
+            codePoint = default;
+            return false;
+        }
+
+        nextIndex = lastIndex + 1;
+        codePoint = result;
+        return true;
     }
 
     private static LuaValue[] ExecuteStringBinaryArithmetic(

@@ -1914,6 +1914,97 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleTableLibraryChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("table_library_chunk.luac"));
+
+        results.Length.ShouldBe(16);
+        results[0].AsString().ShouldBe("a-b-3");
+        results[1].AsInteger().ShouldBe(10);
+        results[2].AsInteger().ShouldBe(15);
+        results[3].AsInteger().ShouldBe(20);
+        results[4].AsInteger().ShouldBe(30);
+        results[5].AsInteger().ShouldBe(10);
+        results[6].AsInteger().ShouldBe(15);
+        results[7].AsInteger().ShouldBe(20);
+        results[8].AsInteger().ShouldBe(8);
+        results[9].AsInteger().ShouldBe(5);
+        results[10].AsInteger().ShouldBe(2);
+        results[11].AsInteger().ShouldBe(1);
+        results[12].AsInteger().ShouldBe(3);
+        results[13].AsString().ShouldBe("x");
+        results[14].IsNil.ShouldBeTrue();
+        results[15].AsString().ShouldBe("z");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleMathLibraryChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("math_library_chunk.luac"));
+
+        results.Length.ShouldBe(26);
+        results[0].AsInteger().ShouldBe(5);
+        results[1].AsFloat().ShouldBe(2.5d, 1e-12);
+        results[2].AsInteger().ShouldBe(3);
+        results[3].AsInteger().ShouldBe(2);
+        results[4].AsInteger().ShouldBe(9);
+        results[5].AsInteger().ShouldBe(1);
+        results[6].AsFloat().ShouldBe(9d, 1e-12);
+        results[7].AsFloat().ShouldBe(3d, 1e-12);
+        results[8].AsFloat().ShouldBe(1d, 1e-12);
+        results[9].AsFloat().ShouldBe(1d, 1e-12);
+        results[10].AsFloat().ShouldBe(0d, 1e-12);
+        results[11].AsFloat().ShouldBe(Math.PI / 2d, 1e-12);
+        results[12].AsFloat().ShouldBe(0d, 1e-12);
+        results[13].AsFloat().ShouldBe(Math.PI / 4d, 1e-12);
+        results[14].AsFloat().ShouldBe(180d, 1e-12);
+        results[15].AsFloat().ShouldBe(Math.PI, 1e-12);
+        results[16].AsInteger().ShouldBe(2);
+        results[17].AsInteger().ShouldBe(-3);
+        results[18].AsFloat().ShouldBe(-0.75d, 1e-12);
+        results[19].AsInteger().ShouldBe(9);
+        results[20].AsString().ShouldBe("integer");
+        results[21].AsString().ShouldBe("float");
+        results[22].AsBoolean().ShouldBeTrue();
+        results[23].AsBoolean().ShouldBeTrue();
+        results[24].AsInteger().ShouldBe(long.MaxValue);
+        results[25].AsInteger().ShouldBe(long.MinValue);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleUtf8LibraryChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("utf8_library_chunk.luac"));
+
+        results.Length.ShouldBe(16);
+        results[0].AsInteger().ShouldBe(3);
+        results[1].AsInteger().ShouldBe(1);
+        results[2].AsInteger().ShouldBe(1);
+        results[3].AsInteger().ShouldBe(2);
+        results[4].AsInteger().ShouldBe(3);
+        results[5].AsInteger().ShouldBe(65);
+        results[6].AsInteger().ShouldBe(960);
+        results[7].AsInteger().ShouldBe(25991);
+        results[8].AsString().ShouldBe("Aπ文");
+        results[9].AsInteger().ShouldBe(1);
+        results[10].AsInteger().ShouldBe(65);
+        results[11].AsInteger().ShouldBe(2);
+        results[12].AsInteger().ShouldBe(960);
+        results[13].AsInteger().ShouldBe(4);
+        results[14].AsInteger().ShouldBe(25991);
+        results[15].AsBoolean().ShouldBeTrue();
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Call_ShouldWrapClrExceptionsFromNativeClosures()
     {
         var closure = new LuaClosure(
