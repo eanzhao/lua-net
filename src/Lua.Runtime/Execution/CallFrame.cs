@@ -73,12 +73,15 @@ public sealed class CallFrame
             var trackedRegister = _toBeClosedRegisters[index];
             if (trackedRegister < registerIndex)
             {
-                continue;
+                break;
             }
 
             registers.Add(trackedRegister);
             _toBeClosedRegisters.RemoveAt(index);
         }
+
+        registers.Sort();
+        registers.Reverse();
 
         return registers;
     }
@@ -113,19 +116,20 @@ public sealed class CallFrame
         }
 
         var keysToClose = new List<int>();
-        foreach (var (key, upvalue) in _openUpvalues)
+        foreach (var key in _openUpvalues.Keys)
         {
-            if (key < registerIndex)
+            if (key >= registerIndex)
             {
-                continue;
+                keysToClose.Add(key);
             }
-
-            upvalue.Close(state);
-            keysToClose.Add(key);
         }
+
+        keysToClose.Sort();
+        keysToClose.Reverse();
 
         foreach (var key in keysToClose)
         {
+            _openUpvalues[key].Close(state);
             _openUpvalues.Remove(key);
         }
     }

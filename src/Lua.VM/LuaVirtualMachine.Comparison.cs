@@ -106,34 +106,14 @@ public sealed partial class LuaVirtualMachine
 
     private static bool AreEqual(LuaValue left, LuaValue right)
     {
-        if (left.Kind == right.Kind)
+        if (left.Kind != right.Kind)
         {
-            if (left == right)
-            {
-                return true;
-            }
-
-            if (left.Kind == LuaValueKind.Table &&
-                TryGetMetamethod(left, GetMetamethodName(EqualityMetamethodEvent), out _))
-            {
-                return false;
-            }
-
-            return left == right;
+            return TryGetNumber(left, out var leftNumber) &&
+                   TryGetNumber(right, out var rightNumber) &&
+                   leftNumber.Equals(rightNumber);
         }
 
-        if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
-        {
-            return leftNumber.Equals(rightNumber);
-        }
-
-        if (left.Kind == right.Kind &&
-            (left.Kind == LuaValueKind.Table || left.Kind == LuaValueKind.UserData))
-        {
-            return false;
-        }
-
-        return false;
+        return left == right;
     }
 
     private bool AreEqualWithMetamethod(LuaValue left, LuaValue right)

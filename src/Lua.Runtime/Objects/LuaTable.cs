@@ -1,3 +1,4 @@
+using Lua.Runtime.Execution;
 using Lua.Runtime.Values;
 
 namespace Lua.Runtime.Objects;
@@ -59,7 +60,7 @@ public sealed class LuaTable : IMetatableOwner
     {
         if (key.IsNil)
         {
-            throw new ArgumentException("Table index is nil.", nameof(key));
+            throw new LuaRuntimeException(LuaValue.FromString("table index is nil"));
         }
 
         if (key.Kind == LuaValueKind.Float)
@@ -67,7 +68,7 @@ public sealed class LuaTable : IMetatableOwner
             var number = key.AsFloat();
             if (double.IsNaN(number))
             {
-                throw new ArgumentException("Table index is NaN.", nameof(key));
+                throw new LuaRuntimeException(LuaValue.FromString("table index is NaN"));
             }
 
             if (double.IsFinite(number) &&

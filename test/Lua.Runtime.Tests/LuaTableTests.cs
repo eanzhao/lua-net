@@ -1,3 +1,4 @@
+using Lua.Runtime.Execution;
 using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
 using Shouldly;
@@ -61,6 +62,39 @@ public class LuaTableTests
 
         table.TryGetValue(LuaValue.FromFloat(1.0), out var value).ShouldBeTrue();
         value.AsString().ShouldBe("lua");
+    }
+
+    [Fact]
+    public void SetValue_ShouldRejectNilKey()
+    {
+        var table = new LuaTable();
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            table.SetValue(LuaValue.Nil, LuaValue.FromInteger(1)));
+
+        exception.ErrorObject.AsString().ShouldBe("table index is nil");
+    }
+
+    [Fact]
+    public void SetValue_ShouldRejectNaNKey()
+    {
+        var table = new LuaTable();
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            table.SetValue(LuaValue.FromFloat(double.NaN), LuaValue.FromInteger(1)));
+
+        exception.ErrorObject.AsString().ShouldBe("table index is NaN");
+    }
+
+    [Fact]
+    public void GetSequenceLength_ShouldHandleGaps()
+    {
+        var table = new LuaTable();
+
+        table.SetValue(LuaValue.FromInteger(1), LuaValue.FromString("a"));
+        table.SetValue(LuaValue.FromInteger(3), LuaValue.FromString("c"));
+
+        table.GetSequenceLength().ShouldBe(1);
     }
 
     [Fact]

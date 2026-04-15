@@ -226,9 +226,20 @@ public sealed partial class LuaVirtualMachine
                 continue;
             }
 
-            upvalues[index] = descriptor.InStack != 0
-                ? parentFrame.GetOrCreateOpenUpvalue(descriptor.Index)
-                : parentFrame.Closure.Upvalues[descriptor.Index];
+            if (descriptor.InStack != 0)
+            {
+                upvalues[index] = parentFrame.GetOrCreateOpenUpvalue(descriptor.Index);
+            }
+            else
+            {
+                if (descriptor.Index >= parentFrame.Closure.Upvalues.Length)
+                {
+                    throw new InvalidOperationException(
+                        $"Upvalue index {descriptor.Index} out of range (parent has {parentFrame.Closure.Upvalues.Length} upvalues).");
+                }
+
+                upvalues[index] = parentFrame.Closure.Upvalues[descriptor.Index];
+            }
         }
 
         return upvalues;

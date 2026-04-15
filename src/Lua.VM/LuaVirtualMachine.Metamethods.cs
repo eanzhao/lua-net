@@ -73,7 +73,7 @@ public sealed partial class LuaVirtualMachine
         }
 
         throw new LuaRuntimeException(
-            LuaValue.FromString($"no metamethod '{metamethodName}' for {left.Kind} and {right.Kind}"));
+            LuaValue.FromString($"no metamethod '{metamethodName}' for {GetTypeName(left)} and {GetTypeName(right)}"));
     }
 
     private LuaValue CallBinaryMetamethodResult(LuaValue left, LuaValue right, int eventIndex)

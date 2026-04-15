@@ -416,7 +416,7 @@ public class LuaStateTests
     }
 
     [Fact]
-    public void CallFrame_ShouldTrackToBeClosedRegistersInReverseRegistrationOrder()
+    public void CallFrame_ShouldCloseToBeClosedRegistersInDescendingOrder()
     {
         var frame = new CallFrame(new LuaClosure("main"), baseIndex: 0, expectedResults: 0);
 
@@ -428,8 +428,8 @@ public class LuaStateTests
         var remaining = frame.ConsumeToBeClosedRegistersFrom(0);
 
         closed.Count.ShouldBe(2);
-        closed[0].ShouldBe(2);
-        closed[1].ShouldBe(3);
+        closed[0].ShouldBe(3);
+        closed[1].ShouldBe(2);
         remaining.Count.ShouldBe(1);
         remaining[0].ShouldBe(1);
     }
@@ -456,6 +456,103 @@ public class LuaStateTests
         frame.SetRegisterTop(5);
 
         frame.RegisterTop.ShouldBe(5);
+    }
+
+    [Fact]
+    public void Error_ShouldThrowLuaRuntimeException()
+    {
+        var state = new LuaState();
+        var error = GetBaseFunction(state, "error");
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, error, LuaValue.FromString("test error")));
+
+        exception.ErrorObject.AsString().ShouldBe("test error");
+    }
+
+    [Fact]
+    public void Error_ShouldThrowNilWhenCalledWithNoArguments()
+    {
+        var state = new LuaState();
+        var error = GetBaseFunction(state, "error");
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, error));
+
+        exception.ErrorObject.IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Select_ShouldRejectIndexZero()
+    {
+        var state = new LuaState();
+        var select = GetBaseFunction(state, "select");
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, select, LuaValue.FromInteger(0), LuaValue.FromInteger(1)));
+
+        exception.ErrorObject.AsString().ShouldContain("index out of range");
+    }
+
+    [Fact]
+    public void Select_ShouldReturnEmptyForIndexBeyondArguments()
+    {
+        var state = new LuaState();
+        var select = GetBaseFunction(state, "select");
+
+        var results = InvokeBaseFunction(
+            state, select, LuaValue.FromInteger(5),
+            LuaValue.FromInteger(10), LuaValue.FromInteger(20));
+
+        results.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ToNumber_ShouldRejectInvalidBase()
+    {
+        var state = new LuaState();
+        var tonumber = GetBaseFunction(state, "tonumber");
+
+        Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, tonumber, LuaValue.FromString("10"), LuaValue.FromInteger(1)));
+
+        Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, tonumber, LuaValue.FromString("10"), LuaValue.FromInteger(37)));
+    }
+
+    [Fact]
+    public void ToNumber_ShouldReturnNilForNonNumericStrings()
+    {
+        var state = new LuaState();
+        var tonumber = GetBaseFunction(state, "tonumber");
+
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString("abc"))
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
+
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString(""))
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Assert_ShouldUseDefaultMessageWhenNoneProvided()
+    {
+        var state = new LuaState();
+        var assert = GetBaseFunction(state, "assert");
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, assert, LuaValue.Nil));
+
+        exception.ErrorObject.AsString().ShouldBe("assertion failed!");
+    }
+
+    [Fact]
+    public void PopFrame_ShouldRejectEmptyStack()
+    {
+        var state = new LuaState();
+
+        Should.Throw<InvalidOperationException>(() => state.PopFrame());
     }
 
     private static LuaClosure GetBaseFunction(LuaState state, string name)
