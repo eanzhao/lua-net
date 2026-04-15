@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -8,8 +8,8 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Lua.Bytecode\Lua.Bytecode.csproj" />
-        <ProjectReference Include="..\Lua.Compiler\Lua.Compiler.csproj" />
         <ProjectReference Include="..\Lua.Runtime\Lua.Runtime.csproj" />
+        <ProjectReference Include="..\Lua.Syntax\Lua.Syntax.csproj" />
     </ItemGroup>
 
 </Project>

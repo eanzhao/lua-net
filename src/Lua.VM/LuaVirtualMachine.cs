@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using Lua.Bytecode.Chunks;
 using Lua.Bytecode.Instructions;
+using Lua.Compiler;
 using Lua.Runtime.Execution;
 using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
@@ -42,6 +43,7 @@ public sealed partial class LuaVirtualMachine
         State = new LuaState();
         State.SetCallableInvoker(CallValue);
         State.SetBinaryChunkLoader(LoadBinaryChunk);
+        State.SetTextChunkLoader(LoadTextChunk);
         State.SetCoroutineResumer(ResumeCoroutine);
         State.SetCoroutineCloser(CloseCoroutine);
     }
@@ -132,6 +134,12 @@ public sealed partial class LuaVirtualMachine
     {
         var reader = new LuaChunkReader();
         var chunk = reader.Read(chunkBytes.ToArray(), chunkName);
+        return CreateRootClosure(chunk.MainFunction, debugName: null, environment: hasEnvironment ? environment : null);
+    }
+
+    private LuaClosure LoadTextChunk(ReadOnlyMemory<byte> chunkBytes, string? chunkName, bool hasEnvironment, LuaValue environment)
+    {
+        var chunk = LuaCompiler.Compile(chunkBytes, chunkName);
         return CreateRootClosure(chunk.MainFunction, debugName: null, environment: hasEnvironment ? environment : null);
     }
 

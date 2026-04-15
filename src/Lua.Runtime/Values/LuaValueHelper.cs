@@ -1,3 +1,4 @@
+using System.Globalization;
 using Lua.Runtime.Objects;
 
 namespace Lua.Runtime.Values;
@@ -44,6 +45,29 @@ public static class LuaValueHelper
         }
 
         result = default;
+        return false;
+    }
+
+    public static bool TryParseLuaStringNumber(string text, out LuaValue result)
+    {
+        var span = text.AsSpan().Trim();
+        if (span.IsEmpty)
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        if (TryParseLuaHexNumber(span, out result))
+        {
+            return true;
+        }
+
+        if (TryParseLuaDecimalNumber(span, out result))
+        {
+            return true;
+        }
+
+        result = LuaValue.Nil;
         return false;
     }
 
@@ -242,6 +266,177 @@ public static class LuaValueHelper
         }
 
         return remainder;
+    }
+
+    private static bool TryParseLuaDecimalNumber(ReadOnlySpan<char> text, out LuaValue result)
+    {
+        var treatsAsFloat = text.IndexOfAny('.', 'e', 'E') >= 0;
+        if (!treatsAsFloat &&
+            long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var integer))
+        {
+            result = LuaValue.FromInteger(integer);
+            return true;
+        }
+
+        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+        {
+            result = LuaValue.FromFloat(number);
+            return true;
+        }
+
+        result = LuaValue.Nil;
+        return false;
+    }
+
+    private static bool TryParseLuaHexNumber(ReadOnlySpan<char> text, out LuaValue result)
+    {
+        var index = 0;
+        var negative = false;
+        if (text[index] is '+' or '-')
+        {
+            negative = text[index] == '-';
+            index++;
+        }
+
+        if (index + 2 > text.Length ||
+            text[index] != '0' ||
+            (text[index + 1] != 'x' && text[index + 1] != 'X'))
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        index += 2;
+        if (index >= text.Length)
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        var digitsStart = index;
+        var integerPart = 0d;
+        while (index < text.Length && TryGetHexDigit(text[index], out var integerDigit))
+        {
+            integerPart = (integerPart * 16d) + integerDigit;
+            index++;
+        }
+
+        var fractionPart = 0d;
+        var fractionDivisor = 16d;
+        if (index < text.Length && text[index] == '.')
+        {
+            index++;
+            while (index < text.Length && TryGetHexDigit(text[index], out var fractionDigit))
+            {
+                fractionPart += fractionDigit / fractionDivisor;
+                fractionDivisor *= 16d;
+                index++;
+            }
+        }
+
+        var hasDigits = index > digitsStart;
+        if (!hasDigits)
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        var exponent = 0;
+        var hasExponent = false;
+        if (index < text.Length && (text[index] == 'p' || text[index] == 'P'))
+        {
+            hasExponent = true;
+            index++;
+            if (index >= text.Length)
+            {
+                result = LuaValue.Nil;
+                return false;
+            }
+
+            var exponentNegative = false;
+            if (text[index] is '+' or '-')
+            {
+                exponentNegative = text[index] == '-';
+                index++;
+            }
+
+            if (index >= text.Length || !char.IsAsciiDigit(text[index]))
+            {
+                result = LuaValue.Nil;
+                return false;
+            }
+
+            while (index < text.Length && char.IsAsciiDigit(text[index]))
+            {
+                exponent = (exponent * 10) + (text[index] - '0');
+                index++;
+            }
+
+            if (exponentNegative)
+            {
+                exponent = -exponent;
+            }
+        }
+
+        if (index != text.Length)
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        if (!hasExponent && fractionPart == 0d)
+        {
+            return TryParseLuaHexInteger(text, negative, out result);
+        }
+
+        var number = (integerPart + fractionPart) * Math.Pow(2d, exponent);
+        if (negative)
+        {
+            number = -number;
+        }
+
+        result = LuaValue.FromFloat(number);
+        return true;
+    }
+
+    private static bool TryParseLuaHexInteger(ReadOnlySpan<char> text, bool negative, out LuaValue result)
+    {
+        var prefixStart = text[0] is '+' or '-' ? 3 : 2;
+        var digits = text[prefixStart..];
+        if (!ulong.TryParse(digits, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var number))
+        {
+            result = LuaValue.Nil;
+            return false;
+        }
+
+        result = negative
+            ? LuaValue.FromInteger(unchecked((long)(0UL - number)))
+            : LuaValue.FromInteger(unchecked((long)number));
+        return true;
+    }
+
+    private static bool TryGetHexDigit(char c, out int digit)
+    {
+        if (c is >= '0' and <= '9')
+        {
+            digit = c - '0';
+            return true;
+        }
+
+        if (c is >= 'a' and <= 'f')
+        {
+            digit = (c - 'a') + 10;
+            return true;
+        }
+
+        if (c is >= 'A' and <= 'F')
+        {
+            digit = (c - 'A') + 10;
+            return true;
+        }
+
+        digit = default;
+        return false;
     }
 
     private static bool NoMetamethod(out LuaValue metamethod)

@@ -14,6 +14,12 @@ public sealed partial class LuaState
         bool hasEnvironment,
         LuaValue environment);
 
+    public delegate LuaClosure TextChunkLoader(
+        ReadOnlyMemory<byte> chunkBytes,
+        string? chunkName,
+        bool hasEnvironment,
+        LuaValue environment);
+
     private enum WarningMode
     {
         Off,
@@ -24,6 +30,7 @@ public sealed partial class LuaState
     private readonly Dictionary<LuaValueKind, LuaTable> _typeMetatables = [];
     private readonly StringBuilder _warningBuffer = new();
     private BinaryChunkLoader? _binaryChunkLoader;
+    private TextChunkLoader? _textChunkLoader;
     private Func<LuaValue, IReadOnlyList<LuaValue>, LuaValue[]>? _callableInvoker;
     private Func<LuaThread, IReadOnlyList<LuaValue>, LuaValue[]>? _coroutineResumer;
     private Func<LuaThread, LuaValue[]>? _coroutineCloser;
@@ -303,6 +310,12 @@ public sealed partial class LuaState
     {
         ArgumentNullException.ThrowIfNull(binaryChunkLoader);
         _binaryChunkLoader = binaryChunkLoader;
+    }
+
+    public void SetTextChunkLoader(TextChunkLoader textChunkLoader)
+    {
+        ArgumentNullException.ThrowIfNull(textChunkLoader);
+        _textChunkLoader = textChunkLoader;
     }
 
     public void SetCoroutineResumer(Func<LuaThread, IReadOnlyList<LuaValue>, LuaValue[]> coroutineResumer)
@@ -2050,7 +2063,24 @@ public sealed partial class LuaState
             return [LuaValue.Nil, LuaValue.FromString($"attempt to load a text chunk (mode is '{mode}')")];
         }
 
-        return [LuaValue.Nil, LuaValue.FromString("text chunks are not supported yet")];
+        if (_textChunkLoader is null)
+        {
+            return [LuaValue.Nil, LuaValue.FromString("text chunk loading is not configured")];
+        }
+
+        try
+        {
+            var loadedClosure = _textChunkLoader(chunkBytes, chunkName, hasEnvironment, environment);
+            return [LuaValue.FromFunction(loadedClosure)];
+        }
+        catch (LuaRuntimeException ex)
+        {
+            return [LuaValue.Nil, ex.ErrorObject];
+        }
+        catch (Exception ex)
+        {
+            return [LuaValue.Nil, LuaValue.FromString(ex.Message)];
+        }
     }
 
     private (LuaValue Loader, LuaValue LoaderData) FindPackageLoader(string moduleName)
@@ -2218,181 +2248,11 @@ public sealed partial class LuaState
                 result = value;
                 return true;
             case LuaValueKind.String:
-                return TryParseLuaStringNumber(value.AsString(), out result);
+                return LuaValueHelper.TryParseLuaStringNumber(value.AsString(), out result);
             default:
                 result = LuaValue.Nil;
                 return false;
         }
-    }
-
-    private static bool TryParseLuaStringNumber(string text, out LuaValue result)
-    {
-        var span = text.AsSpan().Trim();
-        if (span.IsEmpty)
-        {
-            result = LuaValue.Nil;
-            return false;
-        }
-
-        if (TryParseLuaHexNumber(span, out result))
-        {
-            return true;
-        }
-
-        if (TryParseLuaDecimalNumber(span, out result))
-        {
-            return true;
-        }
-
-        result = LuaValue.Nil;
-        return false;
-    }
-
-    private static bool TryParseLuaDecimalNumber(ReadOnlySpan<char> text, out LuaValue result)
-    {
-        var treatsAsFloat = text.IndexOfAny('.', 'e', 'E') >= 0;
-        if (!treatsAsFloat &&
-            long.TryParse(text, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var integer))
-        {
-            result = LuaValue.FromInteger(integer);
-            return true;
-        }
-
-        if (double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number))
-        {
-            result = LuaValue.FromFloat(number);
-            return true;
-        }
-
-        result = LuaValue.Nil;
-        return false;
-    }
-
-    private static bool TryParseLuaHexNumber(ReadOnlySpan<char> text, out LuaValue result)
-    {
-        var index = 0;
-        var negative = false;
-        if (text[index] is '+' or '-')
-        {
-            negative = text[index] == '-';
-            index++;
-        }
-
-        if (index + 2 > text.Length ||
-            text[index] != '0' ||
-            (text[index + 1] != 'x' && text[index + 1] != 'X'))
-        {
-            result = LuaValue.Nil;
-            return false;
-        }
-
-        index += 2;
-        if (index >= text.Length)
-        {
-            result = LuaValue.Nil;
-            return false;
-        }
-
-        var digitsStart = index;
-        var integerPart = 0d;
-        while (index < text.Length && TryGetHexDigit(text[index], out var integerDigit))
-        {
-            integerPart = (integerPart * 16d) + integerDigit;
-            index++;
-        }
-
-        var fractionPart = 0d;
-        var fractionDivisor = 16d;
-        if (index < text.Length && text[index] == '.')
-        {
-            index++;
-            while (index < text.Length && TryGetHexDigit(text[index], out var fractionDigit))
-            {
-                fractionPart += fractionDigit / fractionDivisor;
-                fractionDivisor *= 16d;
-                index++;
-            }
-        }
-
-        var hasDigits = index > digitsStart;
-        if (!hasDigits)
-        {
-            result = LuaValue.Nil;
-            return false;
-        }
-
-        var exponent = 0;
-        var hasExponent = false;
-        if (index < text.Length && (text[index] == 'p' || text[index] == 'P'))
-        {
-            hasExponent = true;
-            index++;
-            if (index >= text.Length)
-            {
-                result = LuaValue.Nil;
-                return false;
-            }
-
-            var exponentNegative = false;
-            if (text[index] is '+' or '-')
-            {
-                exponentNegative = text[index] == '-';
-                index++;
-            }
-
-            if (index >= text.Length || !char.IsAsciiDigit(text[index]))
-            {
-                result = LuaValue.Nil;
-                return false;
-            }
-
-            while (index < text.Length && char.IsAsciiDigit(text[index]))
-            {
-                exponent = (exponent * 10) + (text[index] - '0');
-                index++;
-            }
-
-            if (exponentNegative)
-            {
-                exponent = -exponent;
-            }
-        }
-
-        if (index != text.Length)
-        {
-            result = LuaValue.Nil;
-            return false;
-        }
-
-        if (!hasExponent && fractionPart == 0d)
-        {
-            return TryParseHexInteger(text, negative, out result);
-        }
-
-        var number = (integerPart + fractionPart) * Math.Pow(2d, exponent);
-        if (negative)
-        {
-            number = -number;
-        }
-
-        result = LuaValue.FromFloat(number);
-        return true;
-    }
-
-    private static bool TryParseHexInteger(ReadOnlySpan<char> text, bool negative, out LuaValue result)
-    {
-        var prefixStart = text[0] is '+' or '-' ? 3 : 2;
-        var digits = text[prefixStart..];
-        if (!ulong.TryParse(digits, System.Globalization.NumberStyles.AllowHexSpecifier, System.Globalization.CultureInfo.InvariantCulture, out var number))
-        {
-            result = LuaValue.Nil;
-            return false;
-        }
-
-        result = negative
-            ? LuaValue.FromInteger(unchecked((long)(0UL - number)))
-            : LuaValue.FromInteger(unchecked((long)number));
-        return true;
     }
 
     private static bool TryParseIntegerWithBase(string text, int numberBase, out long result)
@@ -2629,30 +2489,6 @@ public sealed partial class LuaState
         }
 
         return GetTypeName(value);
-    }
-
-    private static bool TryGetHexDigit(char c, out int digit)
-    {
-        if (c is >= '0' and <= '9')
-        {
-            digit = c - '0';
-            return true;
-        }
-
-        if (c is >= 'a' and <= 'f')
-        {
-            digit = (c - 'a') + 10;
-            return true;
-        }
-
-        if (c is >= 'A' and <= 'F')
-        {
-            digit = (c - 'A') + 10;
-            return true;
-        }
-
-        digit = default;
-        return false;
     }
 
     private static bool TryGetBaseDigit(char c, int numberBase, out int digit)

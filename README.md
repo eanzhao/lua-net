@@ -46,16 +46,16 @@ dotnet sln lua-net.sln list
 | 第 10 步 | coroutine 库 | 已完成 |
 | 第 11 步 | 词法分析 | 已完成 |
 | 第 12 步 | 语法分析与 AST | 已完成 |
-| 第 13 步 | 编译器（AST → 字节码） | 未开始 |
+| 第 13 步 | 编译器（AST → 字节码） | 进行中 |
 | 第 14 步 | io / os / package / debug 库 | 未开始 |
 | 第 15 步 | 字节码序列化与 REPL | 未开始 |
 | 第 16 步 | 兼容性收口 | 未开始 |
 
 ### 第 7 步当前覆盖范围
 
-**已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`collectgarbage`（最小版本）、`load` / `loadfile` / `dofile`（先覆盖二进制 chunk 路径）、最小 `package` / `require`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`、`print` / `warn`、最小 `string` 表（`upper` / `lower` / `len`）、字符串元表 `__index`、字符串算术元方法
+**已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`collectgarbage`（最小版本）、`load` / `loadfile` / `dofile`（二进制 chunk + Step 13 第一版文本 chunk 路径）、最小 `package` / `require`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`、`print` / `warn`、最小 `string` 表（`upper` / `lower` / `len`）、字符串元表 `__index`、字符串算术元方法
 
-**后续扩展：** `load` / `loadfile` 的文本源码路径、完整 `package` / `loadlib`、完整 GC 模式参数会在后续阶段继续展开。
+**后续扩展：** 文本 chunk 的剩余语法子集、完整 `package` / `loadlib`、完整 GC 模式参数会在后续阶段继续展开。
 
 ### 第 8 步当前覆盖范围
 
@@ -79,6 +79,9 @@ src/
 │   ├── Lexing/               LuaLexer, LuaToken, LuaSourceRange
 │   ├── Ast/                  语法树节点（chunk/block/statement/expression）
 │   └── Parsing/              LuaParser
+├── Lua.Compiler/             AST 到 LuaPrototype 的源码编译器
+│   ├── LuaCompiler.cs        作用域解析、寄存器分配、语句/表达式降级
+│   └── LuaCompilerException.cs 源码编译错误
 ├── Lua.VM/                   虚拟机执行引擎（按职责拆分为 partial class）
 │   ├── LuaVirtualMachine.cs            核心执行循环与公共 API
 │   ├── LuaVirtualMachine.Arithmetic.cs 算术、位运算、拼接、长度
@@ -94,10 +97,11 @@ test/
 ├── Lua.Runtime.Tests/        运行时单元测试（73 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（13 个）
 ├── Lua.Syntax.Tests/         词法分析与语法分析测试
+├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（6 个）
 ├── Lua.VM.Tests/             VM 集成测试（102 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（39 份）
+docs/                         阶段规划和设计文档（40 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -201,6 +205,12 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 编号 | 文档 | 主题 |
 |------|------|------|
 | 039 | [syntax-analysis-ast](docs/039-step-12-syntax-analysis-ast.md) | AST 节点、`LuaParser`、表达式/语句解析与语法错误 |
+
+### 第 13 步：编译器（第一版）
+
+| 编号 | 文档 | 主题 |
+|------|------|------|
+| 040 | [compiler-first-cut](docs/040-step-13-compiler-first-cut.md) | `Lua.Compiler`、作用域/上值解析、文本 chunk 执行链路 |
 
 ## 开发方式
 

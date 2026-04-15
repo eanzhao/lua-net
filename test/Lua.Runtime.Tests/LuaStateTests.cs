@@ -952,7 +952,7 @@ public class LuaStateTests
             .ShouldBe(
             [
                 LuaValue.Nil,
-                LuaValue.FromString("text chunks are not supported yet")
+                LuaValue.FromString("text chunk loading is not configured")
             ]);
 
         InvokeBaseFunction(state, load, LuaValue.FromString(binaryChunk), LuaValue.Nil, LuaValue.FromString("t"))[0]
