@@ -184,7 +184,7 @@ string 库函数数量多，模式匹配引擎是独立的复杂子系统。
 - token 流与源码位置追踪
 - Lua 5.5 新增保留字：`global`
 
-### 第 12 步：语法分析与 AST
+### 第 12 步：语法分析与 AST ✅
 
 - 表达式解析（优先级攀爬）
 - 语句解析（赋值、if/elseif/else、while、repeat、for、do、return、break、goto/labels）

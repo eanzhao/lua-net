@@ -45,7 +45,7 @@ dotnet sln lua-net.sln list
 | 第 9 步 | string 库与模式匹配 | 已完成 |
 | 第 10 步 | coroutine 库 | 已完成 |
 | 第 11 步 | 词法分析 | 已完成 |
-| 第 12 步 | 语法分析与 AST | 未开始 |
+| 第 12 步 | 语法分析与 AST | 已完成 |
 | 第 13 步 | 编译器（AST → 字节码） | 未开始 |
 | 第 14 步 | io / os / package / debug 库 | 未开始 |
 | 第 15 步 | 字节码序列化与 REPL | 未开始 |
@@ -75,8 +75,10 @@ src/
 │   ├── Chunks/               LuaChunk, LuaPrototype, LuaChunkReader
 │   ├── Instructions/         LuaOpcode(85), LuaInstruction, 指令格式与布局
 │   └── Disassembly/          LuaDisassembler, LuaLineInfoResolver
-├── Lua.Syntax/               词法分析、后续 parser/AST 的前端入口
-│   └── Lexing/               LuaLexer, LuaToken, LuaSourceRange
+├── Lua.Syntax/               词法分析、语法分析与 AST 前端
+│   ├── Lexing/               LuaLexer, LuaToken, LuaSourceRange
+│   ├── Ast/                  语法树节点（chunk/block/statement/expression）
+│   └── Parsing/              LuaParser
 ├── Lua.VM/                   虚拟机执行引擎（按职责拆分为 partial class）
 │   ├── LuaVirtualMachine.cs            核心执行循环与公共 API
 │   ├── LuaVirtualMachine.Arithmetic.cs 算术、位运算、拼接、长度
@@ -91,11 +93,11 @@ src/
 test/
 ├── Lua.Runtime.Tests/        运行时单元测试（73 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（13 个）
-├── Lua.Syntax.Tests/         词法分析测试
+├── Lua.Syntax.Tests/         词法分析与语法分析测试
 ├── Lua.VM.Tests/             VM 集成测试（102 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（38 份）
+docs/                         阶段规划和设计文档（39 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -193,6 +195,12 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 编号 | 文档 | 主题 |
 |------|------|------|
 | 038 | [lexical-analysis](docs/038-step-11-lexical-analysis.md) | `Lua.Syntax`、token 流、字符串/注释/数字字面量扫描 |
+
+### 第 12 步：语法分析与 AST
+
+| 编号 | 文档 | 主题 |
+|------|------|------|
+| 039 | [syntax-analysis-ast](docs/039-step-12-syntax-analysis-ast.md) | AST 节点、`LuaParser`、表达式/语句解析与语法错误 |
 
 ## 开发方式
 
