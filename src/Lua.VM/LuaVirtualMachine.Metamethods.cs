@@ -66,8 +66,8 @@ public sealed partial class LuaVirtualMachine
     {
         var metamethodName = GetMetamethodName(eventIndex);
 
-        if (TryGetMetamethod(left, metamethodName, out var metamethod) ||
-            TryGetMetamethod(right, metamethodName, out metamethod))
+        if (State.TryGetMetamethod(left, metamethodName, out var metamethod) ||
+            State.TryGetMetamethod(right, metamethodName, out metamethod))
         {
             return metamethod;
         }
@@ -106,7 +106,7 @@ public sealed partial class LuaVirtualMachine
                 return (currentCallable.AsFunction(), currentArguments);
             }
 
-            if (!TryGetMetamethod(currentCallable, GetMetamethodName(CallMetamethodEvent), out var metamethod))
+            if (!State.TryGetMetamethod(currentCallable, GetMetamethodName(CallMetamethodEvent), out var metamethod))
             {
                 throw CreateTypeError(currentCallable, "call");
             }

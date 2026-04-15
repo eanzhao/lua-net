@@ -4,6 +4,7 @@ using Lua.Runtime.Execution;
 using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
 using Shouldly;
+using System.Text;
 
 namespace Lua.VM.Tests;
 
@@ -1768,6 +1769,146 @@ public class LuaVirtualMachineTests
         results[6].AsInteger().ShouldBe(99);
         results[7].AsInteger().ShouldBe(2);
         results[8].AsInteger().ShouldBe(33);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandlePrintWarnChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var lines = new List<string>();
+        var warnings = new List<string>();
+
+        vm.State.PrintOutput = lines.Add;
+        vm.State.WarningOutput = warnings.Add;
+
+        var results = vm.Execute(ReadFixtureChunk("print_warn_chunk.luac"));
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(99);
+        lines.Count.ShouldBe(2);
+        lines[0].ShouldBe("head\t42");
+        lines[1].ShouldBe("obj\t3.0");
+        warnings.ShouldHaveSingleItem();
+        warnings[0].ShouldBe("Lua warning: abc");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleStringMethodChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("string_method_chunk.luac"));
+
+        results.Length.ShouldBe(4);
+        results[0].AsString().ShouldBe("LUA");
+        results[1].AsString().ShouldBe("net");
+        results[2].AsInteger().ShouldBe(3);
+        results[3].AsString().ShouldBe("ABC");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleStringArithmeticChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("string_arith_chunk.luac"));
+
+        results.Length.ShouldBe(9);
+        results[0].AsInteger().ShouldBe(11);
+        results[1].AsInteger().ShouldBe(9);
+        results[2].AsInteger().ShouldBe(42);
+        results[3].AsInteger().ShouldBe(1);
+        results[4].AsFloat().ShouldBe(8.0d);
+        results[5].AsFloat().ShouldBe(3.5d);
+        results[6].AsInteger().ShouldBe(3);
+        results[7].AsInteger().ShouldBe(-5);
+        results[8].AsString().ShouldBe("fallback");
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleLoadChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var loadTargetPath = GetFixturePath("chunks", "load_env_chunk.luac");
+        var loadTargetText = Encoding.Latin1.GetString(File.ReadAllBytes(loadTargetPath));
+        var readerPieces = new Queue<LuaValue>(
+        [
+            LuaValue.FromString(loadTargetText[..5]),
+            LuaValue.FromString(loadTargetText[5..]),
+            LuaValue.Nil
+        ]);
+        var reader = new LuaClosure(
+            "reader",
+            body: new LuaNativeClosureBody((_, _, _) =>
+            {
+                var next = readerPieces.Dequeue();
+                return [next];
+            }));
+
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("chunk"), LuaValue.FromString(loadTargetText));
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("path"), LuaValue.FromString(loadTargetPath));
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("reader"), LuaValue.FromFunction(reader));
+
+        var results = vm.Execute(ReadFixtureChunk("load_chunk.luac"));
+
+        results.Length.ShouldBe(4);
+        results[0].AsInteger().ShouldBe(41);
+        results[1].AsInteger().ShouldBe(42);
+        results[2].AsInteger().ShouldBe(7);
+        results[3].AsInteger().ShouldBe(11);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleCollectGarbageChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("collectgarbage_chunk.luac"));
+
+        results.Length.ShouldBe(8);
+        results[0].AsBoolean().ShouldBeTrue();
+        results[1].AsInteger().ShouldBe(0);
+        results[2].AsBoolean().ShouldBeFalse();
+        results[3].AsBoolean().ShouldBeTrue();
+        results[4].AsBoolean().ShouldBeFalse();
+        results[5].AsInteger().ShouldBe(0);
+        results[6].AsInteger().ShouldBe(0);
+        results[7].AsBoolean().ShouldBeTrue();
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Execute_ShouldHandleRequireChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var modulePath = GetFixturePath("chunks", "?.luac");
+
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("module_path"), LuaValue.FromString(modulePath));
+
+        var results = vm.Execute(ReadFixtureChunk("require_chunk.luac"));
+
+        results.Length.ShouldBe(13);
+        results[0].AsInteger().ShouldBe(1);
+        results[1].AsBoolean().ShouldBeTrue();
+        results[2].AsString().ShouldBe("pre_mod");
+        results[3].AsString().ShouldBe(":preload:");
+        results[4].AsString().ShouldBe(":preload:");
+        results[5].AsInteger().ShouldBe(1);
+        results[6].AsInteger().ShouldBe(77);
+        results[7].AsInteger().ShouldBe(77);
+        results[8].AsString().ShouldBe(GetFixturePath("chunks", "require_file_chunk.luac"));
+        results[9].AsInteger().ShouldBe(1);
+        results[10].AsBoolean().ShouldBeTrue();
+        results[11].AsBoolean().ShouldBeTrue();
+        results[12].AsString().ShouldBe(":preload:");
         vm.State.Frames.ShouldBeEmpty();
         vm.State.Stack.Count.ShouldBe(0);
     }

@@ -132,8 +132,8 @@ public sealed partial class LuaVirtualMachine
 
         if (left.Kind is LuaValueKind.Table or LuaValueKind.UserData)
         {
-            if (TryGetMetamethod(left, GetMetamethodName(EqualityMetamethodEvent), out var metamethod) ||
-                TryGetMetamethod(right, GetMetamethodName(EqualityMetamethodEvent), out metamethod))
+            if (State.TryGetMetamethod(left, GetMetamethodName(EqualityMetamethodEvent), out var metamethod) ||
+                State.TryGetMetamethod(right, GetMetamethodName(EqualityMetamethodEvent), out metamethod))
             {
                 return IsTruthy(CallMetamethodResult(metamethod.AsFunction(), left, right));
             }

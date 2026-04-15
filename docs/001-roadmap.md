@@ -88,7 +88,7 @@ test/Lua.*.Tests      单元测试、夹具测试、兼容性测试
 - `__unm` / `__bnot` / `__call`
 - userdata 的全套元方法
 
-### 第 7 步：基础库核心函数 🔧（进行中）
+### 第 7 步：基础库核心函数 ✅
 
 让真实脚本开始具备可运行性。
 
@@ -97,18 +97,26 @@ test/Lua.*.Tests      单元测试、夹具测试、兼容性测试
 - `setmetatable` / `getmetatable`（含 protected metatable）
 - `rawget` / `rawset` / `rawlen` / `rawequal`
 - `next` / `pairs` / `ipairs`
+- `collectgarbage`（最小版本）
+- `load` / `loadfile` / `dofile`（先覆盖二进制 chunk 路径）
+- 最小 `package` / `require`
 - `type` / `assert` / `select`
 - `tonumber` / `tostring`（含 `__tostring` / `__name`）
 - `pcall` / `xpcall` / `error`
 - `print` / `warn`
+- 最小 `string` 表（`upper` / `lower` / `len`）
+- 字符串元表 `__index`
+- 字符串算术元方法
 
 **待补充：**
 
-- `load` / `dofile` / `loadfile`
-- `collectgarbage`（最小版本）
-- `require`（最小版本，依赖 Step 14 的完整 package 系统）
-- 字符串元表 `__index`（让 `("hello"):upper()` 工作）
-- 字符串算术元方法（Lua 5.5 新增：`"10" + 1` → `11`）
+这一阶段计划范围已经完成。
+
+说明：
+
+- 文本 chunk 的 `load` / `loadfile` 路径依赖后续 Step 11-13 的源码编译链路
+- 完整 package 系统、C module 与 `loadlib` 仍然留在 Step 14
+- `collectgarbage` 的更完整模式参数留待后续扩展
 
 ### 第 8 步：table 库与 math 库
 

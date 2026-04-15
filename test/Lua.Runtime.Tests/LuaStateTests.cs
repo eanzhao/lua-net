@@ -2,6 +2,7 @@ using Lua.Runtime.Execution;
 using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
 using Shouldly;
+using System.Text;
 
 namespace Lua.Runtime.Tests;
 
@@ -68,6 +69,13 @@ public class LuaStateTests
         state.GlobalEnvironment.GetValue(LuaValue.FromString("next")).AsFunction().DebugName.ShouldBe("next");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("pairs")).AsFunction().DebugName.ShouldBe("pairs");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("ipairs")).AsFunction().DebugName.ShouldBe("ipairs");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("collectgarbage")).AsFunction().DebugName.ShouldBe("collectgarbage");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("load")).AsFunction().DebugName.ShouldBe("load");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("loadfile")).AsFunction().DebugName.ShouldBe("loadfile");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("dofile")).AsFunction().DebugName.ShouldBe("dofile");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("print")).AsFunction().DebugName.ShouldBe("print");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("warn")).AsFunction().DebugName.ShouldBe("warn");
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("require")).AsFunction().DebugName.ShouldBe("require");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("type")).AsFunction().DebugName.ShouldBe("type");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("assert")).AsFunction().DebugName.ShouldBe("assert");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("select")).AsFunction().DebugName.ShouldBe("select");
@@ -75,6 +83,49 @@ public class LuaStateTests
         state.GlobalEnvironment.GetValue(LuaValue.FromString("tostring")).AsFunction().DebugName.ShouldBe("tostring");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("pcall")).AsFunction().DebugName.ShouldBe("pcall");
         state.GlobalEnvironment.GetValue(LuaValue.FromString("xpcall")).AsFunction().DebugName.ShouldBe("xpcall");
+    }
+
+    [Fact]
+    public void LuaState_ShouldPreloadMinimalPackageLibrary()
+    {
+        var state = new LuaState();
+
+        var packageValue = state.GlobalEnvironment.GetValue(LuaValue.FromString("package"));
+        packageValue.Kind.ShouldBe(LuaValueKind.Table);
+
+        var packageTable = packageValue.AsTable();
+        packageTable.ShouldBeSameAs(state.PackageLibrary);
+        packageTable.GetValue(LuaValue.FromString("loaded")).AsTable().ShouldBeSameAs(state.PackageLoaded);
+        packageTable.GetValue(LuaValue.FromString("preload")).AsTable().ShouldBeSameAs(state.PackagePreload);
+        packageTable.GetValue(LuaValue.FromString("searchers")).AsTable().ShouldBeSameAs(state.PackageSearchers);
+        packageTable.GetValue(LuaValue.FromString("path")).AsString().ShouldBe("./?.luac");
+
+        state.PackageSearchers.GetValue(LuaValue.FromInteger(1)).AsFunction().DebugName.ShouldBe("package.searcher.preload");
+        state.PackageSearchers.GetValue(LuaValue.FromInteger(2)).AsFunction().DebugName.ShouldBe("package.searcher.luac");
+        state.PackageLoaded.GetValue(LuaValue.FromString("package")).AsTable().ShouldBeSameAs(state.PackageLibrary);
+    }
+
+    [Fact]
+    public void LuaState_ShouldPreloadMinimalStringLibraryAndMetatable()
+    {
+        var state = new LuaState();
+        var getMetatable = GetBaseFunction(state, "getmetatable");
+
+        var stringTableValue = state.GlobalEnvironment.GetValue(LuaValue.FromString("string"));
+        stringTableValue.Kind.ShouldBe(LuaValueKind.Table);
+
+        var stringTable = stringTableValue.AsTable();
+        stringTable.ShouldBeSameAs(state.StringLibrary);
+        stringTable.GetValue(LuaValue.FromString("upper")).AsFunction().DebugName.ShouldBe("string.upper");
+        stringTable.GetValue(LuaValue.FromString("lower")).AsFunction().DebugName.ShouldBe("string.lower");
+        stringTable.GetValue(LuaValue.FromString("len")).AsFunction().DebugName.ShouldBe("string.len");
+
+        var stringMetatable = InvokeBaseFunction(state, getMetatable, LuaValue.FromString("lua"))
+            .ShouldHaveSingleItem()
+            .AsTable();
+        stringMetatable.GetValue(LuaValue.FromString("__index")).AsTable().ShouldBeSameAs(state.StringLibrary);
+        stringMetatable.GetValue(LuaValue.FromString("__add")).AsFunction().DebugName.ShouldBe("__add");
+        stringMetatable.GetValue(LuaValue.FromString("__unm")).AsFunction().DebugName.ShouldBe("__unm");
     }
 
     [Fact]
@@ -322,6 +373,417 @@ public class LuaStateTests
             InvokeBaseFunction(state, next, LuaValue.FromTable(table), LuaValue.FromString("missing")));
 
         exception.ErrorObject.AsString().ShouldBe("invalid key to 'next'");
+    }
+
+    [Fact]
+    public void PrintAndWarn_ShouldUseLuaSemantics()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var print = GetBaseFunction(state, "print");
+        var warn = GetBaseFunction(state, "warn");
+        var lines = new List<string>();
+        var warnings = new List<string>();
+        var table = new LuaTable();
+        var metatable = new LuaTable();
+
+        state.PrintOutput = lines.Add;
+        state.WarningOutput = warnings.Add;
+
+        metatable.SetValue(
+            LuaValue.FromString("__tostring"),
+            LuaValue.FromFunction(new LuaClosure(
+                "__tostring",
+                body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromString("obj")]))));
+        table.SetMetatable(metatable);
+
+        InvokeBaseFunction(
+            state,
+            print,
+            LuaValue.FromString("head"),
+            LuaValue.FromInteger(42),
+            LuaValue.FromTable(table))
+            .ShouldBeEmpty();
+
+        InvokeBaseFunction(state, warn, LuaValue.FromString("hidden")).ShouldBeEmpty();
+        InvokeBaseFunction(state, warn, LuaValue.FromString("@on")).ShouldBeEmpty();
+        InvokeBaseFunction(
+            state,
+            warn,
+            LuaValue.FromString("a"),
+            LuaValue.FromInteger(42),
+            LuaValue.FromString("z"))
+            .ShouldBeEmpty();
+        InvokeBaseFunction(state, warn, LuaValue.FromString("@off")).ShouldBeEmpty();
+        InvokeBaseFunction(state, warn, LuaValue.FromString("hidden-again")).ShouldBeEmpty();
+
+        lines.ShouldHaveSingleItem();
+        lines[0].ShouldBe("head\t42\tobj");
+        warnings.ShouldHaveSingleItem();
+        warnings[0].ShouldBe("Lua warning: a42z");
+    }
+
+    [Fact]
+    public void LoadLoadFileAndDoFile_ShouldUseBinaryChunkSemantics()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var load = GetBaseFunction(state, "load");
+        var loadfile = GetBaseFunction(state, "loadfile");
+        var dofile = GetBaseFunction(state, "dofile");
+        var envTable = new LuaTable();
+        var chunkBytes = new byte[] { 0x1B, (byte)'L', (byte)'u', (byte)'a', 0x55, 0x66 };
+        var chunkText = Encoding.Latin1.GetString(chunkBytes);
+        var readerPieces = new Queue<LuaValue>(
+        [
+            LuaValue.FromString(chunkText[..3]),
+            LuaValue.FromString(chunkText[3..]),
+            LuaValue.Nil
+        ]);
+        var loaded = new List<(string? ChunkName, bool HasEnvironment, LuaValue Environment, byte[] Bytes)>();
+
+        state.SetBinaryChunkLoader((bytes, chunkName, hasEnvironment, environment) =>
+        {
+            loaded.Add((chunkName, hasEnvironment, environment, bytes.ToArray()));
+            return new LuaClosure(
+                chunkName ?? "loaded",
+                upvalueCount: 1,
+                body: new LuaNativeClosureBody((innerState, closure, _) =>
+                [
+                    LuaValue.FromString(closure.DebugName ?? "loaded"),
+                    LuaValue.FromInteger(closure.Upvalues[0].GetValue(innerState).AsInteger())
+                ]),
+                upvalues:
+                [
+                    new LuaUpvalue(hasEnvironment ? environment : LuaValue.FromInteger(-1))
+                ]);
+        });
+        state.FileReader = path =>
+        {
+            path.ShouldBe("fixture.luac");
+            return chunkBytes;
+        };
+
+        var fromString = InvokeBaseFunction(
+            state,
+            load,
+            LuaValue.FromString(chunkText),
+            LuaValue.FromString("=(string)"),
+            LuaValue.FromString("b"),
+            LuaValue.FromInteger(41));
+        fromString.Length.ShouldBe(1);
+        fromString[0].Kind.ShouldBe(LuaValueKind.Function);
+        state.InvokeCallable(fromString[0], []).ShouldBe(
+        [
+            LuaValue.FromString("=(string)"),
+            LuaValue.FromInteger(41)
+        ]);
+
+        var reader = new LuaClosure(
+            "reader",
+            body: new LuaNativeClosureBody((_, _, _) =>
+            {
+                var next = readerPieces.Dequeue();
+                return [next];
+            }));
+        var fromReader = InvokeBaseFunction(
+            state,
+            load,
+            LuaValue.FromFunction(reader),
+            LuaValue.FromString("=(reader)"),
+            LuaValue.FromString("b"));
+        fromReader.Length.ShouldBe(1);
+        state.InvokeCallable(fromReader[0], []).ShouldBe(
+        [
+            LuaValue.FromString("=(reader)"),
+            LuaValue.FromInteger(-1)
+        ]);
+
+        var fromFile = InvokeBaseFunction(
+            state,
+            loadfile,
+            LuaValue.FromString("fixture.luac"),
+            LuaValue.FromString("b"),
+            LuaValue.FromInteger(42));
+        fromFile.Length.ShouldBe(1);
+        state.InvokeCallable(fromFile[0], []).ShouldBe(
+        [
+            LuaValue.FromString("fixture.luac"),
+            LuaValue.FromInteger(42)
+        ]);
+
+        InvokeBaseFunction(state, dofile, LuaValue.FromString("fixture.luac")).ShouldBe(
+        [
+            LuaValue.FromString("fixture.luac"),
+            LuaValue.FromInteger(-1)
+        ]);
+
+        loaded.Count.ShouldBe(4);
+        loaded[0].ChunkName.ShouldBe("=(string)");
+        loaded[0].HasEnvironment.ShouldBeTrue();
+        loaded[0].Environment.AsInteger().ShouldBe(41);
+        loaded[1].ChunkName.ShouldBe("=(reader)");
+        loaded[1].HasEnvironment.ShouldBeFalse();
+        loaded[2].ChunkName.ShouldBe("fixture.luac");
+        loaded[2].HasEnvironment.ShouldBeTrue();
+        loaded[2].Environment.AsInteger().ShouldBe(42);
+        loaded[3].ChunkName.ShouldBe("fixture.luac");
+        loaded[3].HasEnvironment.ShouldBeFalse();
+        loaded.ShouldAllBe(item => item.Bytes.SequenceEqual(chunkBytes));
+    }
+
+    [Fact]
+    public void LoadAndLoadFile_ShouldReportUnsupportedTextAndFileErrors()
+    {
+        var state = new LuaState();
+        var load = GetBaseFunction(state, "load");
+        var loadfile = GetBaseFunction(state, "loadfile");
+        var dofile = GetBaseFunction(state, "dofile");
+        var binaryChunk = Encoding.Latin1.GetString(new byte[] { 0x1B, (byte)'L', (byte)'u', (byte)'a' });
+
+        InvokeBaseFunction(state, load, LuaValue.FromString("return 1"))
+            .ShouldBe(
+            [
+                LuaValue.Nil,
+                LuaValue.FromString("text chunks are not supported yet")
+            ]);
+
+        InvokeBaseFunction(state, load, LuaValue.FromString(binaryChunk), LuaValue.Nil, LuaValue.FromString("t"))[0]
+            .IsNil.ShouldBeTrue();
+        InvokeBaseFunction(state, load, LuaValue.FromString(binaryChunk), LuaValue.Nil, LuaValue.FromString("t"))[1]
+            .AsString().ShouldContain("binary chunk");
+
+        state.FileReader = _ => throw new FileNotFoundException("missing");
+
+        var loadFileResults = InvokeBaseFunction(state, loadfile, LuaValue.FromString("missing.lua"));
+        loadFileResults[0].IsNil.ShouldBeTrue();
+        loadFileResults[1].AsString().ShouldContain("cannot open missing.lua");
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, dofile, LuaValue.FromString("missing.lua")));
+        exception.ErrorObject.AsString().ShouldContain("cannot open missing.lua");
+    }
+
+    [Fact]
+    public void CollectGarbage_ShouldUseMinimalSemantics()
+    {
+        var state = new LuaState();
+        var collectgarbage = GetBaseFunction(state, "collectgarbage");
+
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("count"))
+            .ShouldHaveSingleItem()
+            .AsFloat().ShouldBeGreaterThan(0d);
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("isrunning"))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeTrue();
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("stop"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(0);
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("isrunning"))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeFalse();
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("step"), LuaValue.FromInteger(4))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeFalse();
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("collect"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(0);
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("restart"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(0);
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("isrunning"))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Require_ShouldUseMinimalPackageSemantics()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var require = GetBaseFunction(state, "require");
+        var preloadHits = 0;
+        var fileHits = 0;
+        var chunkBytes = new byte[] { 0x1B, (byte)'L', (byte)'u', (byte)'a', 0x01, 0x02 };
+
+        state.PackagePreload.SetValue(
+            LuaValue.FromString("pre_mod"),
+            LuaValue.FromFunction(new LuaClosure(
+                "pre_mod_loader",
+                body: new LuaNativeClosureBody((_, _, arguments) =>
+                {
+                    preloadHits += 1;
+                    var module = new LuaTable();
+                    module.SetValue(LuaValue.FromString("name"), arguments[0]);
+                    module.SetValue(LuaValue.FromString("loader"), arguments[1]);
+                    return [LuaValue.FromTable(module)];
+                }))));
+        state.PackagePreload.SetValue(
+            LuaValue.FromString("pre_true"),
+            LuaValue.FromFunction(new LuaClosure(
+                "pre_true_loader",
+                body: new LuaNativeClosureBody((_, _, _) =>
+                {
+                    preloadHits += 1;
+                    return [];
+                }))));
+
+        state.PackageLibrary.SetValue(
+            LuaValue.FromString("path"),
+            LuaValue.FromString("./missing/?.luac;./mods/?.luac"));
+        state.FileReader = path =>
+        {
+            if (path == "./mods/file_mod.luac")
+            {
+                return chunkBytes;
+            }
+
+            throw new FileNotFoundException("missing");
+        };
+        state.SetBinaryChunkLoader((bytes, chunkName, hasEnvironment, environment) =>
+        {
+            fileHits += 1;
+            bytes.ToArray().ShouldBe(chunkBytes);
+            return new LuaClosure(
+                chunkName,
+                body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromInteger(77)]));
+        });
+
+        var preloaded = InvokeBaseFunction(state, require, LuaValue.FromString("pre_mod"));
+        preloaded.Length.ShouldBe(2);
+        preloaded[0].AsTable().GetValue(LuaValue.FromString("name")).AsString().ShouldBe("pre_mod");
+        preloaded[0].AsTable().GetValue(LuaValue.FromString("loader")).AsString().ShouldBe(":preload:");
+        preloaded[1].AsString().ShouldBe(":preload:");
+
+        var cachedPreload = InvokeBaseFunction(state, require, LuaValue.FromString("pre_mod"));
+        cachedPreload.Length.ShouldBe(1);
+        cachedPreload[0].AsTable().ShouldBeSameAs(preloaded[0].AsTable());
+
+        var fileLoaded = InvokeBaseFunction(state, require, LuaValue.FromString("file_mod"));
+        fileLoaded.Length.ShouldBe(2);
+        fileLoaded[0].AsInteger().ShouldBe(77);
+        fileLoaded[1].AsString().ShouldBe("./mods/file_mod.luac");
+
+        var cachedFile = InvokeBaseFunction(state, require, LuaValue.FromString("file_mod"));
+        cachedFile.Length.ShouldBe(1);
+        cachedFile[0].AsInteger().ShouldBe(77);
+
+        var preTrue = InvokeBaseFunction(state, require, LuaValue.FromString("pre_true"));
+        preTrue.Length.ShouldBe(2);
+        preTrue[0].AsBoolean().ShouldBeTrue();
+        preTrue[1].AsString().ShouldBe(":preload:");
+        InvokeBaseFunction(state, require, LuaValue.FromString("pre_true"))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeTrue();
+
+        preloadHits.ShouldBe(2);
+        fileHits.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Require_ShouldReportMissingModules()
+    {
+        var state = new LuaState();
+        state.PackageLibrary.SetValue(
+            LuaValue.FromString("path"),
+            LuaValue.FromString("./missing/?.luac;./mods/?.luac"));
+        state.FileReader = _ => throw new FileNotFoundException("missing");
+        var require = GetBaseFunction(state, "require");
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, require, LuaValue.FromString("missing.mod")));
+
+        exception.ErrorObject.AsString().ShouldContain("module 'missing.mod' not found:");
+        exception.ErrorObject.AsString().ShouldContain("no field package.preload['missing.mod']");
+        exception.ErrorObject.AsString().ShouldContain("no file './missing/missing/mod.luac'");
+        exception.ErrorObject.AsString().ShouldContain("no file './mods/missing/mod.luac'");
+    }
+
+    [Fact]
+    public void StringLibraryAndMetamethods_ShouldUseLuaSemantics()
+    {
+        var state = new LuaState();
+        state.SetCallableInvoker((callable, arguments) =>
+        {
+            var closure = callable.AsFunction();
+            var body = (LuaNativeClosureBody)closure.Body!;
+            return body.Function(state, closure, arguments);
+        });
+
+        var upper = state.StringLibrary.GetValue(LuaValue.FromString("upper"));
+        var lower = state.StringLibrary.GetValue(LuaValue.FromString("lower"));
+        var len = state.StringLibrary.GetValue(LuaValue.FromString("len"));
+
+        state.InvokeCallable(upper, [LuaValue.FromString("lua")])
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("LUA");
+        state.InvokeCallable(lower, [LuaValue.FromString("NeT")])
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("net");
+        state.InvokeCallable(len, [LuaValue.FromString("lua")])
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(3);
+
+        state.TryGetMetamethod(LuaValue.FromString("10"), "__add", out var add).ShouldBeTrue();
+        state.TryGetMetamethod(LuaValue.FromString("7"), "__div", out var divide).ShouldBeTrue();
+        state.TryGetMetamethod(LuaValue.FromString("7"), "__idiv", out var integerDivide).ShouldBeTrue();
+        state.TryGetMetamethod(LuaValue.FromString("5"), "__unm", out var unaryMinus).ShouldBeTrue();
+
+        state.InvokeCallable(add, [LuaValue.FromString("10"), LuaValue.FromInteger(1)])
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(11);
+        state.InvokeCallable(divide, [LuaValue.FromString("7"), LuaValue.FromInteger(2)])
+            .ShouldHaveSingleItem()
+            .AsFloat().ShouldBe(3.5d);
+        state.InvokeCallable(integerDivide, [LuaValue.FromString("7"), LuaValue.FromInteger(2)])
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(3);
+        state.InvokeCallable(unaryMinus, [LuaValue.FromString("5")])
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(-5);
+
+        var fallbackTable = new LuaTable();
+        var fallbackMetatable = new LuaTable();
+        fallbackMetatable.SetValue(
+            LuaValue.FromString("__add"),
+            LuaValue.FromFunction(new LuaClosure(
+                "__add",
+                body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromString("fallback")]))));
+        fallbackTable.SetMetatable(fallbackMetatable);
+
+        state.InvokeCallable(add, [LuaValue.FromString("x"), LuaValue.FromTable(fallbackTable)])
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("fallback");
+    }
+
+    [Fact]
+    public void Warn_ShouldRejectNonStringLikeValues()
+    {
+        var state = new LuaState();
+        var warn = GetBaseFunction(state, "warn");
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            InvokeBaseFunction(state, warn, LuaValue.FromBoolean(true)));
+
+        exception.ErrorObject.AsString().ShouldBe("bad argument #1 to 'warn' (string expected, got boolean)");
     }
 
     [Fact]

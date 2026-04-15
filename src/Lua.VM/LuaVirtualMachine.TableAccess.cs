@@ -48,7 +48,7 @@ public sealed partial class LuaVirtualMachine
                 continue;
             }
 
-            if (!TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
+            if (!State.TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
             {
                 throw CreateTypeError(currentTarget, "index");
             }
@@ -96,7 +96,7 @@ public sealed partial class LuaVirtualMachine
                 continue;
             }
 
-            if (!TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
+            if (!State.TryGetMetamethod(currentTarget, metamethodName, out var nextMetamethod))
             {
                 throw CreateTypeError(currentTarget, "index");
             }

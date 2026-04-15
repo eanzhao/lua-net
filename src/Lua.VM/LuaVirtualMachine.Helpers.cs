@@ -208,7 +208,7 @@ public sealed partial class LuaVirtualMachine
         return (int)count;
     }
 
-    private LuaUpvalue[] BuildUpvalues(LuaPrototype prototype, CallFrame? parentFrame)
+    private LuaUpvalue[] BuildUpvalues(LuaPrototype prototype, CallFrame? parentFrame, LuaValue? rootEnvironment)
     {
         var upvalues = new LuaUpvalue[prototype.Upvalues.Length];
 
@@ -220,7 +220,7 @@ public sealed partial class LuaVirtualMachine
             {
                 upvalues[index] = new LuaUpvalue(
                     string.Equals(descriptor.Name, "_ENV", StringComparison.Ordinal)
-                        ? LuaValue.FromTable(State.GlobalEnvironment)
+                        ? rootEnvironment ?? LuaValue.FromTable(State.GlobalEnvironment)
                         : LuaValue.Nil);
 
                 continue;
@@ -265,9 +265,9 @@ public sealed partial class LuaVirtualMachine
         return (prototype.Flags & VarArgTableFlag) != 0;
     }
 
-    private static LuaValue GetCloseMethod(LuaValue value)
+    private LuaValue GetCloseMethod(LuaValue value)
     {
-        return TryGetMetamethod(value, "__close", out var metamethod)
+        return State.TryGetMetamethod(value, "__close", out var metamethod)
             ? metamethod
             : LuaValue.Nil;
     }

@@ -40,6 +40,7 @@ public sealed partial class LuaVirtualMachine
     {
         State = new LuaState();
         State.SetCallableInvoker(CallValue);
+        State.SetBinaryChunkLoader(LoadBinaryChunk);
     }
 
     public LuaState State { get; }
@@ -48,7 +49,7 @@ public sealed partial class LuaVirtualMachine
     {
         ArgumentNullException.ThrowIfNull(chunk);
 
-        var closure = CreateClosure(chunk.MainFunction);
+        var closure = CreateRootClosure(chunk.MainFunction, debugName: null, environment: null);
         return Call(closure);
     }
 
@@ -70,11 +71,16 @@ public sealed partial class LuaVirtualMachine
     {
         ArgumentNullException.ThrowIfNull(prototype);
 
+        return CreateRootClosure(prototype, debugName, environment: null);
+    }
+
+    private LuaClosure CreateRootClosure(LuaPrototype prototype, string? debugName, LuaValue? environment)
+    {
         return new LuaClosure(
             debugName ?? GetDebugName(prototype),
             prototype.Upvalues.Length,
             new LuaBytecodeClosureBody(prototype),
-            BuildUpvalues(prototype, parentFrame: null));
+            BuildUpvalues(prototype, parentFrame: null, environment));
     }
 
     private LuaValue[] ExecuteClosure(LuaClosure closure, LuaPrototype prototype, IReadOnlyList<LuaValue> arguments)
@@ -142,7 +148,14 @@ public sealed partial class LuaVirtualMachine
             debugName ?? GetDebugName(prototype),
             prototype.Upvalues.Length,
             new LuaBytecodeClosureBody(prototype),
-            BuildUpvalues(prototype, parentFrame));
+            BuildUpvalues(prototype, parentFrame, rootEnvironment: null));
+    }
+
+    private LuaClosure LoadBinaryChunk(ReadOnlyMemory<byte> chunkBytes, string? chunkName, bool hasEnvironment, LuaValue environment)
+    {
+        var reader = new LuaChunkReader();
+        var chunk = reader.Read(chunkBytes.ToArray(), chunkName);
+        return CreateRootClosure(chunk.MainFunction, debugName: null, environment: hasEnvironment ? environment : null);
     }
 
     private LuaValue[] ExecuteNativeClosure(LuaClosure closure, LuaNativeClosureBody body, IReadOnlyList<LuaValue> arguments)

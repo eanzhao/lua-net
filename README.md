@@ -40,7 +40,7 @@ dotnet sln lua-net.sln list
 | 第 4 步 | VM 骨架与指令执行 | 已完成 |
 | 第 5 步 | 调用、闭包、上值、可变参数 | 已完成 |
 | 第 6 步 | 表与元表 | 已完成 |
-| 第 7 步 | 基础库核心函数 | 进行中 |
+| 第 7 步 | 基础库核心函数 | 已完成 |
 | 第 8 步 | table 库与 math 库 | 未开始 |
 | 第 9 步 | string 库与模式匹配 | 未开始 |
 | 第 10 步 | coroutine 库 | 未开始 |
@@ -53,9 +53,9 @@ dotnet sln lua-net.sln list
 
 ### 第 7 步当前覆盖范围
 
-**已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`、`print` / `warn`
+**已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`collectgarbage`（最小版本）、`load` / `loadfile` / `dofile`（先覆盖二进制 chunk 路径）、最小 `package` / `require`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`、`print` / `warn`、最小 `string` 表（`upper` / `lower` / `len`）、字符串元表 `__index`、字符串算术元方法
 
-**待补充：** `load` / `dofile`、字符串元表与算术元方法
+**后续扩展：** `load` / `loadfile` 的文本源码路径、完整 `package` / `loadlib`、完整 GC 模式参数会在后续阶段继续展开。
 
 ## 仓库结构
 
@@ -81,12 +81,12 @@ src/
 └── Lua.Core/                 共享二进制 chunk 工具（早期遗留）
 
 test/
-├── Lua.Runtime.Tests/        运行时单元测试（57 个）
+├── Lua.Runtime.Tests/        运行时单元测试（65 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（13 个）
-├── Lua.VM.Tests/             VM 集成测试（92 个，使用真实 Lua 5.5 chunk fixture）
+├── Lua.VM.Tests/             VM 集成测试（97 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（31 份）
+docs/                         阶段规划和设计文档（34 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -157,6 +157,9 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 029 | [number-string-conversion](docs/029-step-07-number-string-conversion.md) | tonumber / tostring |
 | 030 | [table-iteration-functions](docs/030-step-07-table-iteration-functions.md) | next / pairs / ipairs |
 | 031 | [print-warn-functions](docs/031-step-07-print-warn-functions.md) | print / warn |
+| 032 | [string-metamethods](docs/032-step-07-string-metamethods.md) | 最小 string 表、字符串元表与字符串算术 |
+| 033 | [load-dofile-functions](docs/033-step-07-load-dofile-functions.md) | load / loadfile / dofile 的二进制 chunk 路径 |
+| 034 | [collectgarbage-require-functions](docs/034-step-07-collectgarbage-require-functions.md) | collectgarbage 与最小 require / package |
 
 ## 开发方式
 

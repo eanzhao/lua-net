@@ -8,23 +8,65 @@ namespace Lua.Runtime.Execution;
 
 public sealed class LuaState
 {
+    public delegate LuaClosure BinaryChunkLoader(
+        ReadOnlyMemory<byte> chunkBytes,
+        string? chunkName,
+        bool hasEnvironment,
+        LuaValue environment);
+
+    private enum WarningMode
+    {
+        Off,
+        Ready,
+        Continue
+    }
+
     private readonly List<CallFrame> _frames = [];
+    private readonly Dictionary<LuaValueKind, LuaTable> _typeMetatables = [];
+    private readonly StringBuilder _warningBuffer = new();
+    private BinaryChunkLoader? _binaryChunkLoader;
     private Func<LuaValue, IReadOnlyList<LuaValue>, LuaValue[]>? _callableInvoker;
+    private bool _gcRunning = true;
+    private WarningMode _warningMode = WarningMode.Off;
     private static readonly LuaValue IPairsAuxFunction = LuaValue.FromFunction(
         new LuaClosure(
             "ipairsaux",
             body: new LuaNativeClosureBody(IPairsAux)));
+    private static readonly byte[] BinaryChunkSignature = [0x1B, (byte)'L', (byte)'u', (byte)'a'];
 
     public LuaState()
     {
         Stack = new LuaStack();
         GlobalEnvironment = new LuaTable("_ENV");
+        StringLibrary = new LuaTable("string");
+        PackageLibrary = new LuaTable("package");
+        PackageLoaded = new LuaTable("package.loaded");
+        PackagePreload = new LuaTable("package.preload");
+        PackageSearchers = new LuaTable("package.searchers");
         RegisterBaseFunctions();
+        RegisterStringSupport();
+        RegisterPackageSupport();
     }
 
     public LuaStack Stack { get; }
 
     public LuaTable GlobalEnvironment { get; }
+
+    public LuaTable StringLibrary { get; }
+
+    public LuaTable PackageLibrary { get; }
+
+    public LuaTable PackageLoaded { get; }
+
+    public LuaTable PackagePreload { get; }
+
+    public LuaTable PackageSearchers { get; }
+
+    public Action<string> PrintOutput { get; set; } = static _ => { };
+
+    public Action<string> WarningOutput { get; set; } = static _ => { };
+
+    public Func<string, byte[]> FileReader { get; set; } = static path => File.ReadAllBytes(path);
 
     public IReadOnlyList<CallFrame> Frames => _frames;
 
@@ -41,6 +83,12 @@ public sealed class LuaState
         RegisterBaseFunction("next", Next);
         RegisterBaseFunction("pairs", Pairs);
         RegisterBaseFunction("ipairs", IPairs);
+        RegisterBaseFunction("collectgarbage", CollectGarbage);
+        RegisterBaseFunction("load", Load);
+        RegisterBaseFunction("loadfile", LoadFile);
+        RegisterBaseFunction("dofile", DoFile);
+        RegisterBaseFunction("print", Print);
+        RegisterBaseFunction("warn", Warn);
         RegisterBaseFunction("type", Type);
         RegisterBaseFunction("assert", Assert);
         RegisterBaseFunction("select", Select);
@@ -51,12 +99,67 @@ public sealed class LuaState
         RegisterBaseFunction("error", Error);
     }
 
+    private void RegisterPackageSupport()
+    {
+        PackageLibrary.SetValue(LuaValue.FromString("path"), LuaValue.FromString("./?.luac"));
+        PackageLibrary.SetValue(LuaValue.FromString("loaded"), LuaValue.FromTable(PackageLoaded));
+        PackageLibrary.SetValue(LuaValue.FromString("preload"), LuaValue.FromTable(PackagePreload));
+        PackageLibrary.SetValue(LuaValue.FromString("searchers"), LuaValue.FromTable(PackageSearchers));
+
+        PackageLoaded.SetValue(LuaValue.FromString("package"), LuaValue.FromTable(PackageLibrary));
+        PackageLoaded.SetValue(LuaValue.FromString("_G"), LuaValue.FromTable(GlobalEnvironment));
+
+        PackageSearchers.SetValue(
+            LuaValue.FromInteger(1),
+            LuaValue.FromFunction(new LuaClosure(
+                "package.searcher.preload",
+                body: new LuaNativeClosureBody(PackageSearcherPreload))));
+        PackageSearchers.SetValue(
+            LuaValue.FromInteger(2),
+            LuaValue.FromFunction(new LuaClosure(
+                "package.searcher.luac",
+                body: new LuaNativeClosureBody(PackageSearcherLua))));
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("package"), LuaValue.FromTable(PackageLibrary));
+        RegisterBaseFunction("require", Require);
+    }
+
+    private void RegisterStringSupport()
+    {
+        RegisterLibraryFunction(StringLibrary, "upper", StringUpper, "string.upper");
+        RegisterLibraryFunction(StringLibrary, "lower", StringLower, "string.lower");
+        RegisterLibraryFunction(StringLibrary, "len", StringLen, "string.len");
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("string"), LuaValue.FromTable(StringLibrary));
+
+        var metatable = new LuaTable("string-metatable");
+        RegisterLibraryFunction(metatable, "__add", StringAdd, "__add");
+        RegisterLibraryFunction(metatable, "__sub", StringSubtract, "__sub");
+        RegisterLibraryFunction(metatable, "__mul", StringMultiply, "__mul");
+        RegisterLibraryFunction(metatable, "__mod", StringModulo, "__mod");
+        RegisterLibraryFunction(metatable, "__pow", StringPower, "__pow");
+        RegisterLibraryFunction(metatable, "__div", StringDivide, "__div");
+        RegisterLibraryFunction(metatable, "__idiv", StringIntegerDivide, "__idiv");
+        RegisterLibraryFunction(metatable, "__unm", StringUnaryMinus, "__unm");
+        metatable.SetValue(LuaValue.FromString("__index"), LuaValue.FromTable(StringLibrary));
+        SetTypeMetatable(LuaValueKind.String, metatable);
+    }
+
     private void RegisterBaseFunction(string name, LuaNativeFunction function)
     {
+        RegisterLibraryFunction(GlobalEnvironment, name, function, name);
+    }
+
+    private static void RegisterLibraryFunction(
+        LuaTable table,
+        string name,
+        LuaNativeFunction function,
+        string debugName)
+    {
         var closure = new LuaClosure(
-            name,
+            debugName,
             body: new LuaNativeClosureBody(function));
-        GlobalEnvironment.SetValue(
+        table.SetValue(
             LuaValue.FromString(name),
             LuaValue.FromFunction(closure));
     }
@@ -86,6 +189,12 @@ public sealed class LuaState
         _callableInvoker = callableInvoker;
     }
 
+    public void SetBinaryChunkLoader(BinaryChunkLoader binaryChunkLoader)
+    {
+        ArgumentNullException.ThrowIfNull(binaryChunkLoader);
+        _binaryChunkLoader = binaryChunkLoader;
+    }
+
     public LuaValue[] InvokeCallable(LuaValue callable, IReadOnlyList<LuaValue> arguments)
     {
         if (_callableInvoker is not null)
@@ -100,6 +209,37 @@ public sealed class LuaState
         }
 
         throw new InvalidOperationException("Callable invoker is not configured.");
+    }
+
+    public bool TryGetRawMetatable(LuaValue value, out LuaTable? metatable)
+    {
+        switch (value.Kind)
+        {
+            case LuaValueKind.Table:
+                metatable = value.AsTable().Metatable;
+                return metatable is not null;
+            case LuaValueKind.UserData:
+                metatable = value.AsUserData().Metatable;
+                return metatable is not null;
+            default:
+                return _typeMetatables.TryGetValue(value.Kind, out metatable);
+        }
+    }
+
+    public bool TryGetMetamethod(LuaValue value, string metamethodName, out LuaValue metamethod)
+    {
+        if (TryGetRawMetatable(value, out var metatable) && metatable is not null)
+        {
+            return metatable.TryGetValue(LuaValue.FromString(metamethodName), out metamethod) && !metamethod.IsNil;
+        }
+
+        metamethod = LuaValue.Nil;
+        return false;
+    }
+
+    private void SetTypeMetatable(LuaValueKind kind, LuaTable metatable)
+    {
+        _typeMetatables[kind] = metatable;
     }
 
     private static LuaValue[] SetMetatable(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
@@ -138,7 +278,7 @@ public sealed class LuaState
     {
 
         var value = RequireArgument(arguments, 0, "getmetatable");
-        if (!TryGetRawMetatable(value, out var metatable) || metatable is null)
+        if (!state.TryGetRawMetatable(value, out var metatable) || metatable is null)
         {
             return [LuaValue.Nil];
         }
@@ -224,7 +364,7 @@ public sealed class LuaState
     {
 
         var value = RequireArgument(arguments, 0, "pairs");
-        if (TryGetMetamethod(value, "__pairs", out var metamethod))
+        if (state.TryGetMetamethod(value, "__pairs", out var metamethod))
         {
             return NormalizeResults(state.InvokeCallable(metamethod, [value]), 4);
         }
@@ -272,6 +412,302 @@ public sealed class LuaState
 
         var value = RequireArgument(arguments, 0, "type");
         return [LuaValue.FromString(GetTypeName(value))];
+    }
+
+    private static LuaValue[] CollectGarbage(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var option = GetOptionalStringArgument(arguments, 0, "collect", "collectgarbage");
+
+        switch (option)
+        {
+            case "stop":
+                state._gcRunning = false;
+                return [LuaValue.FromInteger(0)];
+            case "restart":
+                state._gcRunning = true;
+                return [LuaValue.FromInteger(0)];
+            case "collect":
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                return [LuaValue.FromInteger(0)];
+            case "count":
+                return [LuaValue.FromFloat(GC.GetTotalMemory(forceFullCollection: false) / 1024d)];
+            case "step":
+            {
+                if (arguments.Count > 1 && !TryGetInteger(arguments[1], out _))
+                {
+                    throw CreateArgumentTypeError("collectgarbage", 2, "integer", arguments[1]);
+                }
+
+                return [LuaValue.FromBoolean(false)];
+            }
+            case "isrunning":
+                return [LuaValue.FromBoolean(state._gcRunning)];
+            default:
+                throw CreateArgumentError("collectgarbage", 1, $"invalid option '{option}'");
+        }
+    }
+
+    private static LuaValue[] Print(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var values = new string[arguments.Count];
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            values[index] = ConvertToPrintedString(state, arguments[index]);
+        }
+
+        state.PrintOutput(string.Join('\t', values));
+        return [];
+    }
+
+    private static LuaValue[] Require(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var moduleName = RequireStringArgument(arguments, 0, "require");
+        var moduleNameValue = LuaValue.FromString(moduleName);
+        var loadedTable = state.GetPackageTableField("loaded");
+        var loadedValue = loadedTable.GetValue(moduleNameValue);
+        if (IsTruthy(loadedValue))
+        {
+            return [loadedValue];
+        }
+
+        var (loader, loaderData) = state.FindPackageLoader(moduleName);
+        var loaderResults = state.InvokeCallable(loader, [moduleNameValue, loaderData]);
+        var loaderResult = loaderResults.Length == 0 ? LuaValue.Nil : loaderResults[0];
+        if (!loaderResult.IsNil)
+        {
+            loadedTable.SetValue(moduleNameValue, loaderResult);
+        }
+
+        var moduleValue = loadedTable.GetValue(moduleNameValue);
+        if (moduleValue.IsNil)
+        {
+            moduleValue = LuaValue.FromBoolean(true);
+            loadedTable.SetValue(moduleNameValue, moduleValue);
+        }
+
+        return [moduleValue, loaderData];
+    }
+
+    private static LuaValue[] Load(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var source = RequireArgument(arguments, 0, "load");
+        var chunkName = GetOptionalStringArgument(
+            arguments,
+            1,
+            source.Kind == LuaValueKind.String ? source.AsString() : "=(load)",
+            "load");
+        var mode = GetLoadMode(arguments, 2, "load");
+        var hasEnvironment = arguments.Count > 3;
+        var environment = hasEnvironment ? arguments[3] : LuaValue.Nil;
+
+        if (source.Kind == LuaValueKind.String)
+        {
+            return state.LoadChunk(
+                EncodeLuaString(source.AsString()),
+                chunkName,
+                mode,
+                hasEnvironment,
+                environment);
+        }
+
+        if (source.Kind != LuaValueKind.Function)
+        {
+            throw CreateArgumentTypeError("load", 1, "string or function", source);
+        }
+
+        var readerOutput = new StringBuilder();
+        while (true)
+        {
+            var results = state.InvokeCallable(source, []);
+            var piece = results.Length == 0 ? LuaValue.Nil : results[0];
+            if (piece.IsNil)
+            {
+                break;
+            }
+
+            if (!TryConvertToStringArgument(piece, out var text))
+            {
+                throw CreateRuntimeError("reader function must return a string");
+            }
+
+            readerOutput.Append(text);
+        }
+
+        return state.LoadChunk(
+            EncodeLuaString(readerOutput.ToString()),
+            chunkName,
+            mode,
+            hasEnvironment,
+            environment);
+    }
+
+    private static LuaValue[] LoadFile(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var fileName = GetOptionalFileName(arguments, 0, "loadfile");
+        if (fileName is null)
+        {
+            return [LuaValue.Nil, LuaValue.FromString("stdin loading is not supported yet")];
+        }
+
+        var mode = GetLoadMode(arguments, 1, "loadfile");
+        var hasEnvironment = arguments.Count > 2;
+        var environment = hasEnvironment ? arguments[2] : LuaValue.Nil;
+
+        if (!state.TryReadChunkFile(fileName, out var bytes, out var errorMessage))
+        {
+            return [LuaValue.Nil, LuaValue.FromString(errorMessage)];
+        }
+
+        return state.LoadChunk(bytes, fileName, mode, hasEnvironment, environment);
+    }
+
+    private static LuaValue[] DoFile(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var fileName = GetOptionalFileName(arguments, 0, "dofile");
+        if (fileName is null)
+        {
+            throw CreateRuntimeError("stdin loading is not supported yet");
+        }
+
+        if (!state.TryReadChunkFile(fileName, out var bytes, out var errorMessage))
+        {
+            throw new LuaRuntimeException(LuaValue.FromString(errorMessage));
+        }
+
+        var loadResults = state.LoadChunk(
+            bytes,
+            fileName,
+            mode: "bt",
+            hasEnvironment: false,
+            environment: LuaValue.Nil);
+        if (loadResults[0].IsNil)
+        {
+            throw new LuaRuntimeException(loadResults[1]);
+        }
+
+        return state.InvokeCallable(loadResults[0], []);
+    }
+
+    private static LuaValue[] PackageSearcherPreload(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var moduleName = RequireStringArgument(arguments, 0, "package.searcher.preload");
+        var loader = state.GetPackageTableField("preload").GetValue(LuaValue.FromString(moduleName));
+        return loader.IsNil
+            ? [LuaValue.FromString($"no field package.preload['{moduleName}']")]
+            : [loader, LuaValue.FromString(":preload:")];
+    }
+
+    private static LuaValue[] PackageSearcherLua(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var moduleName = RequireStringArgument(arguments, 0, "package.searcher.luac");
+        if (!state.TryFindPackageFile(moduleName, out var filename, out var bytes, out var errorMessage))
+        {
+            return [LuaValue.FromString(errorMessage)];
+        }
+
+        var loadResults = state.LoadChunk(
+            bytes,
+            filename,
+            mode: "b",
+            hasEnvironment: false,
+            environment: LuaValue.Nil);
+        if (loadResults[0].IsNil)
+        {
+            throw CreateRuntimeError(
+                $"error loading module '{moduleName}' from file '{filename}':\n\t{FormatLuaValue(loadResults[1])}");
+        }
+
+        return [loadResults[0], LuaValue.FromString(filename)];
+    }
+
+    private static LuaValue[] Warn(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var message = RequireArgument(arguments, 0, "warn");
+        state.EmitWarning(ConvertToWarningString(message, 1), toContinue: arguments.Count > 1);
+
+        for (var index = 1; index < arguments.Count; index++)
+        {
+            state.EmitWarning(
+                ConvertToWarningString(arguments[index], index + 1),
+                toContinue: index + 1 < arguments.Count);
+        }
+
+        return [];
+    }
+
+    private static LuaValue[] StringUpper(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var value = RequireStringArgument(arguments, 0, "string.upper");
+        return [LuaValue.FromString(value.ToUpperInvariant())];
+    }
+
+    private static LuaValue[] StringLower(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var value = RequireStringArgument(arguments, 0, "string.lower");
+        return [LuaValue.FromString(value.ToLowerInvariant())];
+    }
+
+    private static LuaValue[] StringLen(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var value = RequireStringArgument(arguments, 0, "string.len");
+        return [LuaValue.FromInteger(Encoding.UTF8.GetByteCount(value))];
+    }
+
+    private static LuaValue[] StringAdd(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return ExecuteStringBinaryArithmetic(state, closure, arguments, "__add", "add", TryAdd);
+    }
+
+    private static LuaValue[] StringSubtract(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return ExecuteStringBinaryArithmetic(state, closure, arguments, "__sub", "subtract", TrySubtract);
+    }
+
+    private static LuaValue[] StringMultiply(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return ExecuteStringBinaryArithmetic(state, closure, arguments, "__mul", "multiply", TryMultiply);
+    }
+
+    private static LuaValue[] StringModulo(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return ExecuteStringBinaryArithmetic(state, closure, arguments, "__mod", "modulo", TryModulo);
+    }
+
+    private static LuaValue[] StringPower(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return ExecuteStringBinaryArithmetic(state, closure, arguments, "__pow", "power", TryPower);
+    }
+
+    private static LuaValue[] StringDivide(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return ExecuteStringBinaryArithmetic(state, closure, arguments, "__div", "divide", TryDivide);
+    }
+
+    private static LuaValue[] StringIntegerDivide(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return ExecuteStringBinaryArithmetic(state, closure, arguments, "__idiv", "divide", TryIntegerDivide);
+    }
+
+    private static LuaValue[] StringUnaryMinus(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+
+        var value = RequireArgument(arguments, 0, "__unm");
+        if (TryConvertToNumber(value, out var number))
+        {
+            var (success, result) = TryUnaryMinus(number);
+            if (success)
+            {
+                return [result];
+            }
+        }
+
+        throw CreateRuntimeError($"attempt to perform arithmetic on a '{GetTypeName(value)}'");
     }
 
     private static LuaValue[] Assert(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
@@ -374,7 +810,7 @@ public sealed class LuaState
     {
 
         var value = RequireArgument(arguments, 0, "tostring");
-        if (TryGetMetamethod(value, "__tostring", out var metamethod))
+        if (state.TryGetMetamethod(value, "__tostring", out var metamethod))
         {
             var results = state.InvokeCallable(metamethod, [value]);
             if (results.Length == 0 || results[0].Kind != LuaValueKind.String)
@@ -419,20 +855,280 @@ public sealed class LuaState
         throw CreateRuntimeError($"bad argument #{index + 1} to '{functionName}' (value expected)");
     }
 
-    private static bool TryGetRawMetatable(LuaValue value, out LuaTable? metatable)
+    private static string GetOptionalStringArgument(
+        IReadOnlyList<LuaValue> arguments,
+        int index,
+        string defaultValue,
+        string functionName)
+    {
+        if (index >= arguments.Count || arguments[index].IsNil)
+        {
+            return defaultValue;
+        }
+
+        if (TryConvertToStringArgument(arguments[index], out var text))
+        {
+            return text;
+        }
+
+        throw CreateArgumentTypeError(functionName, index + 1, "string", arguments[index]);
+    }
+
+    private static string GetLoadMode(IReadOnlyList<LuaValue> arguments, int index, string functionName)
+    {
+        var mode = GetOptionalStringArgument(arguments, index, "bt", functionName);
+        if (mode.Length == 0 ||
+            mode.Contains('B') ||
+            mode.Any(static ch => ch is not ('b' or 't')))
+        {
+            throw CreateArgumentError(functionName, index + 1, "invalid mode");
+        }
+
+        return mode;
+    }
+
+    private static string? GetOptionalFileName(IReadOnlyList<LuaValue> arguments, int index, string functionName)
+    {
+        if (index >= arguments.Count || arguments[index].IsNil)
+        {
+            return null;
+        }
+
+        return RequireStringArgument(arguments, index, functionName);
+    }
+
+    private static string RequireStringArgument(IReadOnlyList<LuaValue> arguments, int index, string functionName)
+    {
+        var value = RequireArgument(arguments, index, functionName);
+        if (TryConvertToStringArgument(value, out var text))
+        {
+            return text;
+        }
+
+        throw CreateArgumentTypeError(functionName, index + 1, "string", value);
+    }
+
+    private static bool TryConvertToStringArgument(LuaValue value, out string text)
     {
         switch (value.Kind)
         {
-            case LuaValueKind.Table:
-                metatable = value.AsTable().Metatable;
-                return metatable is not null;
-            case LuaValueKind.UserData:
-                metatable = value.AsUserData().Metatable;
-                return metatable is not null;
+            case LuaValueKind.String:
+                text = value.AsString();
+                return true;
+            case LuaValueKind.Integer:
+            case LuaValueKind.Float:
+                text = FormatLuaValue(value);
+                return true;
             default:
-                metatable = null;
+                text = string.Empty;
                 return false;
         }
+    }
+
+    private static LuaValue[] ExecuteStringBinaryArithmetic(
+        LuaState state,
+        LuaClosure closure,
+        IReadOnlyList<LuaValue> arguments,
+        string metamethodName,
+        string operationName,
+        Func<LuaValue, LuaValue, (bool Success, LuaValue Result)> operation)
+    {
+        var left = RequireArgument(arguments, 0, metamethodName);
+        var right = RequireArgument(arguments, 1, metamethodName);
+
+        if (TryConvertToNumber(left, out var numericLeft) &&
+            TryConvertToNumber(right, out var numericRight))
+        {
+            var (success, result) = operation(numericLeft, numericRight);
+            if (success)
+            {
+                return [result];
+            }
+        }
+
+        if (right.Kind != LuaValueKind.String &&
+            state.TryGetMetamethod(right, metamethodName, out var rightMetamethod) &&
+            rightMetamethod.Kind == LuaValueKind.Function &&
+            !ReferenceEquals(rightMetamethod.AsFunction(), closure))
+        {
+            return state.InvokeCallable(rightMetamethod, [left, right]);
+        }
+
+        throw CreateRuntimeError(
+            $"attempt to {operationName} a '{GetTypeName(left)}' with a '{GetTypeName(right)}'");
+    }
+
+    private LuaValue[] LoadChunk(
+        ReadOnlyMemory<byte> chunkBytes,
+        string? chunkName,
+        string mode,
+        bool hasEnvironment,
+        LuaValue environment)
+    {
+        if (IsBinaryChunk(chunkBytes.Span))
+        {
+            if (!mode.Contains('b'))
+            {
+                return [LuaValue.Nil, LuaValue.FromString($"attempt to load a binary chunk (mode is '{mode}')")];
+            }
+
+            if (_binaryChunkLoader is null)
+            {
+                return [LuaValue.Nil, LuaValue.FromString("binary chunk loading is not configured")];
+            }
+
+            try
+            {
+                var loadedClosure = _binaryChunkLoader(chunkBytes, chunkName, hasEnvironment, environment);
+                return [LuaValue.FromFunction(loadedClosure)];
+            }
+            catch (LuaRuntimeException ex)
+            {
+                return [LuaValue.Nil, ex.ErrorObject];
+            }
+            catch (Exception ex)
+            {
+                return [LuaValue.Nil, LuaValue.FromString(ex.Message)];
+            }
+        }
+
+        if (!mode.Contains('t'))
+        {
+            return [LuaValue.Nil, LuaValue.FromString($"attempt to load a text chunk (mode is '{mode}')")];
+        }
+
+        return [LuaValue.Nil, LuaValue.FromString("text chunks are not supported yet")];
+    }
+
+    private (LuaValue Loader, LuaValue LoaderData) FindPackageLoader(string moduleName)
+    {
+        var searchers = GetPackageTableField("searchers");
+        var errorMessage = new StringBuilder();
+
+        for (var index = 1L; ; index++)
+        {
+            var searcher = searchers.GetValue(LuaValue.FromInteger(index));
+            if (searcher.IsNil)
+            {
+                break;
+            }
+
+            var results = InvokeCallable(searcher, [LuaValue.FromString(moduleName)]);
+            var loader = results.Length == 0 ? LuaValue.Nil : results[0];
+            var loaderData = results.Length > 1 ? results[1] : LuaValue.Nil;
+
+            if (loader.Kind == LuaValueKind.Function)
+            {
+                return (loader, loaderData);
+            }
+
+            if (loader.Kind == LuaValueKind.String)
+            {
+                if (errorMessage.Length == 0)
+                {
+                    errorMessage.Append("\n\t");
+                }
+                else
+                {
+                    errorMessage.Append("\n\t");
+                }
+
+                errorMessage.Append(loader.AsString());
+            }
+        }
+
+        throw CreateRuntimeError($"module '{moduleName}' not found:{errorMessage}");
+    }
+
+    private LuaTable GetPackageTableField(string fieldName)
+    {
+        var value = PackageLibrary.GetValue(LuaValue.FromString(fieldName));
+        if (value.Kind != LuaValueKind.Table)
+        {
+            throw CreateRuntimeError($"'package.{fieldName}' must be a table");
+        }
+
+        return value.AsTable();
+    }
+
+    private string GetPackageStringField(string fieldName)
+    {
+        var value = PackageLibrary.GetValue(LuaValue.FromString(fieldName));
+        if (value.Kind != LuaValueKind.String)
+        {
+            throw CreateRuntimeError($"'package.{fieldName}' must be a string");
+        }
+
+        return value.AsString();
+    }
+
+    private bool TryFindPackageFile(
+        string moduleName,
+        out string fileName,
+        out ReadOnlyMemory<byte> bytes,
+        out string errorMessage)
+    {
+        var path = GetPackageStringField("path");
+        var modulePath = moduleName.Replace(".", Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal);
+        var errors = new StringBuilder();
+
+        foreach (var rawPattern in path.Split(';'))
+        {
+            if (rawPattern.Length == 0)
+            {
+                continue;
+            }
+
+            var candidate = rawPattern.Replace("?", modulePath, StringComparison.Ordinal);
+            try
+            {
+                bytes = FileReader(candidate);
+                fileName = candidate;
+                errorMessage = string.Empty;
+                return true;
+            }
+            catch
+            {
+                if (errors.Length > 0)
+                {
+                    errors.Append("\n\t");
+                }
+
+                errors.Append($"no file '{candidate}'");
+            }
+        }
+
+        fileName = string.Empty;
+        bytes = ReadOnlyMemory<byte>.Empty;
+        errorMessage = errors.ToString();
+        return false;
+    }
+
+    private bool TryReadChunkFile(string fileName, out ReadOnlyMemory<byte> bytes, out string errorMessage)
+    {
+        try
+        {
+            bytes = FileReader(fileName);
+            errorMessage = string.Empty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            bytes = ReadOnlyMemory<byte>.Empty;
+            errorMessage = $"cannot open {fileName}: {ex.Message}";
+            return false;
+        }
+    }
+
+    private static byte[] EncodeLuaString(string text)
+    {
+        return Encoding.Latin1.GetBytes(text);
+    }
+
+    private static bool IsBinaryChunk(ReadOnlySpan<byte> bytes)
+    {
+        return bytes.Length >= BinaryChunkSignature.Length &&
+               bytes[..BinaryChunkSignature.Length].SequenceEqual(BinaryChunkSignature);
     }
 
 
@@ -734,6 +1430,67 @@ public sealed class LuaState
         return state.GlobalEnvironment.GetValue(LuaValue.FromString(name));
     }
 
+    private void EmitWarning(string message, bool toContinue)
+    {
+        switch (_warningMode)
+        {
+            case WarningMode.Off:
+                TryHandleWarningControl(message, toContinue);
+                return;
+            case WarningMode.Ready:
+                if (TryHandleWarningControl(message, toContinue))
+                {
+                    return;
+                }
+
+                _warningBuffer.Clear();
+                _warningBuffer.Append("Lua warning: ");
+                _warningBuffer.Append(message);
+                if (toContinue)
+                {
+                    _warningMode = WarningMode.Continue;
+                }
+                else
+                {
+                    WarningOutput(_warningBuffer.ToString());
+                    _warningBuffer.Clear();
+                }
+
+                return;
+            case WarningMode.Continue:
+                _warningBuffer.Append(message);
+                if (toContinue)
+                {
+                    return;
+                }
+
+                WarningOutput(_warningBuffer.ToString());
+                _warningBuffer.Clear();
+                _warningMode = WarningMode.Ready;
+                return;
+            default:
+                throw new InvalidOperationException($"Unknown warning mode '{_warningMode}'.");
+        }
+    }
+
+    private bool TryHandleWarningControl(string message, bool toContinue)
+    {
+        if (toContinue || !message.StartsWith('@'))
+        {
+            return false;
+        }
+
+        _warningBuffer.Clear();
+        _warningMode = message switch
+        {
+            "@off" => WarningMode.Off,
+            "@on" => WarningMode.Ready,
+            _ => _warningMode
+        };
+
+        return true;
+    }
+
     private static LuaValue[] NormalizeResults(IReadOnlyList<LuaValue> results, int count)
     {
         var normalized = new LuaValue[count];
@@ -743,6 +1500,27 @@ public sealed class LuaState
         }
 
         return normalized;
+    }
+
+    private static string ConvertToPrintedString(LuaState state, LuaValue value)
+    {
+        var results = state.InvokeCallable(GetBaseFunctionValue(state, "tostring"), [value]);
+        if (results.Length == 0 || results[0].Kind != LuaValueKind.String)
+        {
+            throw new InvalidOperationException("The 'tostring' base function must return a string.");
+        }
+
+        return results[0].AsString();
+    }
+
+    private static string ConvertToWarningString(LuaValue value, int argumentIndex)
+    {
+        return value.Kind switch
+        {
+            LuaValueKind.String => value.AsString(),
+            LuaValueKind.Integer or LuaValueKind.Float => FormatLuaValue(value),
+            _ => throw CreateArgumentTypeError("warn", argumentIndex, "string", value)
+        };
     }
 
     private static string FormatLuaValue(LuaValue value)
@@ -783,8 +1561,14 @@ public sealed class LuaState
 
     private static string GetDisplayTypeName(LuaValue value)
     {
-        if (TryGetRawMetatable(value, out var metatable) &&
-            metatable is not null &&
+        LuaTable? metatable = value.Kind switch
+        {
+            LuaValueKind.Table => value.AsTable().Metatable,
+            LuaValueKind.UserData => value.AsUserData().Metatable,
+            _ => null
+        };
+
+        if (metatable is not null &&
             metatable.TryGetValue(LuaValue.FromString("__name"), out var nameValue) &&
             nameValue.Kind == LuaValueKind.String)
         {
