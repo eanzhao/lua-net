@@ -1,4 +1,4 @@
-# 第 6 步：基础库第一批核心函数
+# 第 7 步：基础库——type / assert / select / pcall
 
 ## 状态
 

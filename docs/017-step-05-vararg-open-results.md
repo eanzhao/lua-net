@@ -166,4 +166,4 @@ Lua 5.5 的 vararg 有两条内部表示路线：
 - 迭代器相关 opcode
 - 更一般的元方法分发
 
-其中 vararg table 这条线已经在后续一轮推进到 `docs/020-step-04-vararg-table.md`。
+其中 vararg table 这条线已经在后续一轮推进到 `docs/020-step-05-vararg-table.md`。

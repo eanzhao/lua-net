@@ -2,7 +2,7 @@
 
 ## 状态
 
-进行中。
+已完成。
 
 这一阶段的目标，是把前面已经落好的 `Runtime` 和 `Bytecode` 真正接起来，先形成一条最小但真实可跑的执行链路。
 
@@ -363,8 +363,8 @@ Lua 完整调用协议里有不少复杂点：
 这一步跑通之后，后续继续往下补：
 
 - 表访问的最小快速路径已经拆到 `docs/007-step-04-table-access.md`
-- `SELF` 与最小对象方法调用路径已经拆到 `docs/008-step-04-self-call.md`
-- `_ENV` 与最小全局表访问路径已经拆到 `docs/009-step-04-global-environment.md`
+- `SELF` 与最小对象方法调用路径已经拆到 `docs/008-step-05-self-call.md`
+- `_ENV` 与最小全局表访问路径已经拆到 `docs/009-step-05-global-environment.md`
 - 共享上值 cell 与 `GETUPVAL` / `SETUPVAL` 已经拆到 `docs/010-step-05-upvalue-cells.md`
 - `CLOSE` 与块作用域上值关闭已经拆到 `docs/011-step-05-close.md`
 - `TBC` 的 `nil/false` 快速路径已经拆到 `docs/012-step-05-tbc.md`
@@ -372,19 +372,19 @@ Lua 完整调用协议里有不少复杂点：
 - `__close` 的错误传播与继续关闭已经拆到 `docs/014-step-05-close-errors.md`
 - 剩余加载路径已经拆到 `docs/015-step-04-load-opcodes.md`
 - `SETLIST` 与数组批量写入已经拆到 `docs/016-step-04-setlist.md`
-- `VARARG` 与开放结果协议已经拆到 `docs/017-step-04-vararg-open-results.md`
+- `VARARG` 与开放结果协议已经拆到 `docs/017-step-05-vararg-open-results.md`
 - 循环执行路径已经拆到 `docs/018-step-04-loops.md`
 - `repeat / until` 与全局声明检查已经拆到 `docs/019-step-04-repeat-global-checks.md`
-- 具名 vararg 参数与 vararg table 已经拆到 `docs/020-step-04-vararg-table.md`
-- 二元算术与位运算元方法分发已经拆到 `docs/021-step-04-binary-metamethods.md`
-- 长度、拼接与比较元方法分发已经拆到 `docs/022-step-04-length-concat-compare-metamethods.md`
-- 一元元方法与最小 `__call` 已经拆到 `docs/023-step-04-unary-call-metamethods.md`
-- 表访问元方法分发已经拆到 `docs/024-step-04-table-metamethods.md`
-- userdata 元方法分发已经拆到 `docs/025-step-04-userdata-metamethods.md`
-- 第一批基础库元表与 `raw*` 函数已经拆到 `docs/026-step-06-base-metatable-raw-functions.md`
-- 第一批基础库核心函数已经拆到 `docs/027-step-06-base-core-functions.md`
-- 基础库受保护调用补充已经拆到 `docs/028-step-06-xpcall.md`
-- 基础库数值与字符串转换已经拆到 `docs/029-step-06-number-string-conversion.md`
+- 具名 vararg 参数与 vararg table 已经拆到 `docs/020-step-05-vararg-table.md`
+- 二元算术与位运算元方法分发已经拆到 `docs/021-step-06-binary-metamethods.md`
+- 长度、拼接与比较元方法分发已经拆到 `docs/022-step-06-length-concat-compare-metamethods.md`
+- 一元元方法与最小 `__call` 已经拆到 `docs/023-step-06-unary-call-metamethods.md`
+- 表访问元方法分发已经拆到 `docs/024-step-06-table-metamethods.md`
+- userdata 元方法分发已经拆到 `docs/025-step-06-userdata-metamethods.md`
+- 第一批基础库元表与 `raw*` 函数已经拆到 `docs/026-step-07-base-metatable-raw-functions.md`
+- 第一批基础库核心函数已经拆到 `docs/027-step-07-base-core-functions.md`
+- 基础库受保护调用补充已经拆到 `docs/028-step-07-xpcall.md`
+- 基础库数值与字符串转换已经拆到 `docs/029-step-07-number-string-conversion.md`
 - 更完整的调用协议
 - 更完整的跳转与条件分支
 - `EQI` / `LEI` / `GEI` 之外更多比较组合

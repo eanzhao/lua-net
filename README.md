@@ -1,26 +1,36 @@
 # lua-net
 
-用 C# 从头实现 Lua 5.5 的学习型项目。
+**用 C# 从零实现 Lua 5.5 的学习项目。**
 
-- 对齐 Lua 5.5.0 语言行为
-- 用清楚、可测试、可阅读的 C# 结构重新实现
-- 按阶段推进，每一步先写文档，再写代码和测试
+这个项目的目标不是做最快的 Lua 实现，而是用最清楚的方式把 Lua 5.5 的运行机制拆开给你看——每一步先写文档说清楚要做什么、为什么做，再写代码和测试把它钉住。
 
-工具链基线：.NET 10 / `net10.0`
+## 这个项目是什么
+
+简单说：**用 C# 重写 Lua 5.5 的完整运行时**。
+
+它能做什么？
+
+- 读取 Lua 5.5 编译出的字节码文件（`.luac`）
+- 执行字节码，跑出和官方 Lua 一样结果
+- 支持表、闭包、元方法、标准库函数等核心语言特性
+
+最终目标是：能接受并运行官方 Lua 5.5 编译器能接受的 Lua 源码。
 
 ## 快速开始
 
 ```bash
-# 运行全部测试（当前 140 个通过）
+# 运行全部测试
 dotnet test lua-net.sln
 
 # 查看解决方案结构
 dotnet sln lua-net.sln list
 ```
 
-## 阶段进度
+工具链基线：**.NET 10** / `net10.0`
 
-项目按 [路线图](docs/001-roadmap.md) 分 10 步推进，当前进度如下：
+## 项目进度
+
+整个项目按 [路线图](docs/001-roadmap.md) 分 **10 步**推进，每一步先写文档，再写代码和测试：
 
 | 阶段 | 主题 | 状态 |
 |------|------|------|
@@ -37,11 +47,9 @@ dotnet sln lua-net.sln list
 
 ### 第 7 步当前覆盖范围
 
-**已实现：**
-`setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`
+**已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`
 
-**待补充：**
-`next` / `pairs` / `ipairs`、`table` 库、`string` 库、`math` 库、`coroutine` 基础版
+**待补充：** `table` 库、`string` 库、`math` 库、`coroutine` 基础版
 
 ## 仓库结构
 
@@ -67,12 +75,12 @@ src/
 └── Lua.Core/                 共享二进制 chunk 工具（早期遗留）
 
 test/
-├── Lua.Runtime.Tests/        运行时单元测试（37 个）
-├── Lua.Bytecode.Tests/       字节码解析测试（13 个）
-├── Lua.VM.Tests/             VM 集成测试（90 个，使用真实 Lua 5.5 chunk fixture）
+├── Lua.Runtime.Tests/        运行时单元测试
+├── Lua.Bytecode.Tests/       字节码解析测试
+├── Lua.VM.Tests/             VM 集成测试（使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（29 份）
+docs/                         阶段规划和设计文档（30 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -83,64 +91,65 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 编号 | 文档 | 主题 |
 |------|------|------|
 | 001 | [roadmap](docs/001-roadmap.md) | 总路线图与 10 步阶段计划 |
-| 002 | [foundation](docs/002-step-01-foundation.md) | 基础基线 |
+| 002 | [foundation](docs/002-step-01-foundation.md) | 基础基线（目标版本、模块边界、测试策略） |
 | 003 | [source-reference](docs/003-step-01-source-reference.md) | 官方源码参考策略 |
 
 ### 第 2 步：运行时值模型
 
 | 编号 | 文档 | 主题 |
 |------|------|------|
-| 004 | [runtime-model](docs/004-step-02-runtime-model.md) | 运行时模型设计 |
+| 004 | [runtime-model](docs/004-step-02-runtime-model.md) | 运行时模型设计（LuaValue, LuaStack, LuaState 等） |
 
 ### 第 3 步：字节码加载与反汇编
 
 | 编号 | 文档 | 主题 |
 |------|------|------|
-| 005 | [bytecode-loader](docs/005-step-03-bytecode-loader.md) | 字节码加载与反汇编 |
+| 005 | [bytecode-loader](docs/005-step-03-bytecode-loader.md) | 字节码格式、指令解码、反汇编 |
 
 ### 第 4 步：VM 骨架
 
 | 编号 | 文档 | 主题 |
 |------|------|------|
-| 006 | [vm-skeleton](docs/006-step-04-vm-skeleton.md) | VM 骨架与最小执行闭环 |
+| 006 | [vm-skeleton](docs/006-step-04-vm-skeleton.md) | VM 核心执行循环与全部已支持指令 |
 | 007 | [table-access](docs/007-step-04-table-access.md) | 最小表构造与原始表访问 |
-| 015 | [load-opcodes](docs/015-step-04-load-opcodes.md) | 剩余加载路径 |
+| 015 | [load-opcodes](docs/015-step-04-load-opcodes.md) | LOADF / LOADKX / LFALSESKIP |
 | 016 | [setlist](docs/016-step-04-setlist.md) | SETLIST 与数组批量写入 |
-| 018 | [loops](docs/018-step-04-loops.md) | 循环执行路径 |
-| 019 | [repeat-global-checks](docs/019-step-04-repeat-global-checks.md) | repeat/until 与全局声明检查 |
+| 018 | [loops](docs/018-step-04-loops.md) | 数值 for、泛型 for、while |
+| 019 | [repeat-global-checks](docs/019-step-04-repeat-global-checks.md) | repeat/until 与 global 声明检查 |
 
 ### 第 5 步：调用、闭包、上值、可变参数
 
 | 编号 | 文档 | 主题 |
 |------|------|------|
-| 008 | [self-call](docs/008-step-05-self-call.md) | SELF 与对象方法调用 |
-| 009 | [global-environment](docs/009-step-05-global-environment.md) | _ENV 与全局表访问 |
-| 010 | [upvalue-cells](docs/010-step-05-upvalue-cells.md) | 共享上值 cell |
+| 008 | [self-call](docs/008-step-05-self-call.md) | SELF 指令与 `:` 方法调用 |
+| 009 | [global-environment](docs/009-step-05-global-environment.md) | `_ENV` 与全局变量读写 |
+| 010 | [upvalue-cells](docs/010-step-05-upvalue-cells.md) | 共享上值 cell 与闭包捕获 |
 | 011 | [close](docs/011-step-05-close.md) | CLOSE 与块作用域上值关闭 |
-| 012 | [tbc](docs/012-step-05-tbc.md) | TBC 最小快速路径 |
-| 013 | [close-metamethod](docs/013-step-05-close-metamethod.md) | __close 生命周期 |
-| 014 | [close-errors](docs/014-step-05-close-errors.md) | __close 错误传播 |
+| 012 | [tbc](docs/012-step-05-tbc.md) | TBC 的 nil/false 快速路径 |
+| 013 | [close-metamethod](docs/013-step-05-close-metamethod.md) | `__close` 生命周期 |
+| 014 | [close-errors](docs/014-step-05-close-errors.md) | `__close` 错误传播 |
 | 017 | [vararg-open-results](docs/017-step-05-vararg-open-results.md) | VARARG 与开放结果协议 |
-| 020 | [vararg-table](docs/020-step-05-vararg-table.md) | vararg table |
+| 020 | [vararg-table](docs/020-step-05-vararg-table.md) | 具名 vararg 参数与 vararg table |
 
 ### 第 6 步：表与元表
 
 | 编号 | 文档 | 主题 |
 |------|------|------|
-| 021 | [binary-metamethods](docs/021-step-06-binary-metamethods.md) | 二元算术与位运算元方法 |
-| 022 | [length-concat-compare](docs/022-step-06-length-concat-compare-metamethods.md) | 长度、拼接与比较元方法 |
-| 023 | [unary-call](docs/023-step-06-unary-call-metamethods.md) | 一元元方法与 __call |
-| 024 | [table-metamethods](docs/024-step-06-table-metamethods.md) | 表访问元方法 |
-| 025 | [userdata-metamethods](docs/025-step-06-userdata-metamethods.md) | userdata 元方法 |
+| 021 | [binary-metamethods](docs/021-step-06-binary-metamethods.md) | `__add` / `__sub` 等二元算术与位运算元方法 |
+| 022 | [length-concat-compare](docs/022-step-06-length-concat-compare-metamethods.md) | `__len` / `__concat` / `__eq` / `__lt` / `__le` |
+| 023 | [unary-call](docs/023-step-06-unary-call-metamethods.md) | `__unm` / `__bnot` / `__call` |
+| 024 | [table-metamethods](docs/024-step-06-table-metamethods.md) | `__index` / `__newindex` 表访问元方法 |
+| 025 | [userdata-metamethods](docs/025-step-06-userdata-metamethods.md) | userdata 的全套元方法 |
 
 ### 第 7 步：标准库基础版
 
 | 编号 | 文档 | 主题 |
 |------|------|------|
-| 026 | [base-metatable-raw](docs/026-step-07-base-metatable-raw-functions.md) | 元表与 raw 函数 |
+| 026 | [base-metatable-raw](docs/026-step-07-base-metatable-raw-functions.md) | getmetatable / rawget / rawset / rawlen / rawequal |
 | 027 | [base-core](docs/027-step-07-base-core-functions.md) | type / assert / select / pcall |
-| 028 | [xpcall](docs/028-step-07-xpcall.md) | xpcall |
+| 028 | [xpcall](docs/028-step-07-xpcall.md) | xpcall 与 message handler |
 | 029 | [number-string-conversion](docs/029-step-07-number-string-conversion.md) | tonumber / tostring |
+| 030 | [table-iteration-functions](docs/030-step-07-table-iteration-functions.md) | next / pairs / ipairs |
 
 ## 开发方式
 

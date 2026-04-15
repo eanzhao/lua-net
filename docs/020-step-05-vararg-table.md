@@ -1,4 +1,4 @@
-# 第 4 步补充：具名 vararg 参数与 vararg table
+# 第 5 步补充：具名 vararg 参数与 vararg table
 
 ## 状态
 

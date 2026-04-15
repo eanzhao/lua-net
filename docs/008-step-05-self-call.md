@@ -1,4 +1,4 @@
-# 第 4 步补充：SELF 与对象方法调用
+# 第 5 步：SELF 与对象方法调用
 
 ## 状态
 
@@ -107,7 +107,7 @@
 
 接下来继续往下补：
 
-- `_ENV` 与全局表访问路径已经拆到 `docs/009-step-04-global-environment.md`
+- `_ENV` 与全局表访问路径已经拆到 `docs/009-step-05-global-environment.md`
 - 更完整的调用协议
 - 上值捕获
 - 元方法调度
