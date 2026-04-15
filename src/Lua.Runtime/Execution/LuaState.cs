@@ -6,7 +6,7 @@ using static Lua.Runtime.Values.LuaValueHelper;
 
 namespace Lua.Runtime.Execution;
 
-public sealed class LuaState
+public sealed partial class LuaState
 {
     public delegate LuaClosure BinaryChunkLoader(
         ReadOnlyMemory<byte> chunkBytes,
@@ -150,9 +150,22 @@ public sealed class LuaState
 
     private void RegisterStringSupport()
     {
+        RegisterLibraryFunction(StringLibrary, "byte", StringByte, "string.byte");
+        RegisterLibraryFunction(StringLibrary, "char", StringChar, "string.char");
+        RegisterLibraryFunction(StringLibrary, "find", StringFind, "string.find");
+        RegisterLibraryFunction(StringLibrary, "format", StringFormat, "string.format");
+        RegisterLibraryFunction(StringLibrary, "gmatch", StringGMatch, "string.gmatch");
+        RegisterLibraryFunction(StringLibrary, "gsub", StringGSub, "string.gsub");
         RegisterLibraryFunction(StringLibrary, "upper", StringUpper, "string.upper");
         RegisterLibraryFunction(StringLibrary, "lower", StringLower, "string.lower");
         RegisterLibraryFunction(StringLibrary, "len", StringLen, "string.len");
+        RegisterLibraryFunction(StringLibrary, "match", StringMatch, "string.match");
+        RegisterLibraryFunction(StringLibrary, "pack", StringPack, "string.pack");
+        RegisterLibraryFunction(StringLibrary, "packsize", StringPackSize, "string.packsize");
+        RegisterLibraryFunction(StringLibrary, "rep", StringRep, "string.rep");
+        RegisterLibraryFunction(StringLibrary, "reverse", StringReverse, "string.reverse");
+        RegisterLibraryFunction(StringLibrary, "sub", StringSub, "string.sub");
+        RegisterLibraryFunction(StringLibrary, "unpack", StringUnpack, "string.unpack");
 
         GlobalEnvironment.SetValue(LuaValue.FromString("string"), LuaValue.FromTable(StringLibrary));
 
@@ -387,7 +400,7 @@ public sealed class LuaState
         return value.Kind switch
         {
             LuaValueKind.Table => [LuaValue.FromInteger(value.AsTable().GetSequenceLength())],
-            LuaValueKind.String => [LuaValue.FromInteger(Encoding.UTF8.GetByteCount(value.AsString()))],
+            LuaValueKind.String => [LuaValue.FromInteger(GetLuaStringBytes(value.AsString()).Length)],
             _ => throw CreateArgumentTypeError("rawlen", 1, "table or string", value)
         };
     }
@@ -737,7 +750,7 @@ public sealed class LuaState
     {
 
         var value = RequireStringArgument(arguments, 0, "string.len");
-        return [LuaValue.FromInteger(Encoding.UTF8.GetByteCount(value))];
+        return [LuaValue.FromInteger(GetLuaStringBytes(value).Length)];
     }
 
     private static LuaValue[] StringAdd(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
@@ -802,7 +815,8 @@ public sealed class LuaState
             return [LuaValue.FromString(string.Empty)];
         }
 
-        var builder = new StringBuilder();
+        var buffer = new List<byte>();
+        var separatorBytes = GetLuaStringBytes(separator);
         for (var index = start; index <= end; index++)
         {
             var field = table.GetValue(LuaValue.FromInteger(index));
@@ -814,13 +828,13 @@ public sealed class LuaState
 
             if (index > start)
             {
-                builder.Append(separator);
+                buffer.AddRange(separatorBytes);
             }
 
-            builder.Append(text);
+            buffer.AddRange(GetLuaStringBytes(text));
         }
 
-        return [LuaValue.FromString(builder.ToString())];
+        return [LuaValue.FromString(CreateLuaString(buffer.ToArray()))];
     }
 
     private static LuaValue[] TableInsert(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

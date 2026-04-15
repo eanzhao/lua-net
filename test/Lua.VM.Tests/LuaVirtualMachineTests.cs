@@ -1832,6 +1832,48 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldHandleStringLibraryChunkFixture()
+    {
+        var vm = new LuaVirtualMachine();
+        var results = vm.Execute(ReadFixtureChunk("string_library_chunk.luac"));
+
+        results.Length.ShouldBe(31);
+        results[0].AsInteger().ShouldBe(65);
+        results[1].AsInteger().ShouldBe(207);
+        results[2].AsInteger().ShouldBe(128);
+        results[3].AsString().ShouldBe("ABC");
+        results[4].AsString().ShouldBe("ab-ab-ab");
+        results[5].AsString().ShouldBe("cba");
+        results[6].AsString().ShouldBe("π");
+        results[7].AsInteger().ShouldBe(7);
+        results[8].AsInteger().ShouldBe(9);
+        results[9].AsInteger().ShouldBe(3);
+        results[10].AsInteger().ShouldBe(4);
+        results[11].AsString().ShouldBe("abc");
+        results[12].AsString().ShouldBe("42");
+        results[13].AsInteger().ShouldBe(3);
+        results[14].AsInteger().ShouldBe(5);
+        results[15].AsString().ShouldBe("(a(b)c)");
+        results[16].AsString().ShouldBe("[cat] 42 [dog]");
+        results[17].AsInteger().ShouldBe(2);
+        results[18].AsString().ShouldBe("x");
+        results[19].AsString().ShouldBe("10");
+        results[20].AsString().ShouldBe("y");
+        results[21].AsString().ShouldBe("20");
+        results[22].AsString().ShouldBe("lua|7|2.50|\"a\\nb\"");
+        results[23].AsInteger().ShouldBe(4);
+        results[24].AsInteger().ShouldBe(1);
+        results[25].AsInteger().ShouldBe(2);
+        results[26].AsInteger().ShouldBe(3);
+        results[27].AsInteger().ShouldBe(4);
+        results[28].AsInteger().ShouldBe(513);
+        results[29].AsInteger().ShouldBe(1027);
+        results[30].AsInteger().ShouldBe(5);
+        vm.State.Frames.ShouldBeEmpty();
+        vm.State.Stack.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public void Execute_ShouldHandleLoadChunkFixture()
     {
         var vm = new LuaVirtualMachine();

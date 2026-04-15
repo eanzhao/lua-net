@@ -116,9 +116,15 @@ public class LuaStateTests
 
         var stringTable = stringTableValue.AsTable();
         stringTable.ShouldBeSameAs(state.StringLibrary);
+        stringTable.GetValue(LuaValue.FromString("byte")).AsFunction().DebugName.ShouldBe("string.byte");
+        stringTable.GetValue(LuaValue.FromString("find")).AsFunction().DebugName.ShouldBe("string.find");
+        stringTable.GetValue(LuaValue.FromString("format")).AsFunction().DebugName.ShouldBe("string.format");
+        stringTable.GetValue(LuaValue.FromString("gsub")).AsFunction().DebugName.ShouldBe("string.gsub");
         stringTable.GetValue(LuaValue.FromString("upper")).AsFunction().DebugName.ShouldBe("string.upper");
         stringTable.GetValue(LuaValue.FromString("lower")).AsFunction().DebugName.ShouldBe("string.lower");
         stringTable.GetValue(LuaValue.FromString("len")).AsFunction().DebugName.ShouldBe("string.len");
+        stringTable.GetValue(LuaValue.FromString("pack")).AsFunction().DebugName.ShouldBe("string.pack");
+        stringTable.GetValue(LuaValue.FromString("unpack")).AsFunction().DebugName.ShouldBe("string.unpack");
 
         var stringMetatable = InvokeBaseFunction(state, getMetatable, LuaValue.FromString("lua"))
             .ShouldHaveSingleItem()
@@ -126,6 +132,120 @@ public class LuaStateTests
         stringMetatable.GetValue(LuaValue.FromString("__index")).AsTable().ShouldBeSameAs(state.StringLibrary);
         stringMetatable.GetValue(LuaValue.FromString("__add")).AsFunction().DebugName.ShouldBe("__add");
         stringMetatable.GetValue(LuaValue.FromString("__unm")).AsFunction().DebugName.ShouldBe("__unm");
+    }
+
+    [Fact]
+    public void StringLibrary_ShouldHandleByteStringOperations()
+    {
+        var state = new LuaState();
+        var byteFunction = GetLibraryFunction(state.StringLibrary, "byte");
+        var charFunction = GetLibraryFunction(state.StringLibrary, "char");
+        var repFunction = GetLibraryFunction(state.StringLibrary, "rep");
+        var reverseFunction = GetLibraryFunction(state.StringLibrary, "reverse");
+        var subFunction = GetLibraryFunction(state.StringLibrary, "sub");
+        var lenFunction = GetLibraryFunction(state.StringLibrary, "len");
+
+        InvokeClosure(state, byteFunction, LuaValue.FromString("Aπ"), LuaValue.FromInteger(1), LuaValue.FromInteger(3))
+            .ShouldBe([LuaValue.FromInteger(65), LuaValue.FromInteger(207), LuaValue.FromInteger(128)]);
+
+        InvokeClosure(state, charFunction, LuaValue.FromInteger(65), LuaValue.FromInteger(207), LuaValue.FromInteger(128))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("Aπ");
+
+        InvokeClosure(state, repFunction, LuaValue.FromString("ab"), LuaValue.FromInteger(3), LuaValue.FromString("-"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("ab-ab-ab");
+
+        InvokeClosure(state, reverseFunction, LuaValue.FromString("abc"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("cba");
+
+        InvokeClosure(state, subFunction, LuaValue.FromString("Aπ"), LuaValue.FromInteger(2), LuaValue.FromInteger(-1))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("π");
+
+        InvokeClosure(state, lenFunction, LuaValue.FromString("Aπ"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(3);
+    }
+
+    [Fact]
+    public void StringLibrary_ShouldHandlePatternsAndReplacement()
+    {
+        var state = new LuaState();
+        var findFunction = GetLibraryFunction(state.StringLibrary, "find");
+        var matchFunction = GetLibraryFunction(state.StringLibrary, "match");
+        var gmatchFunction = GetLibraryFunction(state.StringLibrary, "gmatch");
+        var gsubFunction = GetLibraryFunction(state.StringLibrary, "gsub");
+
+        InvokeClosure(state, findFunction, LuaValue.FromString("hello 123"), LuaValue.FromString("%d+"))
+            .ShouldBe([LuaValue.FromInteger(7), LuaValue.FromInteger(9)]);
+
+        InvokeClosure(state, findFunction, LuaValue.FromString("banana"), LuaValue.FromString("na"), LuaValue.FromInteger(3), LuaValue.FromBoolean(true))
+            .ShouldBe([LuaValue.FromInteger(3), LuaValue.FromInteger(4)]);
+
+        InvokeClosure(state, matchFunction, LuaValue.FromString("abc 42"), LuaValue.FromString("(%a+)%s+(%d+)"))
+            .ShouldBe([LuaValue.FromString("abc"), LuaValue.FromString("42")]);
+
+        InvokeClosure(state, matchFunction, LuaValue.FromString("aabb"), LuaValue.FromString("()bb()"))
+            .ShouldBe([LuaValue.FromInteger(3), LuaValue.FromInteger(5)]);
+
+        InvokeClosure(state, matchFunction, LuaValue.FromString("xx(a(b)c)yy"), LuaValue.FromString("%b()"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("(a(b)c)");
+
+        var replacementTable = new LuaTable();
+        replacementTable.SetValue(LuaValue.FromString("cat"), LuaValue.FromString("animal"));
+        replacementTable.SetValue(LuaValue.FromString("dog"), LuaValue.FromString("pet"));
+        InvokeClosure(state, gsubFunction, LuaValue.FromString("cat 42 dog"), LuaValue.FromString("(%a+)"), LuaValue.FromTable(replacementTable))
+            .ShouldBe([LuaValue.FromString("animal 42 pet"), LuaValue.FromInteger(2)]);
+
+        var iterator = InvokeClosure(state, gmatchFunction, LuaValue.FromString("x=10,y=20"), LuaValue.FromString("(%a)=(%d+)"))
+            .ShouldHaveSingleItem()
+            .AsFunction();
+        InvokeClosure(state, iterator).ShouldBe([LuaValue.FromString("x"), LuaValue.FromString("10")]);
+        InvokeClosure(state, iterator).ShouldBe([LuaValue.FromString("y"), LuaValue.FromString("20")]);
+        InvokeClosure(state, iterator).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void StringLibrary_ShouldHandleFormatAndPack()
+    {
+        var state = new LuaState();
+        var formatFunction = GetLibraryFunction(state.StringLibrary, "format");
+        var packFunction = GetLibraryFunction(state.StringLibrary, "pack");
+        var packSizeFunction = GetLibraryFunction(state.StringLibrary, "packsize");
+        var unpackFunction = GetLibraryFunction(state.StringLibrary, "unpack");
+        var byteFunction = GetLibraryFunction(state.StringLibrary, "byte");
+
+        InvokeClosure(
+            state,
+            formatFunction,
+            LuaValue.FromString("%s|%d|%.2f|%q"),
+            LuaValue.FromString("lua"),
+            LuaValue.FromInteger(7),
+            LuaValue.FromFloat(2.5d),
+            LuaValue.FromString("a\nb"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("lua|7|2.50|\"a\\nb\"");
+
+        var packed = InvokeClosure(
+            state,
+            packFunction,
+            LuaValue.FromString("<I2I2"),
+            LuaValue.FromInteger(513),
+            LuaValue.FromInteger(1027))
+            .ShouldHaveSingleItem();
+
+        InvokeClosure(state, packSizeFunction, LuaValue.FromString("<I2I2"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(4);
+
+        InvokeClosure(state, byteFunction, packed, LuaValue.FromInteger(1), LuaValue.FromInteger(4))
+            .ShouldBe([LuaValue.FromInteger(1), LuaValue.FromInteger(2), LuaValue.FromInteger(3), LuaValue.FromInteger(4)]);
+
+        InvokeClosure(state, unpackFunction, LuaValue.FromString("<I2I2"), packed)
+            .ShouldBe([LuaValue.FromInteger(513), LuaValue.FromInteger(1027), LuaValue.FromInteger(5)]);
     }
 
     [Fact]
@@ -1380,7 +1500,17 @@ public class LuaStateTests
         return state.GlobalEnvironment.GetValue(LuaValue.FromString(name)).AsFunction();
     }
 
+    private static LuaClosure GetLibraryFunction(LuaTable table, string name)
+    {
+        return table.GetValue(LuaValue.FromString(name)).AsFunction();
+    }
+
     private static LuaValue[] InvokeBaseFunction(LuaState state, LuaClosure closure, params LuaValue[] arguments)
+    {
+        return ((LuaNativeClosureBody)closure.Body!).Function(state, closure, arguments);
+    }
+
+    private static LuaValue[] InvokeClosure(LuaState state, LuaClosure closure, params LuaValue[] arguments)
     {
         return ((LuaNativeClosureBody)closure.Body!).Function(state, closure, arguments);
     }

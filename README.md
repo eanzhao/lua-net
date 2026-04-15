@@ -173,6 +173,12 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 |------|------|------|
 | 035 | [table-math-utf8-libraries](docs/035-step-08-table-math-utf8-libraries.md) | `table` / `math` / `utf8` 基础库 |
 
+### 第 9 步：完整 `string` 库与模式匹配
+
+| 编号 | 文档 | 主题 |
+|------|------|------|
+| 036 | [string-library-patterns](docs/036-step-09-string-library-patterns.md) | 完整 `string` 库、Lua 模式匹配与二进制 pack/unpack |
+
 ## 开发方式
 
 1. 先明确阶段目标

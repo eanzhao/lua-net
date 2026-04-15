@@ -1,4 +1,3 @@
-using System.Text;
 using Lua.Bytecode.Chunks;
 using Lua.Bytecode.Instructions;
 using Lua.Runtime.Execution;
@@ -62,7 +61,7 @@ public sealed partial class LuaVirtualMachine
 
         if (value.Kind == LuaValueKind.String)
         {
-            SetRegister(frame, instruction.A, LuaValue.FromInteger(Encoding.UTF8.GetByteCount(value.AsString())));
+            SetRegister(frame, instruction.A, LuaValue.FromInteger(LuaStringBytes.GetBytes(value.AsString()).Length));
             return;
         }
 
@@ -207,7 +206,7 @@ public sealed partial class LuaVirtualMachine
         if (TryGetConcatenationString(left, out var leftText) &&
             TryGetConcatenationString(right, out var rightText))
         {
-            result = LuaValue.FromString(leftText + rightText);
+            result = LuaValue.FromString(LuaStringBytes.Concat(leftText, rightText));
             return true;
         }
 
