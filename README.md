@@ -30,7 +30,7 @@ dotnet sln lua-net.sln list
 
 ## 项目进度
 
-整个项目按 [路线图](docs/001-roadmap.md) 分 **10 步**推进，每一步先写文档，再写代码和测试：
+整个项目按 [路线图](docs/001-roadmap.md) 分 **16 步**推进，每一步先写文档，再写代码和测试：
 
 | 阶段 | 主题 | 状态 |
 |------|------|------|
@@ -40,16 +40,22 @@ dotnet sln lua-net.sln list
 | 第 4 步 | VM 骨架与指令执行 | 已完成 |
 | 第 5 步 | 调用、闭包、上值、可变参数 | 已完成 |
 | 第 6 步 | 表与元表 | 已完成 |
-| 第 7 步 | 标准库基础版 | 进行中 |
-| 第 8 步 | 词法与语法分析 | 未开始 |
-| 第 9 步 | 编译器 | 未开始 |
-| 第 10 步 | 兼容性收口 | 未开始 |
+| 第 7 步 | 基础库核心函数 | 进行中 |
+| 第 8 步 | table 库与 math 库 | 未开始 |
+| 第 9 步 | string 库与模式匹配 | 未开始 |
+| 第 10 步 | coroutine 库 | 未开始 |
+| 第 11 步 | 词法分析 | 未开始 |
+| 第 12 步 | 语法分析与 AST | 未开始 |
+| 第 13 步 | 编译器（AST → 字节码） | 未开始 |
+| 第 14 步 | io / os / package / debug 库 | 未开始 |
+| 第 15 步 | 字节码序列化与 REPL | 未开始 |
+| 第 16 步 | 兼容性收口 | 未开始 |
 
 ### 第 7 步当前覆盖范围
 
 **已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`
 
-**待补充：** `table` 库、`string` 库、`math` 库、`coroutine` 基础版
+**待补充：** `print` / `warn`、`load` / `dofile`、字符串元表与算术元方法
 
 ## 仓库结构
 
