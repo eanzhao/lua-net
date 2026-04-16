@@ -20,6 +20,11 @@ public sealed partial class LuaState
         bool hasEnvironment,
         LuaValue environment);
 
+    public delegate bool BytecodeChunkDumper(
+        LuaClosure closure,
+        bool stripDebugInformation,
+        out ReadOnlyMemory<byte> dumpedChunk);
+
     private enum WarningMode
     {
         Off,
@@ -31,6 +36,7 @@ public sealed partial class LuaState
     private readonly StringBuilder _warningBuffer = new();
     private BinaryChunkLoader? _binaryChunkLoader;
     private TextChunkLoader? _textChunkLoader;
+    private BytecodeChunkDumper? _bytecodeChunkDumper;
     private Func<LuaValue, IReadOnlyList<LuaValue>, LuaValue[]>? _callableInvoker;
     private Func<LuaThread, IReadOnlyList<LuaValue>, LuaValue[]>? _coroutineResumer;
     private Func<LuaThread, LuaValue[]>? _coroutineCloser;
@@ -65,6 +71,9 @@ public sealed partial class LuaState
         Utf8Library = new LuaTable("utf8");
         CoroutineLibrary = new LuaTable("coroutine");
         PackageLibrary = new LuaTable("package");
+        OsLibrary = new LuaTable("os");
+        IoLibrary = new LuaTable("io");
+        DebugLibrary = new LuaTable("debug");
         PackageLoaded = new LuaTable("package.loaded");
         PackagePreload = new LuaTable("package.preload");
         PackageSearchers = new LuaTable("package.searchers");
@@ -75,6 +84,9 @@ public sealed partial class LuaState
         RegisterUtf8Support();
         RegisterCoroutineSupport();
         RegisterPackageSupport();
+        RegisterOsSupport();
+        RegisterIoSupport();
+        RegisterDebugSupport();
     }
 
     public LuaThread MainThread { get; }
@@ -96,6 +108,12 @@ public sealed partial class LuaState
     public LuaTable CoroutineLibrary { get; }
 
     public LuaTable PackageLibrary { get; }
+
+    public LuaTable OsLibrary { get; }
+
+    public LuaTable IoLibrary { get; }
+
+    public LuaTable DebugLibrary { get; }
 
     public LuaTable PackageLoaded { get; }
 
@@ -193,10 +211,60 @@ public sealed partial class LuaState
         RegisterBaseFunction("require", Require);
     }
 
+    private void RegisterOsSupport()
+    {
+        RegisterLibraryFunction(OsLibrary, "clock", OsClock, "os.clock");
+        RegisterLibraryFunction(OsLibrary, "time", OsTime, "os.time");
+        RegisterLibraryFunction(OsLibrary, "difftime", OsDiffTime, "os.difftime");
+        RegisterLibraryFunction(OsLibrary, "date", OsDate, "os.date");
+        RegisterLibraryFunction(OsLibrary, "getenv", OsGetEnv, "os.getenv");
+        RegisterLibraryFunction(OsLibrary, "remove", OsRemove, "os.remove");
+        RegisterLibraryFunction(OsLibrary, "rename", OsRename, "os.rename");
+        RegisterLibraryFunction(OsLibrary, "execute", OsExecute, "os.execute");
+        RegisterLibraryFunction(OsLibrary, "tmpname", OsTmpName, "os.tmpname");
+        RegisterLibraryFunction(OsLibrary, "exit", OsExit, "os.exit");
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("os"), LuaValue.FromTable(OsLibrary));
+    }
+
+    private void RegisterIoSupport()
+    {
+        RegisterLibraryFunction(IoLibrary, "open", IoOpen, "io.open");
+        RegisterLibraryFunction(IoLibrary, "close", IoClose, "io.close");
+        RegisterLibraryFunction(IoLibrary, "read", IoRead, "io.read");
+        RegisterLibraryFunction(IoLibrary, "write", IoWrite, "io.write");
+        RegisterLibraryFunction(IoLibrary, "lines", IoLines, "io.lines");
+        RegisterLibraryFunction(IoLibrary, "input", IoInput, "io.input");
+        RegisterLibraryFunction(IoLibrary, "output", IoOutput, "io.output");
+        RegisterLibraryFunction(IoLibrary, "flush", IoFlush, "io.flush");
+        RegisterLibraryFunction(IoLibrary, "type", IoType, "io.type");
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("io"), LuaValue.FromTable(IoLibrary));
+    }
+
+    private void RegisterDebugSupport()
+    {
+        RegisterLibraryFunction(DebugLibrary, "getinfo", DebugGetInfo, "debug.getinfo");
+        RegisterLibraryFunction(DebugLibrary, "traceback", DebugTraceback, "debug.traceback");
+        RegisterLibraryFunction(DebugLibrary, "getlocal", DebugGetLocal, "debug.getlocal");
+        RegisterLibraryFunction(DebugLibrary, "setlocal", DebugSetLocal, "debug.setlocal");
+        RegisterLibraryFunction(DebugLibrary, "getupvalue", DebugGetUpvalue, "debug.getupvalue");
+        RegisterLibraryFunction(DebugLibrary, "setupvalue", DebugSetUpvalue, "debug.setupvalue");
+        RegisterLibraryFunction(DebugLibrary, "sethook", DebugSetHook, "debug.sethook");
+        RegisterLibraryFunction(DebugLibrary, "gethook", DebugGetHook, "debug.gethook");
+        RegisterLibraryFunction(DebugLibrary, "getuservalue", DebugGetUserValue, "debug.getuservalue");
+        RegisterLibraryFunction(DebugLibrary, "setuservalue", DebugSetUserValue, "debug.setuservalue");
+        RegisterLibraryFunction(DebugLibrary, "upvalueid", DebugUpvalueId, "debug.upvalueid");
+        RegisterLibraryFunction(DebugLibrary, "upvaluejoin", DebugUpvalueJoin, "debug.upvaluejoin");
+
+        GlobalEnvironment.SetValue(LuaValue.FromString("debug"), LuaValue.FromTable(DebugLibrary));
+    }
+
     private void RegisterStringSupport()
     {
         RegisterLibraryFunction(StringLibrary, "byte", StringByte, "string.byte");
         RegisterLibraryFunction(StringLibrary, "char", StringChar, "string.char");
+        RegisterLibraryFunction(StringLibrary, "dump", StringDump, "string.dump");
         RegisterLibraryFunction(StringLibrary, "find", StringFind, "string.find");
         RegisterLibraryFunction(StringLibrary, "format", StringFormat, "string.format");
         RegisterLibraryFunction(StringLibrary, "gmatch", StringGMatch, "string.gmatch");
@@ -332,6 +400,12 @@ public sealed partial class LuaState
         _textChunkLoader = textChunkLoader;
     }
 
+    public void SetBytecodeChunkDumper(BytecodeChunkDumper bytecodeChunkDumper)
+    {
+        ArgumentNullException.ThrowIfNull(bytecodeChunkDumper);
+        _bytecodeChunkDumper = bytecodeChunkDumper;
+    }
+
     public void SetCoroutineResumer(Func<LuaThread, IReadOnlyList<LuaValue>, LuaValue[]> coroutineResumer)
     {
         ArgumentNullException.ThrowIfNull(coroutineResumer);
@@ -351,6 +425,21 @@ public sealed partial class LuaState
         var previous = CurrentThread;
         CurrentThread = thread;
         return previous;
+    }
+
+    public bool TryDumpBytecodeChunk(
+        LuaClosure closure,
+        bool stripDebugInformation,
+        out ReadOnlyMemory<byte> dumpedChunk)
+    {
+        ArgumentNullException.ThrowIfNull(closure);
+
+        if (_bytecodeChunkDumper is null)
+        {
+            throw new InvalidOperationException("Bytecode chunk dumper is not configured.");
+        }
+
+        return _bytecodeChunkDumper(closure, stripDebugInformation, out dumpedChunk);
     }
 
     public LuaValue[] InvokeCallable(LuaValue callable, IReadOnlyList<LuaValue> arguments)

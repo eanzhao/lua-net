@@ -56,6 +56,20 @@ public sealed partial class LuaState
         return [LuaValue.FromString(CreateLuaString(bytes))];
     }
 
+    private static LuaValue[] StringDump(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var functionValue = RequireArgument(arguments, 0, "string.dump");
+        var stripDebugInformation = arguments.Count > 1 && IsTruthy(arguments[1]);
+
+        if (functionValue.Kind != LuaValueKind.Function ||
+            !state.TryDumpBytecodeChunk(functionValue.AsFunction(), stripDebugInformation, out var dumpedChunk))
+        {
+            throw CreateArgumentError("string.dump", 1, "Lua function expected");
+        }
+
+        return [LuaValue.FromString(CreateLuaString(dumpedChunk.Span))];
+    }
+
     private static LuaValue[] StringReverse(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         var text = RequireStringArgument(arguments, 0, "string.reverse");
@@ -489,4 +503,5 @@ public sealed partial class LuaState
     {
         return LuaStringBytes.FromBytes(bytes);
     }
+
 }

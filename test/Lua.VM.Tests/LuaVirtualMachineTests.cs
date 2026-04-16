@@ -2091,6 +2091,90 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void StringDump_ShouldRoundTripLuaClosureThroughLoad()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function()
+    return answer
+end
+""");
+        var environment = new LuaTable();
+        environment.SetValue(LuaValue.FromString("answer"), LuaValue.FromInteger(42));
+
+        var dumpResults = vm.Call(GetStringFunction(vm, "dump"), [LuaValue.FromFunction(target)]);
+
+        dumpResults.ShouldHaveSingleItem();
+        dumpResults[0].Kind.ShouldBe(LuaValueKind.String);
+        LuaStringBytes.GetBytes(dumpResults[0].AsString()).Take(4).ToArray()
+            .ShouldBe([0x1B, (byte)'L', (byte)'u', (byte)'a']);
+
+        var loadResults = vm.Call(
+            GetGlobalFunction(vm, "load"),
+            [
+                dumpResults[0],
+                LuaValue.FromString("=(dumped)"),
+                LuaValue.FromString("b"),
+                LuaValue.FromTable(environment)
+            ]);
+
+        loadResults.ShouldHaveSingleItem();
+        vm.Call(loadResults[0].AsFunction()).ShouldBe([LuaValue.FromInteger(42)]);
+    }
+
+    [Fact]
+    public void StringDump_ShouldStripDebugInformationWhenRequested()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function(value)
+    local answer = value + 1
+    return answer
+end
+""");
+
+        var dumpResults = vm.Call(
+            GetStringFunction(vm, "dump"),
+            [
+                LuaValue.FromFunction(target),
+                LuaValue.FromBoolean(true)
+            ]);
+        var dumpedChunk = new LuaChunkReader().Read(
+            LuaStringBytes.GetBytes(dumpResults[0].AsString()),
+            "stripped.luac");
+
+        dumpedChunk.MainFunction.Source.ShouldBeNull();
+        dumpedChunk.MainFunction.LineInfo.ShouldBeEmpty();
+        dumpedChunk.MainFunction.AbsoluteLineInfo.ShouldBeEmpty();
+        dumpedChunk.MainFunction.LocalVariables.ShouldBeEmpty();
+        dumpedChunk.MainFunction.Upvalues.All(static upvalue => upvalue.Name == null).ShouldBeTrue();
+
+        var loadResults = vm.Call(
+            GetGlobalFunction(vm, "load"),
+            [
+                dumpResults[0],
+                LuaValue.FromString("=(stripped)"),
+                LuaValue.FromString("b")
+            ]);
+
+        vm.Call(loadResults[0].AsFunction(), [LuaValue.FromInteger(41)])
+            .ShouldBe([LuaValue.FromInteger(42)]);
+    }
+
+    [Fact]
+    public void StringDump_ShouldRejectNativeClosures()
+    {
+        var vm = new LuaVirtualMachine();
+
+        var exception = Should.Throw<LuaRuntimeException>(() =>
+            vm.Call(
+                GetStringFunction(vm, "dump"),
+                [GetGlobalFunctionValue(vm, "print")]));
+
+        exception.ErrorObject.AsString().ShouldContain("Lua function expected");
+    }
+
+    [Fact]
     public void Call_ShouldWrapClrExceptionsFromNativeClosures()
     {
         var closure = new LuaClosure(
@@ -2118,6 +2202,37 @@ public class LuaVirtualMachineTests
     private static LuaClosure CreateNativeClosure(string debugName, LuaNativeFunction function)
     {
         return new LuaClosure(debugName, body: new LuaNativeClosureBody(function));
+    }
+
+    private static LuaClosure GetGlobalFunction(LuaVirtualMachine vm, string name)
+    {
+        return GetGlobalFunctionValue(vm, name).AsFunction();
+    }
+
+    private static LuaValue GetGlobalFunctionValue(LuaVirtualMachine vm, string name)
+    {
+        return vm.State.GlobalEnvironment.GetValue(LuaValue.FromString(name));
+    }
+
+    private static LuaClosure GetStringFunction(LuaVirtualMachine vm, string name)
+    {
+        return vm.State.StringLibrary.GetValue(LuaValue.FromString(name)).AsFunction();
+    }
+
+    private static LuaClosure LoadTextFunction(LuaVirtualMachine vm, string source)
+    {
+        var loadResults = vm.Call(
+            GetGlobalFunction(vm, "load"),
+            [
+                LuaValue.FromString(source),
+                LuaValue.FromString("=(test)"),
+                LuaValue.FromString("t")
+            ]);
+        var chunkResults = vm.Call(loadResults[0].AsFunction());
+
+        chunkResults.ShouldHaveSingleItem();
+        chunkResults[0].Kind.ShouldBe(LuaValueKind.Function);
+        return chunkResults[0].AsFunction();
     }
 
     private static uint EncodeAbc(LuaOpcode opcode, int a, int b, int c, int k = 0)

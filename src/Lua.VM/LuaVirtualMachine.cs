@@ -44,6 +44,7 @@ public sealed partial class LuaVirtualMachine
         State.SetCallableInvoker(CallValue);
         State.SetBinaryChunkLoader(LoadBinaryChunk);
         State.SetTextChunkLoader(LoadTextChunk);
+        State.SetBytecodeChunkDumper(DumpBytecodeClosure);
         State.SetCoroutineResumer(ResumeCoroutine);
         State.SetCoroutineCloser(CloseCoroutine);
     }
@@ -143,6 +144,27 @@ public sealed partial class LuaVirtualMachine
         return CreateRootClosure(chunk.MainFunction, debugName: null, environment: hasEnvironment ? environment : null);
     }
 
+    private static bool DumpBytecodeClosure(
+        LuaClosure closure,
+        bool stripDebugInformation,
+        out ReadOnlyMemory<byte> dumpedChunk)
+    {
+        if (closure.Body is not LuaBytecodeClosureBody body)
+        {
+            dumpedChunk = ReadOnlyMemory<byte>.Empty;
+            return false;
+        }
+
+        var writer = new LuaChunkWriter();
+        dumpedChunk = writer.Write(new LuaChunk
+        {
+            Header = CreateDefaultChunkHeader(),
+            MainUpvalueCount = checked((byte)body.Prototype.Upvalues.Length),
+            MainFunction = body.Prototype
+        }, stripDebugInformation);
+        return true;
+    }
+
     private LuaValue[] ExecuteNativeClosure(LuaClosure closure, LuaNativeClosureBody body, IReadOnlyList<LuaValue> arguments)
     {
         var shouldTrackBoundary =
@@ -180,6 +202,23 @@ public sealed partial class LuaVirtualMachine
                 State.CurrentThread.ExitNonYieldableCall();
             }
         }
+    }
+
+    private static LuaChunkHeader CreateDefaultChunkHeader()
+    {
+        return new LuaChunkHeader
+        {
+            Version = LuaChunkHeaderConstants.LuacVersion,
+            Format = LuaChunkHeaderConstants.LuacFormat,
+            IntSize = (byte)sizeof(int),
+            IntFormatMarker = LuaChunkHeaderConstants.LuacInt,
+            InstructionSize = (byte)sizeof(uint),
+            InstructionFormatMarker = LuaChunkHeaderConstants.LuacInstruction,
+            LuaIntegerSize = (byte)sizeof(long),
+            LuaIntegerFormatMarker = LuaChunkHeaderConstants.LuacInt,
+            LuaNumberSize = (byte)sizeof(double),
+            LuaNumberFormatMarker = LuaChunkHeaderConstants.LuacNumber
+        };
     }
 
     private LuaValue[] RunInterpreter(int hostCallId)

@@ -1,0 +1,306 @@
+using Lua.Runtime.Objects;
+using Lua.Runtime.Values;
+using static Lua.Runtime.Values.LuaValueHelper;
+
+namespace Lua.Runtime.Execution;
+
+public sealed partial class LuaState
+{
+    private static LuaValue[] DebugGetInfo(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var level = RequireArgument(arguments, 0, "debug.getinfo");
+        var what = arguments.Count >= 2 && arguments[1].Kind == LuaValueKind.String
+            ? arguments[1].AsString()
+            : "flnStu";
+
+        LuaClosure? target = null;
+        int frameIndex = -1;
+
+        if (level.Kind == LuaValueKind.Function)
+        {
+            target = level.AsFunction();
+        }
+        else if (TryGetInteger(level, out var levelInt))
+        {
+            var frames = state.CurrentThread.Frames;
+            var resolvedIndex = frames.Count - 1 - (int)levelInt;
+            if (resolvedIndex >= 0 && resolvedIndex < frames.Count)
+            {
+                frameIndex = resolvedIndex;
+                target = frames[resolvedIndex].Closure;
+            }
+            else
+            {
+                return [LuaValue.Nil];
+            }
+        }
+        else
+        {
+            throw CreateArgumentTypeError("debug.getinfo", 1, "function or integer", level);
+        }
+
+        var info = new LuaTable("debug.getinfo");
+
+        if (target is not null)
+        {
+            if (what.Contains('n'))
+            {
+                info.SetValue(LuaValue.FromString("name"), target.DebugName is not null
+                    ? LuaValue.FromString(target.DebugName)
+                    : LuaValue.Nil);
+                info.SetValue(LuaValue.FromString("namewhat"), LuaValue.FromString(""));
+            }
+
+            if (what.Contains('S'))
+            {
+                var isMain = target.DebugName == "main";
+                info.SetValue(LuaValue.FromString("source"), LuaValue.FromString("=?"));
+                info.SetValue(LuaValue.FromString("short_src"), LuaValue.FromString("?"));
+                info.SetValue(LuaValue.FromString("what"),
+                    target.Body is LuaNativeClosureBody
+                        ? LuaValue.FromString("C")
+                        : isMain
+                            ? LuaValue.FromString("main")
+                            : LuaValue.FromString("Lua"));
+            }
+
+            if (what.Contains('l') && frameIndex >= 0)
+            {
+                info.SetValue(LuaValue.FromString("currentline"), LuaValue.FromInteger(-1));
+            }
+
+            if (what.Contains('u'))
+            {
+                info.SetValue(LuaValue.FromString("nups"), LuaValue.FromInteger(target.UpvalueCount));
+            }
+        }
+
+        return [LuaValue.FromTable(info)];
+    }
+
+    private static LuaValue[] DebugTraceback(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var message = arguments.Count >= 1 && !arguments[0].IsNil ? arguments[0] : LuaValue.Nil;
+        var level = arguments.Count >= 2 && TryGetInteger(arguments[1], out var levelInt) ? (int)levelInt : 1;
+
+        var sb = new System.Text.StringBuilder();
+        if (!message.IsNil)
+        {
+            sb.AppendLine(message.Kind == LuaValueKind.String ? message.AsString() : FormatLuaValue(message));
+        }
+
+        sb.Append("stack traceback:");
+
+        var frames = state.CurrentThread.Frames;
+        var startIndex = frames.Count - level;
+        for (var i = startIndex; i >= 0 && i < frames.Count; i--)
+        {
+            var frame = frames[i];
+            var name = frame.Closure.DebugName ?? "?";
+            sb.Append($"\n\t[C]: in function '{name}'");
+        }
+
+        return [LuaValue.FromString(sb.ToString())];
+    }
+
+    private static LuaValue[] DebugGetLocal(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var level = RequireArgument(arguments, 0, "debug.getlocal");
+        if (!TryGetInteger(level, out var levelInt))
+        {
+            throw CreateArgumentTypeError("debug.getlocal", 1, "integer", level);
+        }
+
+        var localIndex = RequireArgument(arguments, 1, "debug.getlocal");
+        if (!TryGetInteger(localIndex, out var localInt))
+        {
+            throw CreateArgumentTypeError("debug.getlocal", 2, "integer", localIndex);
+        }
+
+        var frames = state.CurrentThread.Frames;
+        var frameIndex = frames.Count - 1 - (int)levelInt;
+        if (frameIndex < 0 || frameIndex >= frames.Count)
+        {
+            return [LuaValue.Nil];
+        }
+
+        var frame = frames[frameIndex];
+        var registerIndex = (int)localInt - 1;
+        if (registerIndex < 0)
+        {
+            return [LuaValue.Nil];
+        }
+
+        var absoluteIndex = frame.BaseIndex + registerIndex;
+        if (absoluteIndex >= state.Stack.Count)
+        {
+            return [LuaValue.Nil];
+        }
+
+        var localName = $"(local {localInt})";
+        return [LuaValue.FromString(localName), state.Stack[absoluteIndex]];
+    }
+
+    private static LuaValue[] DebugSetLocal(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var level = RequireArgument(arguments, 0, "debug.setlocal");
+        if (!TryGetInteger(level, out var levelInt))
+        {
+            throw CreateArgumentTypeError("debug.setlocal", 1, "integer", level);
+        }
+
+        var localIndex = RequireArgument(arguments, 1, "debug.setlocal");
+        if (!TryGetInteger(localIndex, out var localInt))
+        {
+            throw CreateArgumentTypeError("debug.setlocal", 2, "integer", localIndex);
+        }
+
+        var value = arguments.Count >= 3 ? arguments[2] : LuaValue.Nil;
+
+        var frames = state.CurrentThread.Frames;
+        var frameIndex = frames.Count - 1 - (int)levelInt;
+        if (frameIndex < 0 || frameIndex >= frames.Count)
+        {
+            return [LuaValue.Nil];
+        }
+
+        var frame = frames[frameIndex];
+        var registerIndex = (int)localInt - 1;
+        var absoluteIndex = frame.BaseIndex + registerIndex;
+        if (registerIndex < 0 || absoluteIndex >= state.Stack.Count)
+        {
+            return [LuaValue.Nil];
+        }
+
+        state.Stack[absoluteIndex] = value;
+        return [LuaValue.FromString($"(local {localInt})")];
+    }
+
+    private static LuaValue[] DebugGetUpvalue(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var funcValue = RequireArgument(arguments, 0, "debug.getupvalue");
+        if (funcValue.Kind != LuaValueKind.Function)
+        {
+            throw CreateArgumentTypeError("debug.getupvalue", 1, "function", funcValue);
+        }
+
+        var upIndex = RequireArgument(arguments, 1, "debug.getupvalue");
+        if (!TryGetInteger(upIndex, out var upInt))
+        {
+            throw CreateArgumentTypeError("debug.getupvalue", 2, "integer", upIndex);
+        }
+
+        var func = funcValue.AsFunction();
+        var index = (int)upInt - 1;
+        if (index < 0 || index >= func.Upvalues.Length)
+        {
+            return [LuaValue.Nil];
+        }
+
+        var name = $"(upvalue {upInt})";
+        return [LuaValue.FromString(name), func.Upvalues[index].GetValue(state)];
+    }
+
+    private static LuaValue[] DebugSetUpvalue(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var funcValue = RequireArgument(arguments, 0, "debug.setupvalue");
+        if (funcValue.Kind != LuaValueKind.Function)
+        {
+            throw CreateArgumentTypeError("debug.setupvalue", 1, "function", funcValue);
+        }
+
+        var upIndex = RequireArgument(arguments, 1, "debug.setupvalue");
+        if (!TryGetInteger(upIndex, out var upInt))
+        {
+            throw CreateArgumentTypeError("debug.setupvalue", 2, "integer", upIndex);
+        }
+
+        var value = arguments.Count >= 3 ? arguments[2] : LuaValue.Nil;
+
+        var func = funcValue.AsFunction();
+        var index = (int)upInt - 1;
+        if (index < 0 || index >= func.Upvalues.Length)
+        {
+            return [LuaValue.Nil];
+        }
+
+        func.Upvalues[index].SetValue(state, value);
+        return [LuaValue.FromString($"(upvalue {upInt})")];
+    }
+
+    private static LuaValue[] DebugSetHook(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [];
+    }
+
+    private static LuaValue[] DebugGetHook(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        return [LuaValue.Nil, LuaValue.FromString(""), LuaValue.FromInteger(0)];
+    }
+
+    private static LuaValue[] DebugGetUserValue(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var ud = RequireArgument(arguments, 0, "debug.getuservalue");
+        if (ud.Kind != LuaValueKind.UserData)
+        {
+            return [LuaValue.Nil, LuaValue.FromBoolean(false)];
+        }
+
+        var n = arguments.Count >= 2 && TryGetInteger(arguments[1], out var nInt) ? (int)nInt : 1;
+        if (n != 1)
+        {
+            return [LuaValue.Nil, LuaValue.FromBoolean(false)];
+        }
+
+        var userdata = ud.AsUserData();
+        return userdata.Value is not null
+            ? [LuaValue.Nil, LuaValue.FromBoolean(true)]
+            : [LuaValue.Nil, LuaValue.FromBoolean(false)];
+    }
+
+    private static LuaValue[] DebugSetUserValue(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var ud = RequireArgument(arguments, 0, "debug.setuservalue");
+        return [ud];
+    }
+
+    private static LuaValue[] DebugUpvalueId(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var funcValue = RequireArgument(arguments, 0, "debug.upvalueid");
+        if (funcValue.Kind != LuaValueKind.Function)
+        {
+            throw CreateArgumentTypeError("debug.upvalueid", 1, "function", funcValue);
+        }
+
+        var upIndex = RequireArgument(arguments, 1, "debug.upvalueid");
+        if (!TryGetInteger(upIndex, out var upInt))
+        {
+            throw CreateArgumentTypeError("debug.upvalueid", 2, "integer", upIndex);
+        }
+
+        var func = funcValue.AsFunction();
+        var index = (int)upInt - 1;
+        if (index < 0 || index >= func.Upvalues.Length)
+        {
+            throw CreateRuntimeError("invalid upvalue index");
+        }
+
+        return [LuaValue.FromUserData(new LuaUserData(func.Upvalues[index]))];
+    }
+
+    private static LuaValue[] DebugUpvalueJoin(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var f1 = RequireArgument(arguments, 0, "debug.upvaluejoin").AsFunction();
+        var n1 = (int)RequireArgument(arguments, 1, "debug.upvaluejoin").AsInteger() - 1;
+        var f2 = RequireArgument(arguments, 2, "debug.upvaluejoin").AsFunction();
+        var n2 = (int)RequireArgument(arguments, 3, "debug.upvaluejoin").AsInteger() - 1;
+
+        if (n1 < 0 || n1 >= f1.Upvalues.Length || n2 < 0 || n2 >= f2.Upvalues.Length)
+        {
+            throw CreateRuntimeError("invalid upvalue index");
+        }
+
+        f1.Upvalues[n1] = f2.Upvalues[n2];
+        return [];
+    }
+}
