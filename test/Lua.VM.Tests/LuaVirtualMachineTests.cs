@@ -2193,6 +2193,22 @@ end
         exception.InnerException.ShouldBeOfType<InvalidOperationException>();
     }
 
+    [Fact]
+    public void CollectGarbage_ShouldCollectWeakValuesCreatedByPreviousStatement()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function()
+    local t = setmetatable({}, { __mode = "v" })
+    t[1] = { 10 }
+    collectgarbage()
+    return t[1] == nil
+end
+""");
+
+        vm.Call(target).ShouldBe([LuaValue.FromBoolean(true)]);
+    }
+
     private static string GetFixturePath(string folder, string fileName)
     {
         return Path.Combine(AppContext.BaseDirectory, "fixtures", "lua55", folder, fileName);

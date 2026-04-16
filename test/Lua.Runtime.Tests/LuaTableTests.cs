@@ -126,4 +126,92 @@ public class LuaTableTests
         table.TryGetMetamethod("__close", out var handler).ShouldBeTrue();
         handler.AsString().ShouldBe("handler");
     }
+
+    [Fact]
+    public void WeakKeyTables_ShouldDiscardCollectedCollectableKeys()
+    {
+        var table = CreateWeakTable("k");
+
+        table.SetValue(LuaValue.FromInteger(1), LuaValue.FromString("strong"));
+        AddEphemeralKeyEntry(table, LuaValue.FromString("weak"));
+
+        ForceWeakCollection();
+
+        table.GetValue(LuaValue.FromInteger(1)).AsString().ShouldBe("strong");
+        table.TryGetValue(LuaValue.FromTable(new LuaTable()), out _).ShouldBeFalse();
+
+        var entryCount = CountEntries(table);
+        entryCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void WeakValueTables_ShouldDiscardCollectedCollectableValues()
+    {
+        var table = CreateWeakTable("v");
+
+        table.SetValue(LuaValue.FromInteger(1), LuaValue.FromString("strong"));
+        AddEphemeralValueEntry(table, LuaValue.FromInteger(2));
+
+        ForceWeakCollection();
+
+        table.GetValue(LuaValue.FromInteger(1)).AsString().ShouldBe("strong");
+        table.GetValue(LuaValue.FromInteger(2)).IsNil.ShouldBeTrue();
+        CountEntries(table).ShouldBe(1);
+    }
+
+    [Fact]
+    public void WeakModeChanges_ShouldRebuildExistingEntries()
+    {
+        var table = new LuaTable();
+        var metatable = new LuaTable();
+
+        table.SetMetatable(metatable);
+        AddEphemeralKeyEntry(table, LuaValue.FromInteger(1));
+        metatable.SetValue(LuaValue.FromString("__mode"), LuaValue.FromString("k"));
+
+        ForceWeakCollection();
+        ForceWeakCollection();
+
+        CountEntries(table).ShouldBe(0);
+    }
+
+    private static LuaTable CreateWeakTable(string mode)
+    {
+        var table = new LuaTable();
+        var metatable = new LuaTable();
+        metatable.SetValue(LuaValue.FromString("__mode"), LuaValue.FromString(mode));
+        table.SetMetatable(metatable);
+        return table;
+    }
+
+    private static void AddEphemeralKeyEntry(LuaTable table, LuaValue value)
+    {
+        table.SetValue(LuaValue.FromTable(new LuaTable()), value);
+    }
+
+    private static void AddEphemeralValueEntry(LuaTable table, LuaValue key)
+    {
+        table.SetValue(key, LuaValue.FromTable(new LuaTable()));
+    }
+
+    private static void ForceWeakCollection()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        LuaTable.CleanupWeakEntries();
+    }
+
+    private static int CountEntries(LuaTable table)
+    {
+        var count = 0;
+        var key = LuaValue.Nil;
+        while (table.TryGetNextEntry(key, out var nextKey, out _))
+        {
+            count += 1;
+            key = nextKey;
+        }
+
+        return count;
+    }
 }

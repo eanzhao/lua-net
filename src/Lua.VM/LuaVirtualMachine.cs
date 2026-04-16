@@ -262,6 +262,17 @@ public sealed partial class LuaVirtualMachine
         };
     }
 
+    private static int GetLiveRegisterTop(CallFrame frame, LuaPrototype prototype)
+    {
+        if (prototype.RegisterTopHints is null ||
+            (uint)frame.ProgramCounter >= (uint)prototype.RegisterTopHints.Length)
+        {
+            return frame.RegisterTop;
+        }
+
+        return Math.Max(frame.RegisterTop, prototype.RegisterTopHints[frame.ProgramCounter]);
+    }
+
     private LuaValue[] RunInterpreter(int hostCallId)
     {
         while (true)
@@ -302,6 +313,7 @@ public sealed partial class LuaVirtualMachine
                 }
 
                 var prototype = GetCurrentPrototype(frame);
+                frame.SetLiveRegisterTop(GetLiveRegisterTop(frame, prototype));
 
                 if (frame.ProgramCounter >= prototype.Code.Length)
                 {

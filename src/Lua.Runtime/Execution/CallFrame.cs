@@ -42,6 +42,8 @@ public sealed class CallFrame
 
     public int RegisterTop { get; private set; }
 
+    public int LiveRegisterTop { get; private set; }
+
     public IReadOnlyList<LuaValue> Varargs { get; }
 
     public LuaCallReturnTarget ReturnTarget { get; }
@@ -93,6 +95,12 @@ public sealed class CallFrame
     {
         ArgumentOutOfRangeException.ThrowIfNegative(registerTop);
         RegisterTop = registerTop;
+    }
+
+    public void SetLiveRegisterTop(int registerTop)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(registerTop);
+        LiveRegisterTop = registerTop;
     }
 
     public void RegisterToBeClosed(int registerIndex)

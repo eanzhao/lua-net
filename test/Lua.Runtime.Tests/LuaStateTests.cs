@@ -1060,6 +1060,9 @@ public class LuaStateTests
         InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("step"), LuaValue.FromInteger(4))
             .ShouldHaveSingleItem()
             .AsBoolean().ShouldBeFalse();
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("step"), LuaValue.FromInteger(9))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeTrue();
         InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("collect"))
             .ShouldHaveSingleItem()
             .AsInteger().ShouldBe(0);
@@ -1069,6 +1072,27 @@ public class LuaStateTests
         InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("isrunning"))
             .ShouldHaveSingleItem()
             .AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void CollectGarbage_ShouldPruneWeakTableEntries()
+    {
+        var state = new LuaState();
+        var collectgarbage = GetBaseFunction(state, "collectgarbage");
+        var table = new LuaTable();
+        var metatable = new LuaTable();
+
+        metatable.SetValue(LuaValue.FromString("__mode"), LuaValue.FromString("kv"));
+        table.SetMetatable(metatable);
+        table.SetValue(LuaValue.FromString("strong"), LuaValue.FromInteger(1));
+        AddEphemeralWeakTableEntry(table);
+
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("collect"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(0);
+
+        table.GetValue(LuaValue.FromString("strong")).AsInteger().ShouldBe(1);
+        CountTableEntries(table).ShouldBe(1);
     }
 
     [Fact]
@@ -1998,6 +2022,24 @@ public class LuaStateTests
     private static LuaValue[] InvokeClosure(LuaState state, LuaClosure closure, params LuaValue[] arguments)
     {
         return ((LuaNativeClosureBody)closure.Body!).Function(state, closure, arguments);
+    }
+
+    private static void AddEphemeralWeakTableEntry(LuaTable table)
+    {
+        table.SetValue(LuaValue.FromTable(new LuaTable()), LuaValue.FromTable(new LuaTable()));
+    }
+
+    private static int CountTableEntries(LuaTable table)
+    {
+        var count = 0;
+        var key = LuaValue.Nil;
+        while (table.TryGetNextEntry(key, out var nextKey, out _))
+        {
+            count += 1;
+            key = nextKey;
+        }
+
+        return count;
     }
 
     private static string GetExpectedDefaultNativePackagePath()

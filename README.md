@@ -57,7 +57,7 @@ dotnet sln lua-net.sln list
 | 第 15 步 | 字节码序列化与 REPL | 已完成 |
 | 第 16 步 | 兼容性收口 | 进行中 |
 
-当前 289 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
+当前 294 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
 
 ## 仓库结构
 
@@ -93,14 +93,14 @@ src/
 test/
 ├── Lua.Compatibility.Tests/  官方 Lua 5.5.0 脚本兼容性测试（4 个）
 ├── Lua.Cli.Tests/            CLI / REPL / 脚本入口测试（5 个）
-├── Lua.Runtime.Tests/        运行时单元测试（85 个）
+├── Lua.Runtime.Tests/        运行时单元测试（89 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（15 个）
 ├── Lua.Syntax.Tests/         词法分析与语法分析测试
 ├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（41 个）
-├── Lua.VM.Tests/             VM 集成测试（105 个，使用真实 Lua 5.5 chunk fixture）
+├── Lua.VM.Tests/             VM 集成测试（106 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（53 份）
+docs/                         阶段规划和设计文档（54 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -238,6 +238,7 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 051 | [coroutine-close-continuations](docs/051-step-16-coroutine-close-continuations.md) | coroutine close continuation、`return` / `CLOSE` suspend-resume 与当前 protected-call 恢复缺口 |
 | 052 | [yieldable-protected-calls](docs/052-step-16-yieldable-protected-calls.md) | yieldable `pcall` / `xpcall`、error-unwind `__close` continuation 与 `locals.lua` 转绿 |
 | 053 | [gc-api-modes](docs/053-step-16-gc-api-modes.md) | `collectgarbage` mode / param API、`gengc.lua` 缺口推进到 weak tables |
+| 054 | [weak-tables](docs/054-step-16-weak-tables.md) | 弱表 `__mode` 语义、live register 清理、`gengc.lua` 转绿与 `gc.lua` ephemeron 缺口 |
 
 ## 开发方式
 

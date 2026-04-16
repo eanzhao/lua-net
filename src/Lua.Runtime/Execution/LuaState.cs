@@ -743,19 +743,168 @@ public sealed partial class LuaState
         }
     }
 
-    private void RunHostGarbageCollection()
+    private void RunHostGarbageCollection(bool resetStepDebt = true)
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
-        _gcStepDebt = 0;
+        SweepWeakTables();
+        LuaTable.CleanupWeakEntries();
+        if (resetStepDebt)
+        {
+            _gcStepDebt = 0;
+        }
+    }
+
+    private void SweepWeakTables()
+    {
+        var reachableObjects = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var pendingObjects = new Queue<object>();
+        var reachableTables = new List<LuaTable>();
+
+        EnqueueValue(LuaValue.FromTable(GlobalEnvironment), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(StringLibrary), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(TableLibrary), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(MathLibrary), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(Utf8Library), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(CoroutineLibrary), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(PackageLibrary), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(OsLibrary), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(IoLibrary), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(DebugLibrary), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(PackageLoaded), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(PackagePreload), reachableObjects, pendingObjects);
+        EnqueueValue(LuaValue.FromTable(PackageSearchers), reachableObjects, pendingObjects);
+
+        foreach (var metatable in _typeMetatables.Values)
+        {
+            EnqueueValue(LuaValue.FromTable(metatable), reachableObjects, pendingObjects);
+        }
+
+        EnqueueThread(MainThread, reachableObjects, pendingObjects);
+        if (!ReferenceEquals(CurrentThread, MainThread))
+        {
+            EnqueueThread(CurrentThread, reachableObjects, pendingObjects);
+        }
+
+        while (pendingObjects.Count != 0)
+        {
+            switch (pendingObjects.Dequeue())
+            {
+                case LuaTable table:
+                    reachableTables.Add(table);
+                    table.VisitStrongReferences(value => EnqueueValue(value, reachableObjects, pendingObjects));
+                    break;
+                case LuaClosure closure:
+                    foreach (var upvalue in closure.Upvalues)
+                    {
+                        EnqueueValue(upvalue.GetValue(this), reachableObjects, pendingObjects);
+                    }
+
+                    break;
+                case LuaThread thread:
+                    VisitThread(thread, reachableObjects, pendingObjects);
+                    break;
+                case LuaUserData userdata:
+                    VisitUserData(userdata, reachableObjects, pendingObjects);
+                    break;
+            }
+        }
+
+        foreach (var table in reachableTables)
+        {
+            table.SweepWeakEntries(reachableObjects);
+        }
+    }
+
+    private void VisitThread(
+        LuaThread thread,
+        HashSet<object> reachableObjects,
+        Queue<object> pendingObjects)
+    {
+        if (thread.EntryClosure is not null)
+        {
+            EnqueueValue(LuaValue.FromFunction(thread.EntryClosure), reachableObjects, pendingObjects);
+        }
+
+        if (thread.HookFunction is not null)
+        {
+            EnqueueValue(LuaValue.FromFunction(thread.HookFunction), reachableObjects, pendingObjects);
+        }
+
+        if (thread.ResumeParent is not null)
+        {
+            EnqueueValue(LuaValue.FromThread(thread.ResumeParent), reachableObjects, pendingObjects);
+        }
+
+        foreach (var frame in thread.Frames)
+        {
+            EnqueueValue(LuaValue.FromFunction(frame.Closure), reachableObjects, pendingObjects);
+
+            var liveRegisterTop = Math.Max(frame.LiveRegisterTop, frame.RegisterTop);
+            var maxRegisterCount = Math.Min(liveRegisterTop, Math.Max(0, thread.Stack.Count - frame.BaseIndex));
+            for (var registerIndex = 0; registerIndex < maxRegisterCount; registerIndex++)
+            {
+                EnqueueValue(thread.Stack[frame.BaseIndex + registerIndex], reachableObjects, pendingObjects);
+            }
+        }
+    }
+
+    private static void VisitUserData(
+        LuaUserData userdata,
+        HashSet<object> reachableObjects,
+        Queue<object> pendingObjects)
+    {
+        if (userdata.Metatable is not null)
+        {
+            EnqueueValue(LuaValue.FromTable(userdata.Metatable), reachableObjects, pendingObjects);
+        }
+
+        for (var slot = 1; slot <= userdata.UserValueCount; slot++)
+        {
+            if (userdata.TryGetUserValue(slot, out var value) && !value.IsNil)
+            {
+                EnqueueValue(value, reachableObjects, pendingObjects);
+            }
+        }
+    }
+
+    private static void EnqueueThread(
+        LuaThread? thread,
+        HashSet<object> reachableObjects,
+        Queue<object> pendingObjects)
+    {
+        if (thread is not null && reachableObjects.Add(thread))
+        {
+            pendingObjects.Enqueue(thread);
+        }
+    }
+
+    private static void EnqueueValue(
+        LuaValue value,
+        HashSet<object> reachableObjects,
+        Queue<object> pendingObjects)
+    {
+        object? target = value.Kind switch
+        {
+            LuaValueKind.Table => value.AsTable(),
+            LuaValueKind.Function => value.AsFunction(),
+            LuaValueKind.Thread => value.AsThread(),
+            LuaValueKind.UserData => value.AsUserData(),
+            _ => null
+        };
+        if (target is not null && reachableObjects.Add(target))
+        {
+            pendingObjects.Enqueue(target);
+        }
     }
 
     private bool RunGarbageCollectorStep(int stepSize)
     {
-        RunHostGarbageCollection();
+        RunHostGarbageCollection(resetStepDebt: false);
 
         if (_gcStepSize == FullGcStepSize)
         {
+            _gcStepDebt = 0;
             return true;
         }
 

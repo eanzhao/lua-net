@@ -62,6 +62,7 @@ public static class LuaCompiler
         private readonly FunctionCompiler? _parent = parent;
         private readonly string? _debugName = debugName;
         private readonly List<uint> _code = [];
+        private readonly List<byte> _registerTopHints = [];
         private readonly List<LuaConstant> _constants = [];
         private readonly Dictionary<string, int> _constantIndices = new(StringComparer.Ordinal);
         private readonly List<LuaPrototype> _nestedPrototypes = [];
@@ -185,7 +186,8 @@ public static class LuaCompiler
                 LineInfo = Enumerable.Repeat((sbyte)0, _code.Count).ToArray(),
                 AbsoluteLineInfo = [],
                 LocalVariables = [],
-                ToBeClosedNames = BuildToBeClosedNames()
+                ToBeClosedNames = BuildToBeClosedNames(),
+                RegisterTopHints = _registerTopHints.ToArray()
             };
         }
 
@@ -1659,6 +1661,11 @@ public static class LuaCompiler
 
         private void ResetTemps()
         {
+            if (_tempRegisterTop > _persistentRegisterCount)
+            {
+                EmitLoadNilRange(_persistentRegisterCount, _tempRegisterTop - _persistentRegisterCount);
+            }
+
             _tempRegisterTop = _persistentRegisterCount;
             TrackRegister(Math.Max(0, _tempRegisterTop - 1));
         }
@@ -2001,10 +2008,16 @@ public static class LuaCompiler
 
         private int CurrentProgramCounter => _code.Count;
 
+        private void AddInstruction(uint instruction)
+        {
+            _code.Add(instruction);
+            _registerTopHints.Add(checked((byte)_tempRegisterTop));
+        }
+
         private int EmitJumpPlaceholder()
         {
             var programCounter = _code.Count;
-            _code.Add(EncodeSJ(LuaOpcode.Jmp, 0));
+            AddInstruction(EncodeSJ(LuaOpcode.Jmp, 0));
             return programCounter;
         }
 
@@ -2025,13 +2038,13 @@ public static class LuaCompiler
         private void EmitJump(int targetProgramCounter)
         {
             var offset = targetProgramCounter - (CurrentProgramCounter + 1);
-            _code.Add(EncodeSJ(LuaOpcode.Jmp, offset));
+            AddInstruction(EncodeSJ(LuaOpcode.Jmp, offset));
         }
 
         private int EmitForPrepPlaceholder(int registerIndex)
         {
             var programCounter = CurrentProgramCounter;
-            _code.Add(EncodeAbx(LuaOpcode.ForPrep, registerIndex, 0));
+            AddInstruction(EncodeAbx(LuaOpcode.ForPrep, registerIndex, 0));
             return programCounter;
         }
 
@@ -2045,14 +2058,14 @@ public static class LuaCompiler
         {
             var programCounter = CurrentProgramCounter;
             var offset = (programCounter + 1) - targetProgramCounter;
-            _code.Add(EncodeAbx(LuaOpcode.ForLoop, registerIndex, offset));
+            AddInstruction(EncodeAbx(LuaOpcode.ForLoop, registerIndex, offset));
             return programCounter;
         }
 
         private int EmitTForPrepPlaceholder(int registerIndex)
         {
             var programCounter = CurrentProgramCounter;
-            _code.Add(EncodeAbx(LuaOpcode.TForPrep, registerIndex, 0));
+            AddInstruction(EncodeAbx(LuaOpcode.TForPrep, registerIndex, 0));
             return programCounter;
         }
 
@@ -2065,7 +2078,7 @@ public static class LuaCompiler
         private int EmitTForCall(int registerIndex, int resultCount)
         {
             var programCounter = CurrentProgramCounter;
-            _code.Add(EncodeAbc(LuaOpcode.TForCall, registerIndex, 0, resultCount));
+            AddInstruction(EncodeAbc(LuaOpcode.TForCall, registerIndex, 0, resultCount));
             return programCounter;
         }
 
@@ -2073,7 +2086,7 @@ public static class LuaCompiler
         {
             var programCounter = CurrentProgramCounter;
             var offset = (programCounter + 1) - targetProgramCounter;
-            _code.Add(EncodeAbx(LuaOpcode.TForLoop, registerIndex, offset));
+            AddInstruction(EncodeAbx(LuaOpcode.TForLoop, registerIndex, offset));
             return programCounter;
         }
 
@@ -2090,7 +2103,7 @@ public static class LuaCompiler
             }
 
             var constantIndex = AddConstant(constant);
-            _code.Add(EncodeAbx(LuaOpcode.LoadK, targetRegister, constantIndex));
+            AddInstruction(EncodeAbx(LuaOpcode.LoadK, targetRegister, constantIndex));
         }
 
         private void EmitLoadNilRange(int startRegister, int count)
@@ -2098,14 +2111,14 @@ public static class LuaCompiler
             for (var remaining = count; remaining > 0; remaining -= byte.MaxValue + 1)
             {
                 var chunk = Math.Min(remaining, byte.MaxValue + 1);
-                _code.Add(EncodeAbc(LuaOpcode.LoadNil, startRegister, chunk - 1, 0));
+                AddInstruction(EncodeAbc(LuaOpcode.LoadNil, startRegister, chunk - 1, 0));
                 startRegister += chunk;
             }
         }
 
         private void EmitBoolean(int targetRegister, bool value)
         {
-            _code.Add(EncodeAbc(value ? LuaOpcode.LoadTrue : LuaOpcode.LoadFalse, targetRegister, 0, 0));
+            AddInstruction(EncodeAbc(value ? LuaOpcode.LoadTrue : LuaOpcode.LoadFalse, targetRegister, 0, 0));
         }
 
         private void EmitMove(int targetRegister, int sourceRegister)
@@ -2115,64 +2128,64 @@ public static class LuaCompiler
                 return;
             }
 
-            _code.Add(EncodeAbc(LuaOpcode.Move, targetRegister, sourceRegister, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Move, targetRegister, sourceRegister, 0));
         }
 
         private void EmitGetUpValue(int targetRegister, int upvalueIndex)
         {
-            _code.Add(EncodeAbc(LuaOpcode.GetUpVal, targetRegister, upvalueIndex, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.GetUpVal, targetRegister, upvalueIndex, 0));
         }
 
         private void EmitSetUpValue(int sourceRegister, int upvalueIndex)
         {
-            _code.Add(EncodeAbc(LuaOpcode.SetUpVal, sourceRegister, upvalueIndex, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.SetUpVal, sourceRegister, upvalueIndex, 0));
         }
 
         private void EmitGetTabUp(int targetRegister, int upvalueIndex, int constantIndex)
         {
-            _code.Add(EncodeAbc(LuaOpcode.GetTabUp, targetRegister, upvalueIndex, constantIndex));
+            AddInstruction(EncodeAbc(LuaOpcode.GetTabUp, targetRegister, upvalueIndex, constantIndex));
         }
 
         private void EmitGetField(int targetRegister, int tableRegister, int constantIndex)
         {
-            _code.Add(EncodeAbc(LuaOpcode.GetField, targetRegister, tableRegister, constantIndex));
+            AddInstruction(EncodeAbc(LuaOpcode.GetField, targetRegister, tableRegister, constantIndex));
         }
 
         private void EmitGetTable(int targetRegister, int tableRegister, int keyRegister)
         {
-            _code.Add(EncodeAbc(LuaOpcode.GetTable, targetRegister, tableRegister, keyRegister));
+            AddInstruction(EncodeAbc(LuaOpcode.GetTable, targetRegister, tableRegister, keyRegister));
         }
 
         private void EmitSetTabUp(int upvalueIndex, int constantIndex, int valueRegister)
         {
-            _code.Add(EncodeAbc(LuaOpcode.SetTabUp, upvalueIndex, constantIndex, valueRegister));
+            AddInstruction(EncodeAbc(LuaOpcode.SetTabUp, upvalueIndex, constantIndex, valueRegister));
         }
 
         private void EmitSetField(int tableRegister, int constantIndex, int valueRegister)
         {
-            _code.Add(EncodeAbc(LuaOpcode.SetField, tableRegister, constantIndex, valueRegister));
+            AddInstruction(EncodeAbc(LuaOpcode.SetField, tableRegister, constantIndex, valueRegister));
         }
 
         private void EmitSetTable(int tableRegister, int keyRegister, int valueRegister)
         {
-            _code.Add(EncodeAbc(LuaOpcode.SetTable, tableRegister, keyRegister, valueRegister));
+            AddInstruction(EncodeAbc(LuaOpcode.SetTable, tableRegister, keyRegister, valueRegister));
         }
 
         private void EmitErrNNil(int registerIndex, string globalName)
         {
             var constantIndex = AddConstant(LuaConstant.FromString(globalName));
-            _code.Add(EncodeAbx(LuaOpcode.ErrNNil, registerIndex, constantIndex + 1));
+            AddInstruction(EncodeAbx(LuaOpcode.ErrNNil, registerIndex, constantIndex + 1));
         }
 
         private void EmitSetIntegerKey(int tableRegister, int integerKey, int valueRegister)
         {
-            _code.Add(EncodeAbc(LuaOpcode.SetI, tableRegister, integerKey, valueRegister));
+            AddInstruction(EncodeAbc(LuaOpcode.SetI, tableRegister, integerKey, valueRegister));
         }
 
         private void EmitNewTable(int targetRegister)
         {
-            _code.Add(EncodeAVbc(LuaOpcode.NewTable, targetRegister, 0, 0));
-            _code.Add(EncodeAx(LuaOpcode.ExtraArg, 0));
+            AddInstruction(EncodeAVbc(LuaOpcode.NewTable, targetRegister, 0, 0));
+            AddInstruction(EncodeAx(LuaOpcode.ExtraArg, 0));
         }
 
         private void EmitSetList(int tableRegister, int elementCount, int startIndex)
@@ -2196,37 +2209,37 @@ public static class LuaCompiler
             var encodedStartIndex = startIndex % (LuaInstructionLayout.MaxArgVC + 1);
             var usesExtraArg = extraArg != 0;
 
-            _code.Add(EncodeAVbc(LuaOpcode.SetList, tableRegister, elementCount, encodedStartIndex, usesExtraArg ? 1 : 0));
+            AddInstruction(EncodeAVbc(LuaOpcode.SetList, tableRegister, elementCount, encodedStartIndex, usesExtraArg ? 1 : 0));
             if (usesExtraArg)
             {
-                _code.Add(EncodeAx(LuaOpcode.ExtraArg, extraArg));
+                AddInstruction(EncodeAx(LuaOpcode.ExtraArg, extraArg));
             }
         }
 
         private void EmitSelf(int targetRegister, int receiverRegister, int constantIndex)
         {
-            _code.Add(EncodeAbc(LuaOpcode.Self, targetRegister, receiverRegister, constantIndex));
+            AddInstruction(EncodeAbc(LuaOpcode.Self, targetRegister, receiverRegister, constantIndex));
         }
 
         private void EmitBinary(LuaOpcode opcode, int targetRegister, int leftRegister, int rightRegister)
         {
-            _code.Add(EncodeAbc(opcode, targetRegister, leftRegister, rightRegister));
+            AddInstruction(EncodeAbc(opcode, targetRegister, leftRegister, rightRegister));
         }
 
         private void EmitUnary(LuaOpcode opcode, int targetRegister, int operandRegister)
         {
-            _code.Add(EncodeAbc(opcode, targetRegister, operandRegister, 0));
+            AddInstruction(EncodeAbc(opcode, targetRegister, operandRegister, 0));
         }
 
         private void EmitConcat(int startRegister, int operandCount)
         {
-            _code.Add(EncodeAbc(LuaOpcode.Concat, startRegister, operandCount, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Concat, startRegister, operandCount, 0));
         }
 
         private void EmitComparisonBoolean(LuaOpcode opcode, int leftRegister, int rightRegister, bool expected, int? targetRegister = null)
         {
             var resultRegister = targetRegister ?? leftRegister;
-            _code.Add(EncodeAbc(opcode, leftRegister, rightRegister, 0, expected ? 1 : 0));
+            AddInstruction(EncodeAbc(opcode, leftRegister, rightRegister, 0, expected ? 1 : 0));
             var trueJump = EmitJumpPlaceholder();
             EmitBoolean(resultRegister, false);
             var endJump = EmitJumpPlaceholder();
@@ -2237,17 +2250,17 @@ public static class LuaCompiler
 
         private void EmitTest(int registerIndex, bool expectedTruthy)
         {
-            _code.Add(EncodeAbc(LuaOpcode.Test, registerIndex, 0, 0, expectedTruthy ? 1 : 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Test, registerIndex, 0, 0, expectedTruthy ? 1 : 0));
         }
 
         private void EmitCall(int functionRegister, int functionAndArgumentCount, int resultOperand)
         {
-            _code.Add(EncodeAbc(LuaOpcode.Call, functionRegister, functionAndArgumentCount, resultOperand));
+            AddInstruction(EncodeAbc(LuaOpcode.Call, functionRegister, functionAndArgumentCount, resultOperand));
         }
 
         private void EmitClose(int registerIndex)
         {
-            _code.Add(EncodeAbc(LuaOpcode.Close, registerIndex, 0, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Close, registerIndex, 0, 0));
         }
 
         private void EmitToBeClosed(int registerIndex, string? variableName = null)
@@ -2257,43 +2270,43 @@ public static class LuaCompiler
                 _toBeClosedNames[_code.Count] = variableName;
             }
 
-            _code.Add(EncodeAbc(LuaOpcode.Tbc, registerIndex, 0, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Tbc, registerIndex, 0, 0));
         }
 
         private void EmitVarArg(int targetRegister, int? resultCount)
         {
             var resultOperand = resultCount is null ? 0 : resultCount.Value + 1;
-            _code.Add(EncodeAbc(LuaOpcode.VarArg, targetRegister, 0, resultOperand));
+            AddInstruction(EncodeAbc(LuaOpcode.VarArg, targetRegister, 0, resultOperand));
         }
 
         private void EmitVarArgPrep()
         {
-            _code.Add(EncodeAbc(LuaOpcode.VarArgPrep, 0, 0, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.VarArgPrep, 0, 0, 0));
         }
 
         private void EmitReturn(int startRegister, int resultCount)
         {
-            _code.Add(EncodeAbc(LuaOpcode.Return, startRegister, resultCount + 1, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Return, startRegister, resultCount + 1, 0));
         }
 
         private void EmitReturnOpen(int startRegister)
         {
-            _code.Add(EncodeAbc(LuaOpcode.Return, startRegister, 0, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Return, startRegister, 0, 0));
         }
 
         private void EmitReturn0()
         {
-            _code.Add(EncodeAbc(LuaOpcode.Return0, 0, 0, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Return0, 0, 0, 0));
         }
 
         private void EmitReturn1(int registerIndex)
         {
-            _code.Add(EncodeAbc(LuaOpcode.Return1, registerIndex, 0, 0));
+            AddInstruction(EncodeAbc(LuaOpcode.Return1, registerIndex, 0, 0));
         }
 
         private void EmitClosure(int targetRegister, int prototypeIndex)
         {
-            _code.Add(EncodeAbx(LuaOpcode.Closure, targetRegister, prototypeIndex));
+            AddInstruction(EncodeAbx(LuaOpcode.Closure, targetRegister, prototypeIndex));
         }
 
         private void EmitTableReadByName(int targetRegister, int tableRegister, string name, LuaSourceRange range)

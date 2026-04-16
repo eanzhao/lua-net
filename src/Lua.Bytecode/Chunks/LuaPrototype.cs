@@ -31,4 +31,6 @@ public sealed class LuaPrototype
     public required LuaLocalVariable[] LocalVariables { get; init; }
 
     public string?[]? ToBeClosedNames { get; init; }
+
+    public byte[]? RegisterTopHints { get; init; }
 }
