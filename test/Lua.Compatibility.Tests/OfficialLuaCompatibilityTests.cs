@@ -25,12 +25,12 @@ public class OfficialLuaCompatibilityTests
     }
 
     [Fact]
-    public void OfficialLocals_ShouldCurrentlyStopAtVariableAttributeGap()
+    public void OfficialLocals_ShouldCurrentlyStopAtGotoLabelGap()
     {
         var result = RunOfficialScript("locals.lua");
 
         result.ExitCode.ShouldBe(1);
-        result.Error.ShouldContain("variable attributes are not supported yet");
+        result.Error.ShouldContain("goto and labels are not supported yet");
     }
 
     private static ScriptRunResult RunOfficialScript(string scriptPath)

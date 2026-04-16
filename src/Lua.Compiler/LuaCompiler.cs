@@ -68,8 +68,7 @@ public static class LuaCompiler
         private readonly Dictionary<string, int> _upvalueIndices = new(StringComparer.Ordinal);
         private readonly List<LocalInfo> _visibleLocals = [];
         private readonly List<GlobalDeclarationInfo> _visibleGlobalDeclarations = [];
-        private readonly Stack<int> _scopeStarts = [];
-        private readonly Stack<int> _globalScopeStarts = [];
+        private readonly List<ScopeInfo> _scopes = [];
         private readonly Stack<LoopContext> _loops = [];
         private int _persistentRegisterCount;
         private int _tempRegisterTop;
@@ -313,9 +312,11 @@ public static class LuaCompiler
             EmitTest(conditionRegister, expectedTruthy: false);
             var exitJump = EmitJumpPlaceholder();
 
-            _loops.Push(new LoopContext());
-            CompileScopedBlock(statement.Block);
+            EnterScope();
+            _loops.Push(new LoopContext(_scopes.Count - 1));
+            CompileBlockStatements(statement.Block.Statements);
             var loop = _loops.Pop();
+            ExitScope();
 
             EmitJump(loopStart);
             var loopEnd = CurrentProgramCounter;
@@ -327,15 +328,22 @@ public static class LuaCompiler
         {
             var loopStart = CurrentProgramCounter;
 
-            _loops.Push(new LoopContext());
-            CompileScopedBlock(statement.Block);
+            EnterScope();
+            _loops.Push(new LoopContext(_scopes.Count - 1));
+            CompileBlockStatements(statement.Block.Statements);
 
             var conditionRegister = AllocateTemp();
             CompileExpressionInto(statement.Condition, conditionRegister);
+            if (GetCurrentScopeCloseRegister() is int closeRegister)
+            {
+                EmitClose(closeRegister);
+            }
+
             EmitTest(conditionRegister, expectedTruthy: false);
             var continueJump = EmitJumpPlaceholder();
 
             var loop = _loops.Pop();
+            ExitScope(emitClose: false);
             PatchJump(continueJump, loopStart);
 
             var loopEnd = CurrentProgramCounter;
@@ -349,6 +357,7 @@ public static class LuaCompiler
                 throw CreateError(statement.Range, "break outside loop");
             }
 
+            EmitBreakScopeClose(_loops.Peek());
             _loops.Peek().BreakJumps.Add(EmitJumpPlaceholder());
         }
 
@@ -374,9 +383,13 @@ public static class LuaCompiler
             var bodyProgramCounter = CurrentProgramCounter;
 
             EnterScope();
-            AddExistingLocal(statement.Name.Identifier, variableRegister, statement.Name.Range.Start);
+            AddExistingLocal(
+                statement.Name.Identifier,
+                variableRegister,
+                statement.Name.Range.Start,
+                isReadOnly: true);
 
-            _loops.Push(new LoopContext());
+            _loops.Push(new LoopContext(_scopes.Count - 1));
             CompileBlockStatements(statement.Block.Statements);
             var loop = _loops.Pop();
 
@@ -428,10 +441,11 @@ public static class LuaCompiler
                 AddExistingLocal(
                     statement.Names[index].Identifier,
                     firstLoopVariableRegister + index,
-                    statement.Names[index].Range.Start);
+                    statement.Names[index].Range.Start,
+                    isReadOnly: true);
             }
 
-            _loops.Push(new LoopContext());
+            _loops.Push(new LoopContext(_scopes.Count - 1));
             CompileBlockStatements(statement.Block.Statements);
             var loop = _loops.Pop();
 
@@ -448,17 +462,30 @@ public static class LuaCompiler
 
         private void CompileLocalDeclaration(LuaLocalDeclarationStatementSyntax statement)
         {
-            EnsureLocalDeclarationAttributesSupported(statement.Names);
-
             if (statement.Initializers.Count == 0)
             {
                 var startRegister = _persistentRegisterCount;
+                var toBeClosedRegisters = new List<int>();
                 foreach (var name in statement.Names.Names)
                 {
-                    AddLocal(name.Name.Identifier, name.Range.Start);
+                    var attributes = GetLocalAttributes(statement.Names.LeadingAttribute, name.Attribute);
+                    var register = AddLocal(
+                        name.Name.Identifier,
+                        name.Range.Start,
+                        attributes.IsReadOnly,
+                        attributes.IsToBeClosed);
+                    if (attributes.IsToBeClosed)
+                    {
+                        toBeClosedRegisters.Add(register);
+                    }
                 }
 
                 EmitLoadNilRange(startRegister, statement.Names.Names.Count);
+                foreach (var register in toBeClosedRegisters)
+                {
+                    EmitToBeClosed(register);
+                }
+
                 return;
             }
 
@@ -466,7 +493,12 @@ public static class LuaCompiler
 
             for (var index = 0; index < statement.Names.Names.Count; index++)
             {
-                var localRegister = AddLocal(statement.Names.Names[index].Name.Identifier, statement.Names.Names[index].Range.Start);
+                var attributes = GetLocalAttributes(statement.Names.LeadingAttribute, statement.Names.Names[index].Attribute);
+                var localRegister = AddLocal(
+                    statement.Names.Names[index].Name.Identifier,
+                    statement.Names.Names[index].Range.Start,
+                    attributes.IsReadOnly,
+                    attributes.IsToBeClosed);
                 if (index < valueRegisters.Count)
                 {
                     EmitMove(localRegister, valueRegisters[index]);
@@ -474,6 +506,11 @@ public static class LuaCompiler
                 else
                 {
                     EmitLoadNilRange(localRegister, 1);
+                }
+
+                if (attributes.IsToBeClosed)
+                {
+                    EmitToBeClosed(localRegister);
                 }
             }
         }
@@ -629,6 +666,13 @@ public static class LuaCompiler
         {
             if (TryResolveLexicalName(nameExpression.Name.Identifier, out var reference))
             {
+                if (reference.IsReadOnly)
+                {
+                    throw CreateError(
+                        nameExpression.Range,
+                        $"attempt to assign to const variable '{nameExpression.Name.Identifier}'");
+                }
+
                 return reference.Kind == ReferenceKind.Local
                     ? AssignmentTarget.Local(reference.Index)
                     : AssignmentTarget.Upvalue(reference.Index);
@@ -1116,28 +1160,38 @@ public static class LuaCompiler
             {
                 if (StringComparer.Ordinal.Equals(_visibleLocals[index].Name, name))
                 {
-                    reference = new Reference(ReferenceKind.Local, _visibleLocals[index].Register);
+                    reference = new Reference(
+                        ReferenceKind.Local,
+                        _visibleLocals[index].Register,
+                        _visibleLocals[index].IsReadOnly);
                     return true;
                 }
             }
 
             if (_upvalueIndices.TryGetValue(name, out var upvalueIndex))
             {
-                reference = new Reference(ReferenceKind.Upvalue, upvalueIndex);
+                reference = new Reference(
+                    ReferenceKind.Upvalue,
+                    upvalueIndex,
+                    _upvalues[upvalueIndex].IsReadOnly);
                 return true;
             }
 
             if (_parent is not null && _parent.TryResolveChildCapture(name, out var captureSource))
             {
-                var captureIndex = GetOrAddUpvalue(name, captureSource.InStack, captureSource.Index);
-                reference = new Reference(ReferenceKind.Upvalue, captureIndex);
+                var captureIndex = GetOrAddUpvalue(
+                    name,
+                    captureSource.InStack,
+                    captureSource.Index,
+                    captureSource.IsReadOnly);
+                reference = new Reference(ReferenceKind.Upvalue, captureIndex, captureSource.IsReadOnly);
                 return true;
             }
 
             if (_parent is null && StringComparer.Ordinal.Equals(name, EnvironmentName))
             {
-                var environmentIndex = GetOrAddUpvalue(EnvironmentName, inStack: 0, index: 0);
-                reference = new Reference(ReferenceKind.Upvalue, environmentIndex);
+                var environmentIndex = GetOrAddUpvalue(EnvironmentName, inStack: 0, index: 0, isReadOnly: false);
+                reference = new Reference(ReferenceKind.Upvalue, environmentIndex, IsReadOnly: false);
                 return true;
             }
 
@@ -1151,28 +1205,41 @@ public static class LuaCompiler
             {
                 if (StringComparer.Ordinal.Equals(_visibleLocals[index].Name, name))
                 {
-                    capture = new CaptureSource(InStack: 1, Index: checked((byte)_visibleLocals[index].Register));
+                    capture = new CaptureSource(
+                        InStack: 1,
+                        Index: checked((byte)_visibleLocals[index].Register),
+                        IsReadOnly: _visibleLocals[index].IsReadOnly);
                     return true;
                 }
             }
 
             if (_upvalueIndices.TryGetValue(name, out var existingUpvalueIndex))
             {
-                capture = new CaptureSource(InStack: 0, Index: checked((byte)existingUpvalueIndex));
+                capture = new CaptureSource(
+                    InStack: 0,
+                    Index: checked((byte)existingUpvalueIndex),
+                    IsReadOnly: _upvalues[existingUpvalueIndex].IsReadOnly);
                 return true;
             }
 
             if (_parent is not null && _parent.TryResolveChildCapture(name, out var parentCapture))
             {
-                var upvalueIndex = GetOrAddUpvalue(name, parentCapture.InStack, parentCapture.Index);
-                capture = new CaptureSource(InStack: 0, Index: checked((byte)upvalueIndex));
+                var upvalueIndex = GetOrAddUpvalue(
+                    name,
+                    parentCapture.InStack,
+                    parentCapture.Index,
+                    parentCapture.IsReadOnly);
+                capture = new CaptureSource(
+                    InStack: 0,
+                    Index: checked((byte)upvalueIndex),
+                    IsReadOnly: parentCapture.IsReadOnly);
                 return true;
             }
 
             if (_parent is null && StringComparer.Ordinal.Equals(name, EnvironmentName))
             {
-                var upvalueIndex = GetOrAddUpvalue(EnvironmentName, inStack: 0, index: 0);
-                capture = new CaptureSource(InStack: 0, Index: checked((byte)upvalueIndex));
+                var upvalueIndex = GetOrAddUpvalue(EnvironmentName, inStack: 0, index: 0, isReadOnly: false);
+                capture = new CaptureSource(InStack: 0, Index: checked((byte)upvalueIndex), IsReadOnly: false);
                 return true;
             }
 
@@ -1221,16 +1288,27 @@ public static class LuaCompiler
             }
         }
 
-        private int AddLocal(string name, LuaSourcePosition position)
+        private int AddLocal(
+            string name,
+            LuaSourcePosition position,
+            bool isReadOnly = false,
+            bool isToBeClosed = false)
         {
             var register = AllocatePersistentRegister();
-            _visibleLocals.Add(new LocalInfo(name, register, position));
+            _visibleLocals.Add(new LocalInfo(name, register, position, isReadOnly, isToBeClosed));
+            TrackClosableLocal(register, isToBeClosed);
             return register;
         }
 
-        private void AddExistingLocal(string name, int register, LuaSourcePosition position)
+        private void AddExistingLocal(
+            string name,
+            int register,
+            LuaSourcePosition position,
+            bool isReadOnly = false,
+            bool isToBeClosed = false)
         {
-            _visibleLocals.Add(new LocalInfo(name, register, position));
+            _visibleLocals.Add(new LocalInfo(name, register, position, isReadOnly, isToBeClosed));
+            TrackClosableLocal(register, isToBeClosed);
         }
 
         private void AddVisibleGlobalDeclarations(IReadOnlyList<GlobalDeclarationInfo> declarations)
@@ -1273,20 +1351,17 @@ public static class LuaCompiler
             };
         }
 
-        private void EnsureLocalDeclarationAttributesSupported(LuaDeclarationNameListSyntax declaration)
+        private static LocalAttributes GetLocalAttributes(
+            LuaVariableAttributeSyntax? leadingAttribute,
+            LuaVariableAttributeSyntax? attribute)
         {
-            if (declaration.LeadingAttribute is not null)
+            var effectiveAttribute = attribute?.Kind ?? leadingAttribute?.Kind;
+            return effectiveAttribute switch
             {
-                throw CreateUnsupported(declaration.LeadingAttribute, "variable attributes are not supported yet");
-            }
-
-            foreach (var name in declaration.Names)
-            {
-                if (name.Attribute is not null)
-                {
-                    throw CreateUnsupported(name.Attribute, "variable attributes are not supported yet");
-                }
-            }
+                LuaVariableAttributeKind.Const => new LocalAttributes(IsReadOnly: true, IsToBeClosed: false),
+                LuaVariableAttributeKind.Close => new LocalAttributes(IsReadOnly: false, IsToBeClosed: true),
+                _ => default
+            };
         }
 
         private void EmitGlobalInitializationCheck(string name, LuaSourceRange range)
@@ -1401,23 +1476,35 @@ public static class LuaCompiler
 
         private void EnterScope()
         {
-            _scopeStarts.Push(_visibleLocals.Count);
-            _globalScopeStarts.Push(_visibleGlobalDeclarations.Count);
+            _scopes.Add(new ScopeInfo(_visibleLocals.Count, _visibleGlobalDeclarations.Count));
         }
 
-        private void ExitScope()
+        private void ExitScope(bool emitClose = true)
         {
-            var start = _scopeStarts.Pop();
+            var scope = _scopes[^1];
+            _scopes.RemoveAt(_scopes.Count - 1);
+
+            if (emitClose && scope.FirstClosableRegister is int closeRegister)
+            {
+                EmitClose(closeRegister);
+            }
+
+            var start = scope.LocalStart;
             if (start < _visibleLocals.Count)
             {
                 _visibleLocals.RemoveRange(start, _visibleLocals.Count - start);
             }
 
-            var globalStart = _globalScopeStarts.Pop();
+            var globalStart = scope.GlobalStart;
             if (globalStart < _visibleGlobalDeclarations.Count)
             {
                 _visibleGlobalDeclarations.RemoveRange(globalStart, _visibleGlobalDeclarations.Count - globalStart);
             }
+        }
+
+        private int? GetCurrentScopeCloseRegister()
+        {
+            return _scopes.Count == 0 ? null : _scopes[^1].FirstClosableRegister;
         }
 
         private void ResetTemps()
@@ -1489,7 +1576,7 @@ public static class LuaCompiler
             return opcode is LuaOpcode.Return or LuaOpcode.Return0 or LuaOpcode.Return1;
         }
 
-        private int GetOrAddUpvalue(string name, byte inStack, byte index)
+        private int GetOrAddUpvalue(string name, byte inStack, byte index, bool isReadOnly)
         {
             if (_upvalueIndices.TryGetValue(name, out var existing))
             {
@@ -1503,8 +1590,48 @@ public static class LuaCompiler
             }
 
             _upvalueIndices[name] = upvalueIndex;
-            _upvalues.Add(new UpvalueInfo(name, inStack, index));
+            _upvalues.Add(new UpvalueInfo(name, inStack, index, isReadOnly));
             return upvalueIndex;
+        }
+
+        private void TrackClosableLocal(int register, bool isToBeClosed)
+        {
+            if (!isToBeClosed)
+            {
+                return;
+            }
+
+            var scopeIndex = _scopes.Count - 1;
+            if (scopeIndex < 0)
+            {
+                throw new InvalidOperationException("Cannot mark a to-be-closed local without an active scope.");
+            }
+
+            var scope = _scopes[scopeIndex];
+            scope.FirstClosableRegister = scope.FirstClosableRegister is null
+                ? register
+                : Math.Min(scope.FirstClosableRegister.Value, register);
+        }
+
+        private void EmitBreakScopeClose(LoopContext loop)
+        {
+            int? closeRegister = null;
+            for (var index = loop.ScopeIndex; index < _scopes.Count; index++)
+            {
+                if (_scopes[index].FirstClosableRegister is not int candidate)
+                {
+                    continue;
+                }
+
+                closeRegister = closeRegister is null
+                    ? candidate
+                    : Math.Min(closeRegister.Value, candidate);
+            }
+
+            if (closeRegister is int register)
+            {
+                EmitClose(register);
+            }
         }
 
         private int AddConstant(LuaConstant constant)
@@ -1796,6 +1923,11 @@ public static class LuaCompiler
             _code.Add(EncodeAbc(LuaOpcode.Close, registerIndex, 0, 0));
         }
 
+        private void EmitToBeClosed(int registerIndex)
+        {
+            _code.Add(EncodeAbc(LuaOpcode.Tbc, registerIndex, 0, 0));
+        }
+
         private void EmitVarArg(int targetRegister, int? resultCount)
         {
             var resultOperand = resultCount is null ? 0 : resultCount.Value + 1;
@@ -1910,7 +2042,7 @@ public static class LuaCompiler
                 (encoded << LuaInstructionLayout.PosSJ);
         }
 
-        private readonly record struct Reference(ReferenceKind Kind, int Index);
+        private readonly record struct Reference(ReferenceKind Kind, int Index, bool IsReadOnly);
 
         private enum ReferenceKind
         {
@@ -1918,16 +2050,34 @@ public static class LuaCompiler
             Upvalue
         }
 
-        private sealed record LocalInfo(string Name, int Register, LuaSourcePosition Position);
+        private sealed record LocalInfo(
+            string Name,
+            int Register,
+            LuaSourcePosition Position,
+            bool IsReadOnly,
+            bool IsToBeClosed);
 
         private sealed record GlobalDeclarationInfo(string? Name, bool IsReadOnly, LuaSourcePosition Position);
 
-        private sealed record UpvalueInfo(string Name, byte InStack, byte Index);
+        private sealed record UpvalueInfo(string Name, byte InStack, byte Index, bool IsReadOnly);
 
-        private readonly record struct CaptureSource(byte InStack, byte Index);
+        private readonly record struct CaptureSource(byte InStack, byte Index, bool IsReadOnly);
 
-        private sealed class LoopContext
+        private readonly record struct LocalAttributes(bool IsReadOnly, bool IsToBeClosed);
+
+        private sealed class ScopeInfo(int localStart, int globalStart)
         {
+            public int LocalStart { get; } = localStart;
+
+            public int GlobalStart { get; } = globalStart;
+
+            public int? FirstClosableRegister { get; set; }
+        }
+
+        private sealed class LoopContext(int scopeIndex)
+        {
+            public int ScopeIndex { get; } = scopeIndex;
+
             public List<int> BreakJumps { get; } = [];
         }
 

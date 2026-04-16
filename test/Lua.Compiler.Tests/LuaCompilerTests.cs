@@ -452,6 +452,144 @@ answer = 42
     }
 
     [Fact]
+    public void Compile_ShouldRejectAssignmentToConstLocal()
+    {
+        var exception = Should.Throw<LuaCompilerException>(() => LuaCompiler.Compile("""
+local value<const> = 42
+value = 99
+"""));
+
+        exception.Message.ShouldContain("attempt to assign to const variable 'value'");
+    }
+
+    [Fact]
+    public void Compile_ShouldRejectAssignmentToCapturedConstLocal()
+    {
+        var exception = Should.Throw<LuaCompilerException>(() => LuaCompiler.Compile("""
+local answer<const> = 42
+
+local function mutate()
+    answer = 99
+end
+"""));
+
+        exception.Message.ShouldContain("attempt to assign to const variable 'answer'");
+    }
+
+    [Fact]
+    public void Compile_ShouldTreatForControlVariablesAsReadOnly()
+    {
+        var exception = Should.Throw<LuaCompilerException>(() => LuaCompiler.Compile("""
+for i = 1, 3 do
+    i = i + 1
+end
+"""));
+
+        exception.Message.ShouldContain("attempt to assign to const variable 'i'");
+    }
+
+    [Fact]
+    public void Compile_ShouldCloseToBeClosedLocalsAtScopeExit()
+    {
+        const string source = """
+local log = ""
+local mt = {
+    __close = function(self)
+        log = log .. self.tag
+    end
+}
+
+do
+    local a <close> = setmetatable({ tag = "a" }, mt)
+    do
+        local b <close> = setmetatable({ tag = "b" }, mt)
+    end
+
+    log = log .. "x"
+end
+
+return log
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("bxa");
+    }
+
+    [Fact]
+    public void Compile_ShouldCloseToBeClosedLocalsWhenBreakingOutOfLoop()
+    {
+        const string source = """
+local log = ""
+local mt = {
+    __close = function(self)
+        log = log .. self.tag
+    end
+}
+
+while true do
+    local x <close> = setmetatable({ tag = "x" }, mt)
+    break
+end
+
+return log
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("x");
+    }
+
+    [Fact]
+    public void Compile_ShouldAllowRepeatConditionToSeeBlockLocals()
+    {
+        const string source = """
+local total = 0
+
+repeat
+    local nextValue = total + 1
+    total = nextValue
+until nextValue == 2
+
+return total
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(2);
+    }
+
+    [Fact]
+    public void Compile_ShouldCloseToBeClosedLocalsWhenRepeatContinues()
+    {
+        const string source = """
+local log = ""
+local mt = {
+    __close = function(self)
+        log = log .. self.tag
+    end
+}
+
+local i = 0
+repeat
+    i = i + 1
+    local tag = i == 1 and "a" or "b"
+    local x <close> = setmetatable({ tag = tag }, mt)
+until i == 2
+
+return log
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("ab");
+    }
+
+    [Fact]
     public void Compile_ShouldSupportGlobalFunctionDeclarations()
     {
         const string source = """
