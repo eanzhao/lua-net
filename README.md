@@ -52,22 +52,12 @@ dotnet sln lua-net.sln list
 | 第 10 步 | coroutine 库 | 已完成 |
 | 第 11 步 | 词法分析 | 已完成 |
 | 第 12 步 | 语法分析与 AST | 已完成 |
-| 第 13 步 | 编译器（AST → 字节码） | 进行中 |
-| 第 14 步 | io / os / package / debug 库 | 进行中 |
+| 第 13 步 | 编译器（AST → 字节码） | 已完成 |
+| 第 14 步 | io / os / package / debug 库 | 已完成 |
 | 第 15 步 | 字节码序列化与 REPL | 已完成 |
 | 第 16 步 | 兼容性收口 | 进行中 |
 
-### 第 7 步当前覆盖范围
-
-**已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`collectgarbage`（最小版本）、`load` / `loadfile` / `dofile`（二进制 chunk + Step 13 第一版文本 chunk 路径）、最小 `package` / `require`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`、`print` / `warn`、最小 `string` 表（`upper` / `lower` / `len`）、字符串元表 `__index`、字符串算术元方法
-
-**后续扩展：** 文本 chunk 的剩余语法子集、`io` / `os` / `debug` 以及更贴近原生 Lua C API 的动态库接入会在后续阶段继续展开。
-
-### 第 8 步当前覆盖范围
-
-**已实现：** `table.concat` / `table.insert` / `table.remove` / `table.move` / `table.sort` / `table.pack` / `table.unpack`，`math.abs` / `ceil` / `floor` / `max` / `min` / `sqrt` / `log` / `exp` / `sin` / `cos` / `tan` / `asin` / `acos` / `atan` / `deg` / `rad` / `fmod` / `modf` / `tointeger` / `type` / `ult`，`math.pi` / `huge` / `maxinteger` / `mininteger`，`utf8.offset` / `utf8.codepoint` / `utf8.char` / `utf8.len` / `utf8.codes` / `utf8.charpattern`
-
-**后续扩展：** `table.create`、`math.random` / `math.randomseed`、更完整的字符串/模式匹配消费路径会在后续阶段继续展开。
+当前 249 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
 
 ## 仓库结构
 
