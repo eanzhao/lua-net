@@ -36,6 +36,17 @@ public class OfficialLuaCompatibilityTests
         result.Error.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void OfficialGenGc_ShouldCurrentlyStopAtWeakTableGap()
+    {
+        var result = RunOfficialScript("gengc.lua");
+
+        result.ExitCode.ShouldBe(1);
+        result.Output.ShouldContain("testing generational garbage collection");
+        result.Output.ShouldNotContain("OK");
+        result.Error.ShouldContain("assertion failed!");
+    }
+
     private static ScriptRunResult RunOfficialScript(string scriptPath)
     {
         var output = new StringWriter();

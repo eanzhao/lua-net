@@ -32,6 +32,12 @@ public sealed partial class LuaState
         Continue
     }
 
+    private enum GarbageCollectorMode
+    {
+        Incremental,
+        Generational
+    }
+
     private readonly Dictionary<LuaValueKind, LuaTable> _typeMetatables = [];
     private readonly StringBuilder _warningBuffer = new();
     private BinaryChunkLoader? _binaryChunkLoader;
@@ -41,6 +47,11 @@ public sealed partial class LuaState
     private Func<LuaThread, IReadOnlyList<LuaValue>, LuaValue[]>? _coroutineResumer;
     private Func<LuaThread, LuaValue[]>? _coroutineCloser;
     private bool _gcRunning = true;
+    private GarbageCollectorMode _gcMode = GarbageCollectorMode.Incremental;
+    private int _gcPause = 200;
+    private int _gcStepMultiplier = 100;
+    private int _gcStepSize = 13;
+    private int _gcStepDebt;
     private WarningMode _warningMode = WarningMode.Off;
     private static readonly LuaValue IPairsAuxFunction = LuaValue.FromFunction(
         new LuaClosure(
@@ -57,6 +68,7 @@ public sealed partial class LuaState
     private static readonly byte[] BinaryChunkSignature = [0x1B, (byte)'L', (byte)'u', (byte)'a'];
     private static readonly UTF8Encoding StrictUtf8Encoding = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
     private const int MaxUnicode = 0x10FFFF;
+    private const int FullGcStepSize = 0;
     private const string InvalidUtf8CodeMessage = "invalid UTF-8 code";
     private const string Utf8CharPattern = "[\0-\x7F\xC2-\xFD][\x80-\xBF]*";
 
@@ -697,25 +709,123 @@ public sealed partial class LuaState
                 state._gcRunning = true;
                 return [LuaValue.FromInteger(0)];
             case "collect":
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
+                state.RunHostGarbageCollection();
                 return [LuaValue.FromInteger(0)];
             case "count":
                 return [LuaValue.FromFloat(GC.GetTotalMemory(forceFullCollection: false) / 1024d)];
             case "step":
             {
-                if (arguments.Count > 1 && !TryGetInteger(arguments[1], out _))
-                {
-                    throw CreateArgumentTypeError("collectgarbage", 2, "integer", arguments[1]);
-                }
-
-                return [LuaValue.FromBoolean(false)];
+                var stepSize = arguments.Count > 1 && !arguments[1].IsNil
+                    ? RequireGarbageCollectorParameter(arguments[1], 2)
+                    : 0;
+                return [LuaValue.FromBoolean(state.RunGarbageCollectorStep(stepSize))];
             }
             case "isrunning":
                 return [LuaValue.FromBoolean(state._gcRunning)];
+            case "incremental":
+                return [state.SetGarbageCollectorMode(GarbageCollectorMode.Incremental)];
+            case "generational":
+                return [state.SetGarbageCollectorMode(GarbageCollectorMode.Generational)];
+            case "param":
+            {
+                var parameterName = RequireStringArgument(arguments, 1, "collectgarbage");
+                if (arguments.Count <= 2 || arguments[2].IsNil)
+                {
+                    return [LuaValue.FromInteger(state.GetGarbageCollectorParameter(parameterName))];
+                }
+
+                var newValue = RequireGarbageCollectorParameter(arguments[2], 3);
+                var previousValue = state.SetGarbageCollectorParameter(parameterName, newValue);
+                return [LuaValue.FromInteger(previousValue)];
+            }
             default:
                 throw CreateArgumentError("collectgarbage", 1, $"invalid option '{option}'");
         }
+    }
+
+    private void RunHostGarbageCollection()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        _gcStepDebt = 0;
+    }
+
+    private bool RunGarbageCollectorStep(int stepSize)
+    {
+        RunHostGarbageCollection();
+
+        if (_gcStepSize == FullGcStepSize)
+        {
+            return true;
+        }
+
+        var increment = stepSize <= 0 ? 1 : stepSize;
+        _gcStepDebt = checked(_gcStepDebt + increment);
+        if (_gcStepDebt >= _gcStepSize)
+        {
+            _gcStepDebt = 0;
+            return true;
+        }
+
+        return false;
+    }
+
+    private LuaValue SetGarbageCollectorMode(GarbageCollectorMode mode)
+    {
+        var previousMode = GetGarbageCollectorModeName();
+        _gcMode = mode;
+        return LuaValue.FromString(previousMode);
+    }
+
+    private string GetGarbageCollectorModeName()
+    {
+        return _gcMode == GarbageCollectorMode.Incremental
+            ? "incremental"
+            : "generational";
+    }
+
+    private int GetGarbageCollectorParameter(string parameterName)
+    {
+        return parameterName switch
+        {
+            "pause" => _gcPause,
+            "stepmul" => _gcStepMultiplier,
+            "stepsize" => _gcStepSize,
+            _ => throw CreateArgumentError("collectgarbage", 2, $"invalid parameter '{parameterName}'")
+        };
+    }
+
+    private int SetGarbageCollectorParameter(string parameterName, int newValue)
+    {
+        return parameterName switch
+        {
+            "pause" => SwapGarbageCollectorParameter(ref _gcPause, newValue),
+            "stepmul" => SwapGarbageCollectorParameter(ref _gcStepMultiplier, newValue),
+            "stepsize" => SwapGarbageCollectorParameter(ref _gcStepSize, newValue),
+            _ => throw CreateArgumentError("collectgarbage", 2, $"invalid parameter '{parameterName}'")
+        };
+    }
+
+    private static int SwapGarbageCollectorParameter(ref int parameter, int newValue)
+    {
+        var previousValue = parameter;
+        parameter = newValue;
+        return previousValue;
+    }
+
+    private static int RequireGarbageCollectorParameter(LuaValue value, int argumentIndex)
+    {
+        if (!TryGetInteger(value, out var parameterValue))
+        {
+            throw CreateArgumentTypeError("collectgarbage", argumentIndex, "integer", value);
+        }
+
+        if (parameterValue < 0 || parameterValue > int.MaxValue)
+        {
+            throw CreateArgumentError("collectgarbage", argumentIndex, "value out of range");
+        }
+
+        return (int)parameterValue;
     }
 
     private static LuaValue[] Print(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

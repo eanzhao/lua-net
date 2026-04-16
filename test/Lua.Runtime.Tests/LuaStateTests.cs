@@ -979,7 +979,7 @@ public class LuaStateTests
     }
 
     [Fact]
-    public void CollectGarbage_ShouldUseMinimalSemantics()
+    public void CollectGarbage_ShouldSupportModeSwitchingAndParameters()
     {
         var state = new LuaState();
         var collectgarbage = GetBaseFunction(state, "collectgarbage");
@@ -996,6 +996,67 @@ public class LuaStateTests
         InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("isrunning"))
             .ShouldHaveSingleItem()
             .AsBoolean().ShouldBeFalse();
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("incremental"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("incremental");
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("generational"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("incremental");
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("incremental"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("generational");
+
+        var oldPause = InvokeBaseFunction(
+            state,
+            collectgarbage,
+            LuaValue.FromString("param"),
+            LuaValue.FromString("pause"),
+            LuaValue.FromInteger(150));
+        oldPause.ShouldHaveSingleItem().AsInteger().ShouldBe(200);
+        InvokeBaseFunction(
+            state,
+            collectgarbage,
+            LuaValue.FromString("param"),
+            LuaValue.FromString("pause"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(150);
+
+        var oldStepMultiplier = InvokeBaseFunction(
+            state,
+            collectgarbage,
+            LuaValue.FromString("param"),
+            LuaValue.FromString("stepmul"),
+            LuaValue.FromInteger(250));
+        oldStepMultiplier.ShouldHaveSingleItem().AsInteger().ShouldBe(100);
+        InvokeBaseFunction(
+            state,
+            collectgarbage,
+            LuaValue.FromString("param"),
+            LuaValue.FromString("stepmul"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(250);
+
+        InvokeBaseFunction(
+            state,
+            collectgarbage,
+            LuaValue.FromString("param"),
+            LuaValue.FromString("stepsize"),
+            LuaValue.FromInteger(0))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(13);
+        InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("step"))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeTrue();
+
+        InvokeBaseFunction(
+            state,
+            collectgarbage,
+            LuaValue.FromString("param"),
+            LuaValue.FromString("stepsize"),
+            LuaValue.FromInteger(13))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(0);
+
         InvokeBaseFunction(state, collectgarbage, LuaValue.FromString("step"), LuaValue.FromInteger(4))
             .ShouldHaveSingleItem()
             .AsBoolean().ShouldBeFalse();
