@@ -349,6 +349,24 @@ public sealed partial class LuaVirtualMachine
         return true;
     }
 
+    private bool TryStartErrorCloseContinuation(Exception exception)
+    {
+        var frame = State.CurrentFrame;
+        if (frame is null ||
+            frame.PendingClose is not null ||
+            !frame.HasToBeClosedRegistersFrom(0))
+        {
+            return false;
+        }
+
+        return StartCloseContinuation(
+            frame,
+            registerIndex: 0,
+            LuaPendingCloseContinuationKind.Error,
+            returnResults: null,
+            pendingException: exception);
+    }
+
     private bool TryResumePendingClose(
         CallFrame frame,
         int hostCallId,
@@ -388,16 +406,35 @@ public sealed partial class LuaVirtualMachine
             }
             catch (LuaYieldException ex) when (ReferenceEquals(ex.Thread, State.CurrentThread))
             {
+                if (pendingClose.HasCloseError)
+                {
+                    pendingClose.CanReplaceCloseError = false;
+                }
+
                 pendingClose.WaitForResumeValues();
                 throw;
             }
             catch (Exception ex)
             {
-                pendingClose.PendingException = AnnotateCloseError(ex);
+                if (!pendingClose.HasCloseError || pendingClose.CanReplaceCloseError)
+                {
+                    pendingClose.PendingException = AnnotateCloseError(ex);
+                    pendingClose.HasCloseError = true;
+                    pendingClose.CanReplaceCloseError = true;
+                }
             }
         }
 
         frame.ClearPendingClose();
+        if (pendingClose.ContinuationKind == LuaPendingCloseContinuationKind.Error)
+        {
+            var pendingException = pendingClose.PendingException;
+            State.PopFrame();
+            State.Stack.SetTop(frame.BaseIndex);
+            RethrowIfNeeded(pendingException);
+            return true;
+        }
+
         if (pendingClose.PendingException is not null)
         {
             ExceptionDispatchInfo.Capture(pendingClose.PendingException).Throw();
@@ -410,6 +447,151 @@ public sealed partial class LuaVirtualMachine
         }
 
         return true;
+    }
+
+    private bool TryResumePendingProtectedCall(
+        CallFrame frame,
+        int hostCallId,
+        out bool completedFrame,
+        out LuaValue[] completedResults)
+    {
+        completedFrame = false;
+        completedResults = [];
+
+        var pendingProtectedCall = frame.PendingProtectedCall;
+        if (pendingProtectedCall is null)
+        {
+            return false;
+        }
+
+        if (pendingProtectedCall.AwaitingResumeValues)
+        {
+            if (!State.CurrentThread.HasResumeValues())
+            {
+                return false;
+            }
+
+            var resumeValues = State.CurrentThread.ConsumeResumeValues();
+            pendingProtectedCall.ConsumeResumeValues();
+            pendingProtectedCall.SetPhaseResults(resumeValues);
+        }
+
+        while (true)
+        {
+            if (pendingProtectedCall.HasPhaseResults)
+            {
+                var phaseResults = pendingProtectedCall.ConsumePhaseResults();
+                pendingProtectedCall.SetFinalResults(
+                    pendingProtectedCall.Phase == LuaPendingProtectedCallPhase.Function
+                        ? CreateProtectedSuccessResults(phaseResults)
+                        : CreateProtectedFailureResults(phaseResults.Length == 0 ? LuaValue.Nil : phaseResults[0]));
+                continue;
+            }
+
+            if (pendingProtectedCall.HasPendingErrorObject)
+            {
+                if (pendingProtectedCall.Phase == LuaPendingProtectedCallPhase.MessageHandler ||
+                    pendingProtectedCall.MessageHandler is null)
+                {
+                    var finalErrorObject = pendingProtectedCall.Phase == LuaPendingProtectedCallPhase.MessageHandler
+                        ? LuaValue.FromString("error in error handling")
+                        : pendingProtectedCall.ConsumePendingErrorObject();
+                    pendingProtectedCall.SetFinalResults(CreateProtectedFailureResults(finalErrorObject));
+                    continue;
+                }
+
+                var errorObject = pendingProtectedCall.ConsumePendingErrorObject();
+                pendingProtectedCall.BeginMessageHandler();
+
+                try
+                {
+                    var handledResults = State.InvokeCallable(pendingProtectedCall.MessageHandler.Value, [errorObject]);
+                    pendingProtectedCall.SetPhaseResults(handledResults);
+                    continue;
+                }
+                catch (LuaYieldException ex) when (ReferenceEquals(ex.Thread, State.CurrentThread))
+                {
+                    if (pendingProtectedCall.ActiveHostCallId == 0)
+                    {
+                        pendingProtectedCall.WaitForResumeValues();
+                    }
+
+                    throw;
+                }
+                catch
+                {
+                    pendingProtectedCall.SetFinalResults(
+                        CreateProtectedFailureResults(LuaValue.FromString("error in error handling")));
+                    continue;
+                }
+            }
+
+            if (!pendingProtectedCall.HasFinalResults)
+            {
+                return false;
+            }
+
+            var finalResults = pendingProtectedCall.ConsumeFinalResults();
+            frame.ClearPendingProtectedCall();
+            ExecuteReturnHook(frame);
+            State.PopFrame();
+            State.Stack.SetTop(frame.BaseIndex);
+
+            if (State.CurrentFrame is not null)
+            {
+                State.CurrentThread.SetResumeValues(finalResults);
+                return true;
+            }
+
+            if (!State.CurrentThread.IsMainThread)
+            {
+                State.CurrentThread.MarkCompleted();
+            }
+
+            completedFrame = true;
+            completedResults = finalResults;
+            return true;
+        }
+    }
+
+    private bool TryCompleteProtectedHostCall(int hostCallId, IReadOnlyList<LuaValue> results)
+    {
+        var frames = State.CurrentThread.Frames;
+        for (var index = frames.Count - 1; index >= 0; index--)
+        {
+            var pendingProtectedCall = frames[index].PendingProtectedCall;
+            if (pendingProtectedCall is null ||
+                !pendingProtectedCall.IsSuspended ||
+                pendingProtectedCall.ActiveHostCallId != hostCallId)
+            {
+                continue;
+            }
+
+            pendingProtectedCall.SetPhaseResults(results);
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryHandlePendingProtectedCallException(Exception exception)
+    {
+        var frames = State.CurrentThread.Frames;
+        for (var index = frames.Count - 1; index >= 0; index--)
+        {
+            var pendingProtectedCall = frames[index].PendingProtectedCall;
+            if (pendingProtectedCall is null || !pendingProtectedCall.IsSuspended)
+            {
+                continue;
+            }
+
+            var frameDepth = index + 1;
+            var cleanedException = CleanupFramesToDepth(frameDepth, exception) ?? exception;
+            pendingProtectedCall.SetPendingErrorObject(GetErrorObject(cleanedException));
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryStartCloseCall(CallFrame frame, int registerIndex, LuaPendingClose pendingClose)
@@ -500,6 +682,23 @@ public sealed partial class LuaVirtualMachine
             LuaRuntimeException runtimeException => runtimeException.ErrorObject,
             _ => LuaValue.FromString(exception.Message)
         };
+    }
+
+    private static LuaValue[] CreateProtectedSuccessResults(IReadOnlyList<LuaValue> results)
+    {
+        var values = new LuaValue[results.Count + 1];
+        values[0] = LuaValue.FromBoolean(true);
+        for (var index = 0; index < results.Count; index++)
+        {
+            values[index + 1] = results[index];
+        }
+
+        return values;
+    }
+
+    private static LuaValue[] CreateProtectedFailureResults(LuaValue errorObject)
+    {
+        return [LuaValue.FromBoolean(false), errorObject];
     }
 
     private static void RethrowIfNeeded(Exception? exception)

@@ -50,6 +50,8 @@ public sealed class CallFrame
 
     public LuaPendingClose? PendingClose { get; private set; }
 
+    public LuaPendingProtectedCall? PendingProtectedCall { get; private set; }
+
     public void SetPendingCall(int registerIndex, int resultCount)
     {
         PendingCall = LuaPendingCall.ForRegisters(registerIndex, resultCount);
@@ -74,6 +76,17 @@ public sealed class CallFrame
     public void ClearPendingClose()
     {
         PendingClose = null;
+    }
+
+    public void SetPendingProtectedCall(LuaPendingProtectedCall pendingProtectedCall)
+    {
+        ArgumentNullException.ThrowIfNull(pendingProtectedCall);
+        PendingProtectedCall = pendingProtectedCall;
+    }
+
+    public void ClearPendingProtectedCall()
+    {
+        PendingProtectedCall = null;
     }
 
     public void SetRegisterTop(int registerTop)
@@ -118,6 +131,21 @@ public sealed class CallFrame
         registers.Reverse();
 
         return registers;
+    }
+
+    public bool HasToBeClosedRegistersFrom(int registerIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(registerIndex);
+
+        foreach (var trackedRegister in _toBeClosedRegisters)
+        {
+            if (trackedRegister >= registerIndex)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public LuaUpvalue GetOrCreateOpenUpvalue(LuaStack stack, int registerIndex)

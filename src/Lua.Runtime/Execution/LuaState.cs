@@ -2637,6 +2637,78 @@ public sealed partial class LuaState
         IReadOnlyList<LuaValue> callArguments,
         LuaValue? messageHandler)
     {
+        var frame = state.CurrentFrame;
+        if (frame is null)
+        {
+            return ExecuteProtectedCallSynchronously(state, callable, callArguments, messageHandler);
+        }
+
+        var pendingProtectedCall = new LuaPendingProtectedCall(messageHandler);
+        frame.SetPendingProtectedCall(pendingProtectedCall);
+
+        try
+        {
+            var results = state.InvokeCallable(callable, callArguments);
+            frame.ClearPendingProtectedCall();
+            return PrependSuccessResult(results);
+        }
+        catch (LuaYieldException ex) when (ReferenceEquals(ex.Thread, state.CurrentThread))
+        {
+            if (pendingProtectedCall.ActiveHostCallId == 0)
+            {
+                pendingProtectedCall.WaitForResumeValues();
+            }
+            else
+            {
+                pendingProtectedCall.MarkSuspended();
+            }
+
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var errorObject = GetErrorObject(ex);
+            if (messageHandler is null)
+            {
+                frame.ClearPendingProtectedCall();
+                return [LuaValue.FromBoolean(false), errorObject];
+            }
+
+            pendingProtectedCall.BeginMessageHandler();
+
+            try
+            {
+                var handledResults = state.InvokeCallable(messageHandler.Value, [errorObject]);
+                frame.ClearPendingProtectedCall();
+                return [LuaValue.FromBoolean(false), handledResults.Length == 0 ? LuaValue.Nil : handledResults[0]];
+            }
+            catch (LuaYieldException yieldedHandler) when (ReferenceEquals(yieldedHandler.Thread, state.CurrentThread))
+            {
+                if (pendingProtectedCall.ActiveHostCallId == 0)
+                {
+                    pendingProtectedCall.WaitForResumeValues();
+                }
+                else
+                {
+                    pendingProtectedCall.MarkSuspended();
+                }
+
+                throw;
+            }
+            catch
+            {
+                frame.ClearPendingProtectedCall();
+                return [LuaValue.FromBoolean(false), LuaValue.FromString("error in error handling")];
+            }
+        }
+    }
+
+    private static LuaValue[] ExecuteProtectedCallSynchronously(
+        LuaState state,
+        LuaValue callable,
+        IReadOnlyList<LuaValue> callArguments,
+        LuaValue? messageHandler)
+    {
         try
         {
             var results = state.InvokeCallable(callable, callArguments);

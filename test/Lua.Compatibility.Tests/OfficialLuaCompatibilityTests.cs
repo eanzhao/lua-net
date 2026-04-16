@@ -25,16 +25,15 @@ public class OfficialLuaCompatibilityTests
     }
 
     [Fact]
-    public void OfficialLocals_ShouldCurrentlyStopAtYieldableProtectedCallGap()
+    public void OfficialLocals_ShouldRunSuccessfully()
     {
         var result = RunOfficialScript("locals.lua");
 
-        result.ExitCode.ShouldBe(1);
+        result.ExitCode.ShouldBe(0);
         result.Output.ShouldContain("testing errors in __close");
         result.Output.ShouldContain("to-be-closed variables in coroutines");
-        result.Output.ShouldNotContain("OK");
-        result.Error.ShouldContain("assertion failed!");
-        result.Error.ShouldContain("in metamethod 'close'");
+        result.Output.ShouldContain("OK");
+        result.Error.ShouldBeEmpty();
     }
 
     private static ScriptRunResult RunOfficialScript(string scriptPath)

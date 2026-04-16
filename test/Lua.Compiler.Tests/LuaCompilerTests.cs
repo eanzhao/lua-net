@@ -972,6 +972,53 @@ return first, second, table.concat(trace, "|")
     }
 
     [Fact]
+    public void Compile_ShouldResumeProtectedCallsAcrossYieldingCloseCallbacks()
+    {
+        const string source = """
+local function func2close(f)
+    return setmetatable({}, { __close = f })
+end
+
+local function foo()
+    local z <close> = func2close(function (_, msg)
+        coroutine.yield("z")
+    end)
+
+    local y <close> = func2close(function (_, msg)
+        coroutine.yield("y")
+    end)
+
+    local x <close> = func2close(function (_, msg)
+        coroutine.yield("x")
+    end)
+
+    return 10, 20
+end
+
+local co = coroutine.wrap(function ()
+    return pcall(foo)
+end)
+
+local a = co()
+local b = co()
+local c = co()
+local st, x, y = co()
+
+return a, b, c, tostring(st), x, y
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(6);
+        results[0].AsString().ShouldBe("x");
+        results[1].AsString().ShouldBe("y");
+        results[2].AsString().ShouldBe("z");
+        results[3].AsString().ShouldBe("true");
+        results[4].AsInteger().ShouldBe(10);
+        results[5].AsInteger().ShouldBe(20);
+    }
+
+    [Fact]
     public void Compile_ShouldPropagateLatestNestedCloseError()
     {
         const string source = """

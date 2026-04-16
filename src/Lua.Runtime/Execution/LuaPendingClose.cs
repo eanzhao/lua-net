@@ -5,7 +5,8 @@ namespace Lua.Runtime.Execution;
 public enum LuaPendingCloseContinuationKind
 {
     ContinueExecution,
-    Return
+    Return,
+    Error
 }
 
 public sealed class LuaPendingClose
@@ -31,6 +32,10 @@ public sealed class LuaPendingClose
     public LuaValue[] ReturnResults { get; }
 
     public Exception? PendingException { get; set; }
+
+    public bool HasCloseError { get; set; }
+
+    public bool CanReplaceCloseError { get; set; } = true;
 
     public bool AwaitingResumeValues { get; private set; }
 

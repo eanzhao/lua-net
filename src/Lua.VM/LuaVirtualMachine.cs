@@ -110,6 +110,7 @@ public sealed partial class LuaVirtualMachine
         ArgumentNullException.ThrowIfNull(arguments);
         var hostCallId = CreateHostCallId();
         var frameDepth = State.Frames.Count;
+        State.CurrentFrame?.PendingProtectedCall?.SetActiveHostCallId(hostCallId);
         PushBytecodeFrame(closure, prototype, arguments, LuaCallReturnTarget.ForHostCall(hostCallId));
 
         try
@@ -236,7 +237,8 @@ public sealed partial class LuaVirtualMachine
                 State.CurrentThread.ExitNonYieldableCall();
             }
 
-            if (ReferenceEquals(State.CurrentFrame, nativeFrame))
+            if (ReferenceEquals(State.CurrentFrame, nativeFrame) &&
+                nativeFrame.PendingProtectedCall is null)
             {
                 State.PopFrame();
             }
@@ -274,6 +276,16 @@ public sealed partial class LuaVirtualMachine
                     if (resumedCompleted)
                     {
                         return resumedResults;
+                    }
+
+                    continue;
+                }
+
+                if (TryResumePendingProtectedCall(frame, hostCallId, out var protectedCompleted, out var protectedResults))
+                {
+                    if (protectedCompleted)
+                    {
+                        return protectedResults;
                     }
 
                     continue;
@@ -588,9 +600,21 @@ public sealed partial class LuaVirtualMachine
                         throw new NotImplementedException($"Opcode '{instruction.Name}' is not implemented yet.");
                 }
             }
-            catch (Exception ex) when (ex is not LuaYieldException && ex is not LuaThreadCloseException && TryHandlePendingCloseException(ex))
+            catch (Exception ex)
             {
-                continue;
+                if (ex is LuaYieldException or LuaThreadCloseException)
+                {
+                    throw;
+                }
+
+                if (TryHandlePendingCloseException(ex) ||
+                    TryStartErrorCloseContinuation(ex) ||
+                    TryHandlePendingProtectedCallException(ex))
+                {
+                    continue;
+                }
+
+                throw;
             }
         }
     }
@@ -708,6 +732,11 @@ public sealed partial class LuaVirtualMachine
                     return true;
                 }
 
+                if (TryCompleteProtectedHostCall(frame.ReturnTarget.HostCallId, results))
+                {
+                    return false;
+                }
+
                 throw new InvalidOperationException($"Unexpected host call id '{frame.ReturnTarget.HostCallId}'.");
             case LuaCallReturnTargetKind.ThreadRoot:
                 State.CurrentThread.MarkCompleted();
@@ -805,7 +834,13 @@ public sealed partial class LuaVirtualMachine
 
             var frameDepth = index + 1;
             var cleanedException = CleanupFramesToDepth(frameDepth, exception) ?? exception;
-            frames[index].PendingClose!.PendingException = AnnotateCloseError(cleanedException);
+            if (!frames[index].PendingClose!.HasCloseError || frames[index].PendingClose!.CanReplaceCloseError)
+            {
+                frames[index].PendingClose!.PendingException = AnnotateCloseError(cleanedException);
+                frames[index].PendingClose!.HasCloseError = true;
+                frames[index].PendingClose!.CanReplaceCloseError = true;
+            }
+
             return true;
         }
 
