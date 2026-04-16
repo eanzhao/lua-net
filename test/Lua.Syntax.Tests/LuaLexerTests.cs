@@ -141,4 +141,61 @@ beta]=]
 
         exception.Message.ShouldContain("UTF-8 value too large");
     }
+
+    [Fact]
+    public void Tokenize_UnfinishedShortString_ShouldThrow()
+    {
+        Should.Throw<LuaSyntaxException>(() => new LuaLexer("'hello").Tokenize())
+            .Message.ShouldContain("unfinished string");
+
+        Should.Throw<LuaSyntaxException>(() => new LuaLexer("\"hello\n\"").Tokenize())
+            .Message.ShouldContain("unfinished string");
+    }
+
+    [Fact]
+    public void Tokenize_InvalidEscapeSequence_ShouldThrow()
+    {
+        Should.Throw<LuaSyntaxException>(() => new LuaLexer("'\\q'").Tokenize())
+            .Message.ShouldContain("escape sequence");
+    }
+
+    [Fact]
+    public void Tokenize_DecimalEscapeOverflow_ShouldThrow()
+    {
+        Should.Throw<LuaSyntaxException>(() => new LuaLexer("'\\999'").Tokenize())
+            .Message.ShouldContain("decimal escape too large");
+    }
+
+    [Fact]
+    public void Tokenize_HexFloatWithoutExponent_ShouldThrow()
+    {
+        Should.Throw<LuaSyntaxException>(() => new LuaLexer("0x1.8").Tokenize())
+            .Message.ShouldContain("malformed number");
+    }
+
+    [Fact]
+    public void Tokenize_UnfinishedLongString_ShouldThrow()
+    {
+        Should.Throw<LuaSyntaxException>(() => new LuaLexer("[[ unterminated").Tokenize())
+            .Message.ShouldContain("unfinished long string");
+    }
+
+    [Fact]
+    public void Tokenize_ShouldRecognizeAllSingleCharOperators()
+    {
+        var tokens = new LuaLexer("+ * % ^ # & ~ | = ( ) { } [ ] : ; ,").Tokenize();
+
+        var kinds = tokens.Where(t => t.Kind != LuaTokenKind.EndOfFile).Select(t => t.Kind).ToArray();
+        kinds.ShouldContain(LuaTokenKind.Plus);
+        kinds.ShouldContain(LuaTokenKind.Star);
+        kinds.ShouldContain(LuaTokenKind.Percent);
+        kinds.ShouldContain(LuaTokenKind.Caret);
+        kinds.ShouldContain(LuaTokenKind.Hash);
+        kinds.ShouldContain(LuaTokenKind.Ampersand);
+        kinds.ShouldContain(LuaTokenKind.Tilde);
+        kinds.ShouldContain(LuaTokenKind.Pipe);
+        kinds.ShouldContain(LuaTokenKind.Assign);
+        kinds.ShouldContain(LuaTokenKind.Semicolon);
+        kinds.ShouldContain(LuaTokenKind.Comma);
+    }
 }

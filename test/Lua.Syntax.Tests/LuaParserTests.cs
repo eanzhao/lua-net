@@ -178,4 +178,122 @@ end
         exception.Message.ShouldContain("sample.lua:");
         exception.Message.ShouldContain("expected 'end'");
     }
+
+    [Fact]
+    public void ParseChunk_ShouldParseGotoAndLabels()
+    {
+        const string source = """
+            goto done
+            local x = 1
+            ::done::
+            """;
+
+        var chunk = LuaParser.Parse(source);
+
+        chunk.Block.Statements[0].ShouldBeOfType<LuaGotoStatementSyntax>()
+            .Name.Identifier.ShouldBe("done");
+        chunk.Block.Statements[2].ShouldBeOfType<LuaLabelStatementSyntax>()
+            .Name.Identifier.ShouldBe("done");
+    }
+
+    [Fact]
+    public void ParseChunk_ShouldParseDoBlockAndSemicolons()
+    {
+        var chunk = LuaParser.Parse("do end ; ;");
+
+        chunk.Block.Statements.Count.ShouldBe(3);
+        chunk.Block.Statements[0].ShouldBeOfType<LuaDoStatementSyntax>();
+        chunk.Block.Statements[1].ShouldBeOfType<LuaEmptyStatementSyntax>();
+        chunk.Block.Statements[2].ShouldBeOfType<LuaEmptyStatementSyntax>();
+    }
+
+    [Fact]
+    public void ParseChunk_ShouldParseNestedFunctionsAndClosures()
+    {
+        const string source = """
+            local function outer(x)
+                local function inner(y)
+                    return x + y
+                end
+                return inner
+            end
+            """;
+
+        var chunk = LuaParser.Parse(source);
+
+        var outer = chunk.Block.Statements.Single().ShouldBeOfType<LuaLocalFunctionStatementSyntax>();
+        outer.Name.Identifier.ShouldBe("outer");
+        outer.Body.Parameters.Count.ShouldBe(1);
+
+        var innerStatement = outer.Body.Block.Statements[0].ShouldBeOfType<LuaLocalFunctionStatementSyntax>();
+        innerStatement.Name.Identifier.ShouldBe("inner");
+        innerStatement.Body.Parameters.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void ParseChunk_ShouldParseGlobalFunctionDeclaration()
+    {
+        var chunk = LuaParser.Parse("global function greet(name) return name end");
+
+        var func = chunk.Block.Statements.Single().ShouldBeOfType<LuaGlobalFunctionStatementSyntax>();
+        func.Name.Identifier.ShouldBe("greet");
+        func.Body.Parameters.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void ParseChunk_ShouldParseFunctionCallAsStatement()
+    {
+        var chunk = LuaParser.Parse("print(1, 2, 3)");
+
+        var call = chunk.Block.Statements.Single().ShouldBeOfType<LuaFunctionCallStatementSyntax>();
+        call.Call.Arguments.Arguments.Count.ShouldBe(3);
+    }
+
+    [Fact]
+    public void ParseChunk_ShouldParseMethodCallChain()
+    {
+        var chunk = LuaParser.Parse("return a:foo(1):bar(2)");
+
+        var ret = chunk.Block.Statements.Single().ShouldBeOfType<LuaReturnStatementSyntax>();
+        var outerCall = ret.Expressions.Single().ShouldBeOfType<LuaFunctionCallExpressionSyntax>();
+        outerCall.MethodName!.Identifier.ShouldBe("bar");
+
+        var innerCall = outerCall.Prefix.ShouldBeOfType<LuaFunctionCallExpressionSyntax>();
+        innerCall.MethodName!.Identifier.ShouldBe("foo");
+    }
+
+    [Fact]
+    public void ParseChunk_ShouldParseComplexBinaryPrecedence()
+    {
+        var chunk = LuaParser.Parse("return 1 + 2 * 3, a and b or c");
+
+        var ret = chunk.Block.Statements.Single().ShouldBeOfType<LuaReturnStatementSyntax>();
+
+        var add = ret.Expressions[0].ShouldBeOfType<LuaBinaryExpressionSyntax>();
+        add.Operator.ShouldBe(LuaBinaryOperatorKind.Add);
+        add.Right.ShouldBeOfType<LuaBinaryExpressionSyntax>()
+            .Operator.ShouldBe(LuaBinaryOperatorKind.Multiply);
+
+        var orExpr = ret.Expressions[1].ShouldBeOfType<LuaBinaryExpressionSyntax>();
+        orExpr.Operator.ShouldBe(LuaBinaryOperatorKind.Or);
+        orExpr.Left.ShouldBeOfType<LuaBinaryExpressionSyntax>()
+            .Operator.ShouldBe(LuaBinaryOperatorKind.And);
+    }
+
+    [Fact]
+    public void ParseChunk_ShouldParseFunctionExpressionAsValue()
+    {
+        var chunk = LuaParser.Parse("local f = function(a, b) return a + b end");
+
+        var local = chunk.Block.Statements.Single().ShouldBeOfType<LuaLocalDeclarationStatementSyntax>();
+        var funcExpr = local.Initializers.Single().ShouldBeOfType<LuaFunctionExpressionSyntax>();
+        funcExpr.Body.Parameters.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void ParseChunk_InvalidAssignmentTarget_ShouldThrow()
+    {
+        Should.Throw<LuaSyntaxException>(() => LuaParser.Parse("1 + 2 = 3"))
+            .Message.ShouldContain("expected");
+    }
 }
