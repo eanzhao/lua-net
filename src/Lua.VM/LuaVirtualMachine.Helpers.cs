@@ -200,7 +200,13 @@ public sealed partial class LuaVirtualMachine
     private static int GetVarArgCount(LuaTable table)
     {
         var countValue = table.GetValue(LuaValue.FromString("n"));
-        if (!TryGetInteger(countValue, out var count) || count < 0 || count > int.MaxValue)
+        if (countValue.Kind != LuaValueKind.Integer)
+        {
+            throw new InvalidOperationException("vararg table has no proper 'n'");
+        }
+
+        var count = countValue.AsInteger();
+        if (count < 0 || count > int.MaxValue)
         {
             throw new InvalidOperationException("vararg table has no proper 'n'");
         }

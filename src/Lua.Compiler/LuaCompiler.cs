@@ -121,7 +121,7 @@ public static class LuaCompiler
 
             if (body.VarargParameter?.Name is not null)
             {
-                AddLocal(body.VarargParameter.Name.Identifier, body.VarargParameter.Name.Range.Start);
+                AddLocal(body.VarargParameter.Name.Identifier, body.VarargParameter.Name.Range.Start, isReadOnly: true);
                 EmitVarArgPrep();
             }
 
@@ -133,6 +133,8 @@ public static class LuaCompiler
             {
                 EmitReturn0();
             }
+
+            PatchVarArgInstructionsForTable(flags, parameterCount);
 
             return BuildPrototype(
                 lineDefined: body.Range.Start.Line,
@@ -2277,6 +2279,28 @@ public static class LuaCompiler
         {
             var resultOperand = resultCount is null ? 0 : resultCount.Value + 1;
             AddInstruction(EncodeAbc(LuaOpcode.VarArg, targetRegister, 0, resultOperand));
+        }
+
+        private void PatchVarArgInstructionsForTable(byte flags, int varargTableRegister)
+        {
+            if ((flags & VarArgTableFlag) == 0)
+            {
+                return;
+            }
+
+            for (var i = 0; i < _code.Count; i++)
+            {
+                var instruction = LuaInstruction.FromRaw(_code[i]);
+                if (instruction.Opcode == LuaOpcode.VarArg)
+                {
+                    _code[i] = EncodeAbcWithK(LuaOpcode.VarArg, instruction.A, varargTableRegister, instruction.C, k: 1);
+                }
+            }
+        }
+
+        private static uint EncodeAbcWithK(LuaOpcode opcode, int a, int b, int c, int k)
+        {
+            return (uint)((int)opcode | (a << 7) | (k << 15) | (b << 16) | (c << 24));
         }
 
         private void EmitVarArgPrep()
