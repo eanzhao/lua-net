@@ -1639,6 +1639,160 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void LuaState_ShouldPreloadOsIoAndDebugLibraries()
+    {
+        var state = new LuaState();
+
+        state.OsLibrary.GetValue(LuaValue.FromString("clock")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("time")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("date")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("difftime")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("getenv")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("execute")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("remove")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("rename")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("tmpname")).Kind.ShouldBe(LuaValueKind.Function);
+        state.OsLibrary.GetValue(LuaValue.FromString("exit")).Kind.ShouldBe(LuaValueKind.Function);
+
+        state.IoLibrary.GetValue(LuaValue.FromString("open")).Kind.ShouldBe(LuaValueKind.Function);
+        state.IoLibrary.GetValue(LuaValue.FromString("close")).Kind.ShouldBe(LuaValueKind.Function);
+        state.IoLibrary.GetValue(LuaValue.FromString("read")).Kind.ShouldBe(LuaValueKind.Function);
+        state.IoLibrary.GetValue(LuaValue.FromString("write")).Kind.ShouldBe(LuaValueKind.Function);
+        state.IoLibrary.GetValue(LuaValue.FromString("lines")).Kind.ShouldBe(LuaValueKind.Function);
+        state.IoLibrary.GetValue(LuaValue.FromString("input")).Kind.ShouldBe(LuaValueKind.Function);
+        state.IoLibrary.GetValue(LuaValue.FromString("output")).Kind.ShouldBe(LuaValueKind.Function);
+        state.IoLibrary.GetValue(LuaValue.FromString("flush")).Kind.ShouldBe(LuaValueKind.Function);
+        state.IoLibrary.GetValue(LuaValue.FromString("type")).Kind.ShouldBe(LuaValueKind.Function);
+
+        state.DebugLibrary.GetValue(LuaValue.FromString("getinfo")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("traceback")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("getlocal")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("setlocal")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("getupvalue")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("setupvalue")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("sethook")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("gethook")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("upvalueid")).Kind.ShouldBe(LuaValueKind.Function);
+        state.DebugLibrary.GetValue(LuaValue.FromString("upvaluejoin")).Kind.ShouldBe(LuaValueKind.Function);
+
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("os")).Kind.ShouldBe(LuaValueKind.Table);
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("io")).Kind.ShouldBe(LuaValueKind.Table);
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("debug")).Kind.ShouldBe(LuaValueKind.Table);
+    }
+
+    [Fact]
+    public void OsLibrary_ShouldSupportCoreOperations()
+    {
+        var state = new LuaState();
+        var osClock = GetLibraryFunction(state.OsLibrary, "clock");
+        var osTime = GetLibraryFunction(state.OsLibrary, "time");
+        var osDiffTime = GetLibraryFunction(state.OsLibrary, "difftime");
+        var osDate = GetLibraryFunction(state.OsLibrary, "date");
+        var osGetEnv = GetLibraryFunction(state.OsLibrary, "getenv");
+
+        var clockResult = InvokeBaseFunction(state, osClock);
+        clockResult.ShouldHaveSingleItem().Kind.ShouldBe(LuaValueKind.Float);
+        clockResult[0].AsFloat().ShouldBeGreaterThanOrEqualTo(0.0);
+
+        var timeResult = InvokeBaseFunction(state, osTime);
+        timeResult.ShouldHaveSingleItem().Kind.ShouldBe(LuaValueKind.Integer);
+        timeResult[0].AsInteger().ShouldBeGreaterThan(0);
+
+        var diffResult = InvokeBaseFunction(state, osDiffTime, LuaValue.FromInteger(200), LuaValue.FromInteger(100));
+        diffResult.ShouldHaveSingleItem().AsFloat().ShouldBe(100.0);
+
+        var dateResult = InvokeBaseFunction(state, osDate, LuaValue.FromString("*t"));
+        dateResult.ShouldHaveSingleItem().Kind.ShouldBe(LuaValueKind.Table);
+        var dateTable = dateResult[0].AsTable();
+        dateTable.GetValue(LuaValue.FromString("year")).Kind.ShouldBe(LuaValueKind.Integer);
+        dateTable.GetValue(LuaValue.FromString("month")).Kind.ShouldBe(LuaValueKind.Integer);
+        dateTable.GetValue(LuaValue.FromString("day")).Kind.ShouldBe(LuaValueKind.Integer);
+
+        var pathResult = InvokeBaseFunction(state, osGetEnv, LuaValue.FromString("PATH"));
+        pathResult.ShouldHaveSingleItem().Kind.ShouldBe(LuaValueKind.String);
+
+        var missingResult = InvokeBaseFunction(state, osGetEnv, LuaValue.FromString("LUA_NET_NONEXISTENT_VAR_12345"));
+        missingResult.ShouldHaveSingleItem().IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void IoLibrary_ShouldReadAndWriteFiles()
+    {
+        var state = new LuaState();
+        var ioOpen = GetLibraryFunction(state.IoLibrary, "open");
+        var ioType = GetLibraryFunction(state.IoLibrary, "type");
+
+        var tmpFile = Path.GetTempFileName();
+        try
+        {
+            var writeResult = InvokeBaseFunction(state, ioOpen, LuaValue.FromString(tmpFile), LuaValue.FromString("w"));
+            writeResult[0].Kind.ShouldBe(LuaValueKind.Table);
+            var writeHandle = writeResult[0].AsTable();
+
+            InvokeBaseFunction(state, ioType, writeResult[0])
+                .ShouldHaveSingleItem().AsString().ShouldBe("file");
+
+            var fileWrite = GetLibraryFunction(writeHandle.Metatable!, "write");
+            InvokeBaseFunction(state, fileWrite, writeResult[0], LuaValue.FromString("hello lua-net"));
+
+            var fileClose = GetLibraryFunction(writeHandle.Metatable!, "close");
+            InvokeBaseFunction(state, fileClose, writeResult[0]);
+
+            InvokeBaseFunction(state, ioType, writeResult[0])
+                .ShouldHaveSingleItem().AsString().ShouldBe("closed file");
+
+            var readResult = InvokeBaseFunction(state, ioOpen, LuaValue.FromString(tmpFile), LuaValue.FromString("r"));
+            readResult[0].Kind.ShouldBe(LuaValueKind.Table);
+            var readHandle = readResult[0].AsTable();
+
+            var fileRead = GetLibraryFunction(readHandle.Metatable!, "read");
+            var content = InvokeBaseFunction(state, fileRead, readResult[0], LuaValue.FromString("a"));
+            content.ShouldHaveSingleItem().AsString().ShouldBe("hello lua-net");
+
+            var readClose = GetLibraryFunction(readHandle.Metatable!, "close");
+            InvokeBaseFunction(state, readClose, readResult[0]);
+        }
+        finally
+        {
+            File.Delete(tmpFile);
+        }
+    }
+
+    [Fact]
+    public void DebugLibrary_ShouldSupportGetInfoAndTraceback()
+    {
+        var state = new LuaState();
+        var debugGetInfo = GetLibraryFunction(state.DebugLibrary, "getinfo");
+        var debugTraceback = GetLibraryFunction(state.DebugLibrary, "traceback");
+        var debugGetUpvalue = GetLibraryFunction(state.DebugLibrary, "getupvalue");
+        var debugSetUpvalue = GetLibraryFunction(state.DebugLibrary, "setupvalue");
+
+        var testClosure = new LuaClosure(
+            "test",
+            upvalueCount: 1,
+            body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromInteger(42)]),
+            upvalues: [new LuaUpvalue(LuaValue.FromInteger(99))]);
+
+        var infoResult = InvokeBaseFunction(state, debugGetInfo, LuaValue.FromFunction(testClosure));
+        infoResult.ShouldHaveSingleItem().Kind.ShouldBe(LuaValueKind.Table);
+        var info = infoResult[0].AsTable();
+        info.GetValue(LuaValue.FromString("what")).AsString().ShouldBe("C");
+        info.GetValue(LuaValue.FromString("nups")).AsInteger().ShouldBe(1);
+
+        var tracebackResult = InvokeBaseFunction(state, debugTraceback, LuaValue.FromString("test error"), LuaValue.FromInteger(0));
+        tracebackResult.ShouldHaveSingleItem().AsString().ShouldContain("test error");
+        tracebackResult[0].AsString().ShouldContain("stack traceback:");
+
+        var getUpResult = InvokeBaseFunction(state, debugGetUpvalue, LuaValue.FromFunction(testClosure), LuaValue.FromInteger(1));
+        getUpResult.Length.ShouldBe(2);
+        getUpResult[1].AsInteger().ShouldBe(99);
+
+        InvokeBaseFunction(state, debugSetUpvalue, LuaValue.FromFunction(testClosure), LuaValue.FromInteger(1), LuaValue.FromInteger(200));
+        var getUpResult2 = InvokeBaseFunction(state, debugGetUpvalue, LuaValue.FromFunction(testClosure), LuaValue.FromInteger(1));
+        getUpResult2[1].AsInteger().ShouldBe(200);
+    }
+
+    [Fact]
     public void PopFrame_ShouldRejectEmptyStack()
     {
         var state = new LuaState();
