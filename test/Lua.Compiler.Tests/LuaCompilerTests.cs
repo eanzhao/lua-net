@@ -131,6 +131,71 @@ return t:add(1), t.answer, t[1], t[2]
     }
 
     [Fact]
+    public void Require_ShouldHandleTextAndNativeModulesThroughPackageSearchers()
+    {
+        const string source = """
+package.path = "./mods/?.lua"
+package.cpath = native_cpath
+
+local text = require("text_mod")
+local native, native_loader = require("native_mod")
+local nested, nested_loader = require("root.nested")
+local direct = assert(package.loadlib(native_path, "luaopen_native_mod"))("direct", native_path)
+local found = assert(package.searchpath("text_mod", package.path))
+
+return
+    text.value,
+    native.kind,
+    native_loader,
+    nested,
+    nested_loader,
+    direct.kind,
+    direct.name,
+    found
+""";
+
+        var vm = new LuaVirtualMachine();
+        var extension = OperatingSystem.IsWindows() ? "dll" : OperatingSystem.IsMacOS() ? "dylib" : "so";
+        var nativePath = $"./mods/native_mod.{extension}";
+        var nativeCPath = $"./mods/?.{extension}";
+        var rootPath = $"./mods/root.{extension}";
+
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("native_path"), LuaValue.FromString(nativePath));
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("native_cpath"), LuaValue.FromString(nativeCPath));
+        vm.State.FileReader = path => path switch
+        {
+            "./mods/text_mod.lua" => Encoding.Latin1.GetBytes("return { value = 41 }"),
+            _ => throw new FileNotFoundException("missing")
+        };
+        vm.State.RegisterNativeLibraryFunction(
+            nativePath,
+            "luaopen_native_mod",
+            (_, _, arguments) =>
+            {
+                var module = new LuaTable();
+                module.SetValue(LuaValue.FromString("kind"), LuaValue.FromString("native"));
+                module.SetValue(LuaValue.FromString("name"), arguments[0]);
+                return [LuaValue.FromTable(module)];
+            });
+        vm.State.RegisterNativeLibraryFunction(
+            rootPath,
+            "luaopen_root_nested",
+            (_, _, _) => [LuaValue.FromInteger(42)]);
+
+        var results = vm.Execute(LuaCompiler.Compile(source, "package_step14.lua"));
+
+        results.Length.ShouldBe(8);
+        results[0].AsInteger().ShouldBe(41);
+        results[1].AsString().ShouldBe("native");
+        results[2].AsString().ShouldBe(nativePath);
+        results[3].AsInteger().ShouldBe(42);
+        results[4].AsString().ShouldBe(rootPath);
+        results[5].AsString().ShouldBe("native");
+        results[6].AsString().ShouldBe("direct");
+        results[7].AsString().ShouldBe("./mods/text_mod.lua");
+    }
+
+    [Fact]
     public void Compile_ShouldRejectUnsupportedGlobalDeclarations()
     {
         var exception = Should.Throw<LuaCompilerException>(() => LuaCompiler.Compile("global answer = 42"));

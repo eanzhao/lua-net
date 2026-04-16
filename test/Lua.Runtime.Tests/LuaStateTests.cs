@@ -86,7 +86,7 @@ public class LuaStateTests
     }
 
     [Fact]
-    public void LuaState_ShouldPreloadMinimalPackageLibrary()
+    public void LuaState_ShouldPreloadExtendedPackageLibrary()
     {
         var state = new LuaState();
 
@@ -98,10 +98,16 @@ public class LuaStateTests
         packageTable.GetValue(LuaValue.FromString("loaded")).AsTable().ShouldBeSameAs(state.PackageLoaded);
         packageTable.GetValue(LuaValue.FromString("preload")).AsTable().ShouldBeSameAs(state.PackagePreload);
         packageTable.GetValue(LuaValue.FromString("searchers")).AsTable().ShouldBeSameAs(state.PackageSearchers);
-        packageTable.GetValue(LuaValue.FromString("path")).AsString().ShouldBe("./?.luac");
+        packageTable.GetValue(LuaValue.FromString("path")).AsString().ShouldBe("./?.lua;./?/init.lua;./?.luac;./?/init.luac");
+        packageTable.GetValue(LuaValue.FromString("cpath")).AsString().ShouldBe(GetExpectedDefaultNativePackagePath());
+        packageTable.GetValue(LuaValue.FromString("config")).AsString().ShouldBe($"{Path.DirectorySeparatorChar}\n;\n?\n!\n-\n");
+        packageTable.GetValue(LuaValue.FromString("loadlib")).AsFunction().DebugName.ShouldBe("package.loadlib");
+        packageTable.GetValue(LuaValue.FromString("searchpath")).AsFunction().DebugName.ShouldBe("package.searchpath");
 
         state.PackageSearchers.GetValue(LuaValue.FromInteger(1)).AsFunction().DebugName.ShouldBe("package.searcher.preload");
-        state.PackageSearchers.GetValue(LuaValue.FromInteger(2)).AsFunction().DebugName.ShouldBe("package.searcher.luac");
+        state.PackageSearchers.GetValue(LuaValue.FromInteger(2)).AsFunction().DebugName.ShouldBe("package.searcher.lua");
+        state.PackageSearchers.GetValue(LuaValue.FromInteger(3)).AsFunction().DebugName.ShouldBe("package.searcher.c");
+        state.PackageSearchers.GetValue(LuaValue.FromInteger(4)).AsFunction().DebugName.ShouldBe("package.searcher.croot");
         state.PackageLoaded.GetValue(LuaValue.FromString("package")).AsTable().ShouldBeSameAs(state.PackageLibrary);
     }
 
@@ -1094,12 +1100,137 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void PackageSearchPath_ShouldResolveCandidatesAndReportMisses()
+    {
+        var state = new LuaState();
+        var searchPath = GetLibraryFunction(state.PackageLibrary, "searchpath");
+
+        state.FileReader = path => path switch
+        {
+            "./mods/native/root.lua" => [0x42],
+            "./mods/custom.module.bin" => [0x24],
+            _ => throw new FileNotFoundException("missing")
+        };
+
+        InvokeClosure(
+            state,
+            searchPath,
+            LuaValue.FromString("native.root"),
+            LuaValue.FromString("./mods/?.lua;./mods/?/init.lua"))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe($"./mods{Path.DirectorySeparatorChar}native{Path.DirectorySeparatorChar}root.lua");
+
+        InvokeClosure(
+            state,
+            searchPath,
+            LuaValue.FromString("custom/module"),
+            LuaValue.FromString("./mods/?.bin"),
+            LuaValue.FromString("/"),
+            LuaValue.FromString("."))
+            .ShouldHaveSingleItem()
+            .AsString().ShouldBe("./mods/custom.module.bin");
+
+        var missing = InvokeClosure(
+            state,
+            searchPath,
+            LuaValue.FromString("missing.mod"),
+            LuaValue.FromString("./mods/?.lua;./mods/?/init.lua"));
+
+        missing[0].IsNil.ShouldBeTrue();
+        missing[1].AsString().ShouldContain($"no file './mods{Path.DirectorySeparatorChar}missing{Path.DirectorySeparatorChar}mod.lua'");
+        missing[1].AsString().ShouldContain($"no file './mods{Path.DirectorySeparatorChar}missing{Path.DirectorySeparatorChar}mod{Path.DirectorySeparatorChar}init.lua'");
+    }
+
+    [Fact]
+    public void PackageLoadLib_AndRequire_ShouldUseRegisteredNativeLibraries()
+    {
+        var state = new LuaState();
+        var loadlib = GetLibraryFunction(state.PackageLibrary, "loadlib");
+        var require = GetBaseFunction(state, "require");
+        var directCalls = 0;
+        var nestedCalls = 0;
+        var extension = OperatingSystem.IsWindows() ? "dll" : OperatingSystem.IsMacOS() ? "dylib" : "so";
+        var directLibraryPath = $"./native/native_mod.{extension}";
+        var rootLibraryPath = $"./native/root.{extension}";
+
+        state.PackageLibrary.SetValue(
+            LuaValue.FromString("cpath"),
+            LuaValue.FromString($"./native/?.{extension}"));
+        state.RegisterNativeLibraryFunction(
+            directLibraryPath,
+            "luaopen_native_mod",
+            (_, _, arguments) =>
+            {
+                directCalls++;
+                var module = new LuaTable();
+                module.SetValue(LuaValue.FromString("name"), arguments[0]);
+                module.SetValue(LuaValue.FromString("loader"), arguments[1]);
+                return [LuaValue.FromTable(module)];
+            });
+        state.RegisterNativeLibraryFunction(
+            rootLibraryPath,
+            "luaopen_root_nested",
+            (_, _, arguments) =>
+            {
+                nestedCalls++;
+                return [LuaValue.FromString(arguments[0].AsString())];
+            });
+
+        var loaded = InvokeClosure(
+            state,
+            loadlib,
+            LuaValue.FromString(directLibraryPath),
+            LuaValue.FromString("luaopen_native_mod"));
+
+        loaded.ShouldHaveSingleItem().Kind.ShouldBe(LuaValueKind.Function);
+
+        InvokeClosure(
+            state,
+            loadlib,
+            LuaValue.FromString(directLibraryPath),
+            LuaValue.FromString("*"))
+            .ShouldHaveSingleItem()
+            .AsBoolean().ShouldBeTrue();
+
+        var missingInit = InvokeClosure(
+            state,
+            loadlib,
+            LuaValue.FromString(directLibraryPath),
+            LuaValue.FromString("luaopen_missing"));
+
+        missingInit[0].IsNil.ShouldBeTrue();
+        missingInit[1].AsString().ShouldBe($"cannot find symbol 'luaopen_missing' in native library '{directLibraryPath}'");
+        missingInit[2].AsString().ShouldBe("init");
+
+        var directModule = InvokeBaseFunction(state, require, LuaValue.FromString("native_mod"));
+        directModule.Length.ShouldBe(2);
+        directModule[0].AsTable().GetValue(LuaValue.FromString("name")).AsString().ShouldBe("native_mod");
+        directModule[0].AsTable().GetValue(LuaValue.FromString("loader")).AsString().ShouldBe(directLibraryPath);
+        directModule[1].AsString().ShouldBe(directLibraryPath);
+
+        InvokeBaseFunction(state, require, LuaValue.FromString("native_mod"))
+            .ShouldHaveSingleItem()
+            .AsTable().ShouldBeSameAs(directModule[0].AsTable());
+
+        var nestedModule = InvokeBaseFunction(state, require, LuaValue.FromString("root.nested"));
+        nestedModule.Length.ShouldBe(2);
+        nestedModule[0].AsString().ShouldBe("root.nested");
+        nestedModule[1].AsString().ShouldBe(rootLibraryPath);
+
+        directCalls.ShouldBe(1);
+        nestedCalls.ShouldBe(1);
+    }
+
+    [Fact]
     public void Require_ShouldReportMissingModules()
     {
         var state = new LuaState();
         state.PackageLibrary.SetValue(
             LuaValue.FromString("path"),
             LuaValue.FromString("./missing/?.luac;./mods/?.luac"));
+        state.PackageLibrary.SetValue(
+            LuaValue.FromString("cpath"),
+            LuaValue.FromString("./missing/?.so;./mods/?.so"));
         state.FileReader = _ => throw new FileNotFoundException("missing");
         var require = GetBaseFunction(state, "require");
 
@@ -1533,5 +1664,15 @@ public class LuaStateTests
     private static LuaValue[] InvokeClosure(LuaState state, LuaClosure closure, params LuaValue[] arguments)
     {
         return ((LuaNativeClosureBody)closure.Body!).Function(state, closure, arguments);
+    }
+
+    private static string GetExpectedDefaultNativePackagePath()
+    {
+        var extension = OperatingSystem.IsWindows()
+            ? "dll"
+            : OperatingSystem.IsMacOS()
+                ? "dylib"
+                : "so";
+        return $"./?.{extension};./?/init.{extension}";
     }
 }

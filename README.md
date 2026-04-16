@@ -47,7 +47,7 @@ dotnet sln lua-net.sln list
 | 第 11 步 | 词法分析 | 已完成 |
 | 第 12 步 | 语法分析与 AST | 已完成 |
 | 第 13 步 | 编译器（AST → 字节码） | 进行中 |
-| 第 14 步 | io / os / package / debug 库 | 未开始 |
+| 第 14 步 | io / os / package / debug 库 | 进行中 |
 | 第 15 步 | 字节码序列化与 REPL | 未开始 |
 | 第 16 步 | 兼容性收口 | 未开始 |
 
@@ -55,7 +55,7 @@ dotnet sln lua-net.sln list
 
 **已实现：** `setmetatable` / `getmetatable`、`rawget` / `rawset` / `rawlen` / `rawequal`、`next` / `pairs` / `ipairs`、`collectgarbage`（最小版本）、`load` / `loadfile` / `dofile`（二进制 chunk + Step 13 第一版文本 chunk 路径）、最小 `package` / `require`、`type`、`assert`、`select`、`tonumber` / `tostring`、`pcall` / `xpcall`、`error`、`print` / `warn`、最小 `string` 表（`upper` / `lower` / `len`）、字符串元表 `__index`、字符串算术元方法
 
-**后续扩展：** 文本 chunk 的剩余语法子集、完整 `package` / `loadlib`、完整 GC 模式参数会在后续阶段继续展开。
+**后续扩展：** 文本 chunk 的剩余语法子集、`io` / `os` / `debug` 以及更贴近原生 Lua C API 的动态库接入会在后续阶段继续展开。
 
 ### 第 8 步当前覆盖范围
 
@@ -211,6 +211,12 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 编号 | 文档 | 主题 |
 |------|------|------|
 | 040 | [compiler-first-cut](docs/040-step-13-compiler-first-cut.md) | `Lua.Compiler`、作用域/上值解析、文本 chunk 执行链路 |
+
+### 第 14 步：`package` 系统（第一轮）
+
+| 编号 | 文档 | 主题 |
+|------|------|------|
+| 041 | [package-system](docs/041-step-14-package-system.md) | `package.config` / `searchpath` / `loadlib` / C searcher |
 
 ## 开发方式
 

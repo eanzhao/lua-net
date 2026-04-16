@@ -156,10 +156,14 @@ public sealed partial class LuaState
 
     private void RegisterPackageSupport()
     {
-        PackageLibrary.SetValue(LuaValue.FromString("path"), LuaValue.FromString("./?.luac"));
+        PackageLibrary.SetValue(LuaValue.FromString("path"), LuaValue.FromString(GetDefaultPackagePath()));
+        PackageLibrary.SetValue(LuaValue.FromString("cpath"), LuaValue.FromString(GetDefaultNativePackagePath()));
+        PackageLibrary.SetValue(LuaValue.FromString("config"), LuaValue.FromString(CreatePackageConfigString()));
         PackageLibrary.SetValue(LuaValue.FromString("loaded"), LuaValue.FromTable(PackageLoaded));
         PackageLibrary.SetValue(LuaValue.FromString("preload"), LuaValue.FromTable(PackagePreload));
         PackageLibrary.SetValue(LuaValue.FromString("searchers"), LuaValue.FromTable(PackageSearchers));
+        RegisterLibraryFunction(PackageLibrary, "loadlib", PackageLoadLib, "package.loadlib");
+        RegisterLibraryFunction(PackageLibrary, "searchpath", PackageSearchPath, "package.searchpath");
 
         PackageLoaded.SetValue(LuaValue.FromString("package"), LuaValue.FromTable(PackageLibrary));
         PackageLoaded.SetValue(LuaValue.FromString("_G"), LuaValue.FromTable(GlobalEnvironment));
@@ -172,8 +176,18 @@ public sealed partial class LuaState
         PackageSearchers.SetValue(
             LuaValue.FromInteger(2),
             LuaValue.FromFunction(new LuaClosure(
-                "package.searcher.luac",
+                "package.searcher.lua",
                 body: new LuaNativeClosureBody(PackageSearcherLua))));
+        PackageSearchers.SetValue(
+            LuaValue.FromInteger(3),
+            LuaValue.FromFunction(new LuaClosure(
+                "package.searcher.c",
+                body: new LuaNativeClosureBody(PackageSearcherC))));
+        PackageSearchers.SetValue(
+            LuaValue.FromInteger(4),
+            LuaValue.FromFunction(new LuaClosure(
+                "package.searcher.croot",
+                body: new LuaNativeClosureBody(PackageSearcherCRoot))));
 
         GlobalEnvironment.SetValue(LuaValue.FromString("package"), LuaValue.FromTable(PackageLibrary));
         RegisterBaseFunction("require", Require);
@@ -745,16 +759,22 @@ public sealed partial class LuaState
 
     private static LuaValue[] PackageSearcherLua(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        var moduleName = RequireStringArgument(arguments, 0, "package.searcher.luac");
-        if (!state.TryFindPackageFile(moduleName, out var filename, out var bytes, out var errorMessage))
+        var moduleName = RequireStringArgument(arguments, 0, "package.searcher.lua");
+        if (!state.TrySearchPackageFile(moduleName, "path", Path.DirectorySeparatorChar.ToString(), out var filename, out var errorMessage))
         {
             return [LuaValue.FromString(errorMessage)];
+        }
+
+        if (!state.TryReadChunkFile(filename, out var bytes, out errorMessage))
+        {
+            throw CreateRuntimeError(
+                $"error loading module '{moduleName}' from file '{filename}':\n\t{errorMessage}");
         }
 
         var loadResults = state.LoadChunk(
             bytes,
             filename,
-            mode: "b",
+            mode: "bt",
             hasEnvironment: false,
             environment: LuaValue.Nil);
         if (loadResults[0].IsNil)
@@ -2143,48 +2163,6 @@ public sealed partial class LuaState
         }
 
         return value.AsString();
-    }
-
-    private bool TryFindPackageFile(
-        string moduleName,
-        out string fileName,
-        out ReadOnlyMemory<byte> bytes,
-        out string errorMessage)
-    {
-        var path = GetPackageStringField("path");
-        var modulePath = moduleName.Replace(".", Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal);
-        var errors = new StringBuilder();
-
-        foreach (var rawPattern in path.Split(';'))
-        {
-            if (rawPattern.Length == 0)
-            {
-                continue;
-            }
-
-            var candidate = rawPattern.Replace("?", modulePath, StringComparison.Ordinal);
-            try
-            {
-                bytes = FileReader(candidate);
-                fileName = candidate;
-                errorMessage = string.Empty;
-                return true;
-            }
-            catch
-            {
-                if (errors.Length > 0)
-                {
-                    errors.Append("\n\t");
-                }
-
-                errors.Append($"no file '{candidate}'");
-            }
-        }
-
-        fileName = string.Empty;
-        bytes = ReadOnlyMemory<byte>.Empty;
-        errorMessage = errors.ToString();
-        return false;
     }
 
     private bool TryReadChunkFile(string fileName, out ReadOnlyMemory<byte> bytes, out string errorMessage)
