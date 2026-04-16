@@ -246,18 +246,18 @@ public sealed partial class LuaState
 
     private void RegisterDebugSupport()
     {
-        RegisterLibraryFunction(DebugLibrary, "getinfo", DebugGetInfo, "debug.getinfo");
-        RegisterLibraryFunction(DebugLibrary, "traceback", DebugTraceback, "debug.traceback");
-        RegisterLibraryFunction(DebugLibrary, "getlocal", DebugGetLocal, "debug.getlocal");
-        RegisterLibraryFunction(DebugLibrary, "setlocal", DebugSetLocal, "debug.setlocal");
-        RegisterLibraryFunction(DebugLibrary, "getupvalue", DebugGetUpvalue, "debug.getupvalue");
-        RegisterLibraryFunction(DebugLibrary, "setupvalue", DebugSetUpvalue, "debug.setupvalue");
-        RegisterLibraryFunction(DebugLibrary, "sethook", DebugSetHook, "debug.sethook");
-        RegisterLibraryFunction(DebugLibrary, "gethook", DebugGetHook, "debug.gethook");
-        RegisterLibraryFunction(DebugLibrary, "getuservalue", DebugGetUserValue, "debug.getuservalue");
-        RegisterLibraryFunction(DebugLibrary, "setuservalue", DebugSetUserValue, "debug.setuservalue");
-        RegisterLibraryFunction(DebugLibrary, "upvalueid", DebugUpvalueId, "debug.upvalueid");
-        RegisterLibraryFunction(DebugLibrary, "upvaluejoin", DebugUpvalueJoin, "debug.upvaluejoin");
+        RegisterLibraryFunction(DebugLibrary, "getinfo", DebugGetInfo, "getinfo");
+        RegisterLibraryFunction(DebugLibrary, "traceback", DebugTraceback, "traceback");
+        RegisterLibraryFunction(DebugLibrary, "getlocal", DebugGetLocal, "getlocal");
+        RegisterLibraryFunction(DebugLibrary, "setlocal", DebugSetLocal, "setlocal");
+        RegisterLibraryFunction(DebugLibrary, "getupvalue", DebugGetUpvalue, "getupvalue");
+        RegisterLibraryFunction(DebugLibrary, "setupvalue", DebugSetUpvalue, "setupvalue");
+        RegisterLibraryFunction(DebugLibrary, "sethook", DebugSetHook, "sethook");
+        RegisterLibraryFunction(DebugLibrary, "gethook", DebugGetHook, "gethook");
+        RegisterLibraryFunction(DebugLibrary, "getuservalue", DebugGetUserValue, "getuservalue");
+        RegisterLibraryFunction(DebugLibrary, "setuservalue", DebugSetUserValue, "setuservalue");
+        RegisterLibraryFunction(DebugLibrary, "upvalueid", DebugUpvalueId, "upvalueid");
+        RegisterLibraryFunction(DebugLibrary, "upvaluejoin", DebugUpvalueJoin, "upvaluejoin");
 
         GlobalEnvironment.SetValue(LuaValue.FromString("debug"), LuaValue.FromTable(DebugLibrary));
     }

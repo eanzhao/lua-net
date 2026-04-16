@@ -1823,6 +1823,35 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void DebugLibrary_ShouldStoreAndClearHookConfiguration()
+    {
+        var state = new LuaState();
+        var debugSetHook = GetLibraryFunction(state.DebugLibrary, "sethook");
+        var debugGetHook = GetLibraryFunction(state.DebugLibrary, "gethook");
+        var hook = new LuaClosure(
+            "hook",
+            body: new LuaNativeClosureBody(static (_, _, _) => []));
+
+        InvokeBaseFunction(
+            state,
+            debugSetHook,
+            LuaValue.FromFunction(hook),
+            LuaValue.FromString("r"),
+            LuaValue.FromInteger(3));
+
+        var configured = InvokeBaseFunction(state, debugGetHook);
+        configured.Length.ShouldBe(3);
+        configured[0].AsFunction().ShouldBeSameAs(hook);
+        configured[1].AsString().ShouldBe("r");
+        configured[2].AsInteger().ShouldBe(3);
+
+        InvokeBaseFunction(state, debugSetHook, LuaValue.Nil);
+
+        var cleared = InvokeBaseFunction(state, debugGetHook);
+        cleared.ShouldHaveSingleItem().IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
     public void DebugLibrary_ShouldSupportMultiSlotUserValues()
     {
         var state = new LuaState();

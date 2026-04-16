@@ -10,6 +10,7 @@ public sealed class LuaThread
     private LuaValue[] _resumeValues = [];
     private bool _hasResumeValues;
     private int _nonYieldableCallDepth;
+    private int _hookInvocationDepth;
 
     public LuaThread(string? debugName = null, bool isMainThread = false)
     {
@@ -43,6 +44,14 @@ public sealed class LuaThread
     public LuaValue ErrorObject { get; private set; } = LuaValue.Nil;
 
     public int NonYieldableCallDepth => _nonYieldableCallDepth;
+
+    public LuaClosure? HookFunction { get; private set; }
+
+    public string HookMask { get; private set; } = string.Empty;
+
+    public int HookCount { get; private set; }
+
+    public bool IsExecutingHook => _hookInvocationDepth > 0;
 
     public void PushFrame(CallFrame frame)
     {
@@ -164,5 +173,41 @@ public sealed class LuaThread
         }
 
         _nonYieldableCallDepth -= 1;
+    }
+
+    public void SetHook(LuaClosure? hookFunction, string hookMask, int hookCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(hookCount);
+
+        HookFunction = hookFunction;
+        HookMask = hookMask ?? string.Empty;
+        HookCount = hookCount;
+    }
+
+    public void ClearHook()
+    {
+        HookFunction = null;
+        HookMask = string.Empty;
+        HookCount = 0;
+    }
+
+    public bool HasHookEvent(char eventMask)
+    {
+        return HookFunction is not null && HookMask.Contains(eventMask, StringComparison.Ordinal);
+    }
+
+    public void EnterHookInvocation()
+    {
+        _hookInvocationDepth += 1;
+    }
+
+    public void ExitHookInvocation()
+    {
+        if (_hookInvocationDepth == 0)
+        {
+            throw new InvalidOperationException("Hook invocation depth is already zero.");
+        }
+
+        _hookInvocationDepth -= 1;
     }
 }

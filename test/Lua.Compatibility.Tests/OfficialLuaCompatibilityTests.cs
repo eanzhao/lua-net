@@ -25,13 +25,14 @@ public class OfficialLuaCompatibilityTests
     }
 
     [Fact]
-    public void OfficialLocals_ShouldCurrentlyStopAtReturnHookGap()
+    public void OfficialLocals_ShouldCurrentlyStopAtCoroutineCloseYieldGap()
     {
         var result = RunOfficialScript("locals.lua");
 
         result.ExitCode.ShouldBe(1);
         result.Output.ShouldContain("testing errors in __close");
-        result.Output.ShouldNotContain("to-be-closed variables in coroutines");
+        result.Output.ShouldContain("to-be-closed variables in coroutines");
+        result.Output.ShouldNotContain("OK");
         result.Error.ShouldContain("assertion failed!");
     }
 

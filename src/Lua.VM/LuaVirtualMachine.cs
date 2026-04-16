@@ -203,7 +203,9 @@ public sealed partial class LuaVirtualMachine
                 State.CurrentThread.EnterNonYieldableCall();
             }
 
-            return body.Function(State, closure, arguments);
+            var results = body.Function(State, closure, arguments);
+            ExecuteReturnHook(nativeFrame);
+            return results;
         }
         catch (LuaYieldException)
         {
@@ -641,6 +643,7 @@ public sealed partial class LuaVirtualMachine
             ExceptionDispatchInfo.Capture(pendingException).Throw();
         }
 
+        ExecuteReturnHook(frame);
         State.PopFrame();
         State.Stack.SetTop(frame.BaseIndex);
 

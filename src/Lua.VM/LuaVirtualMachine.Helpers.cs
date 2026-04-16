@@ -328,13 +328,32 @@ public sealed partial class LuaVirtualMachine
             throw CreateCloseMethodRuntimeException(closeMethod);
         }
 
+        var closeClosure = GetCloseCallable(closeMethod.AsFunction());
         if (pendingException is null)
         {
-            Call(closeMethod.AsFunction(), [value]);
+            Call(closeClosure, [value]);
             return;
         }
 
-        Call(closeMethod.AsFunction(), [value, GetErrorObject(pendingException)]);
+        Call(closeClosure, [value, GetErrorObject(pendingException)]);
+    }
+
+    private static LuaClosure GetCloseCallable(LuaClosure closeClosure)
+    {
+        if (!string.IsNullOrEmpty(closeClosure.DebugName) &&
+            !closeClosure.DebugName.StartsWith("function@", StringComparison.Ordinal))
+        {
+            return closeClosure;
+        }
+
+        return new LuaClosure(
+            "close",
+            closeClosure.UpvalueCount,
+            closeClosure.Body,
+            closeClosure.Upvalues,
+            closeClosure.UpvalueNames,
+            closeClosure.SourceName,
+            closeClosure.LineDefined);
     }
 
     private static LuaValue GetErrorObject(Exception? exception)
@@ -397,6 +416,26 @@ public sealed partial class LuaVirtualMachine
         return new LuaRuntimeException(
             LuaValue.FromString($"{message}\nin metamethod 'close'"),
             runtimeException);
+    }
+
+    private void ExecuteReturnHook(CallFrame frame)
+    {
+        var thread = State.CurrentThread;
+        if (thread.IsExecutingHook || !thread.HasHookEvent('r') || thread.HookFunction is null)
+        {
+            return;
+        }
+
+        thread.EnterHookInvocation();
+
+        try
+        {
+            Call(thread.HookFunction, [LuaValue.FromString("return")]);
+        }
+        finally
+        {
+            thread.ExitHookInvocation();
+        }
     }
 
     private static LuaRuntimeException CreateTypeError(LuaValue value, string operation)

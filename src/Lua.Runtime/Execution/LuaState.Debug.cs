@@ -249,12 +249,92 @@ public sealed partial class LuaState
 
     private static LuaValue[] DebugSetHook(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
+        var argumentIndex = 0;
+        var targetThread = ResolveHookThread(state, arguments, ref argumentIndex);
+        if (argumentIndex >= arguments.Count || arguments[argumentIndex].IsNil)
+        {
+            targetThread.ClearHook();
+            return [];
+        }
+
+        var hookValue = arguments[argumentIndex];
+        if (hookValue.Kind != LuaValueKind.Function)
+        {
+            throw CreateArgumentTypeError("debug.sethook", argumentIndex + 1, "function", hookValue);
+        }
+
+        var mask = GetHookMask(arguments, argumentIndex + 1);
+        var count = GetHookCount(arguments, argumentIndex + 2);
+        targetThread.SetHook(hookValue.AsFunction(), mask, count);
         return [];
     }
 
     private static LuaValue[] DebugGetHook(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-        return [LuaValue.Nil, LuaValue.FromString(""), LuaValue.FromInteger(0)];
+        var argumentIndex = 0;
+        var targetThread = ResolveHookThread(state, arguments, ref argumentIndex);
+        if (argumentIndex < arguments.Count && arguments[argumentIndex].Kind != LuaValueKind.Thread)
+        {
+            throw CreateArgumentTypeError("debug.gethook", argumentIndex + 1, "thread", arguments[argumentIndex]);
+        }
+
+        return targetThread.HookFunction is null
+            ? [LuaValue.Nil]
+            : [LuaValue.FromFunction(targetThread.HookFunction), LuaValue.FromString(targetThread.HookMask), LuaValue.FromInteger(targetThread.HookCount)];
+    }
+
+    private static LuaThread ResolveHookThread(LuaState state, IReadOnlyList<LuaValue> arguments, ref int argumentIndex)
+    {
+        if (argumentIndex < arguments.Count && arguments[argumentIndex].Kind == LuaValueKind.Thread)
+        {
+            return arguments[argumentIndex++].AsThread();
+        }
+
+        return state.CurrentThread;
+    }
+
+    private static string GetHookMask(IReadOnlyList<LuaValue> arguments, int index)
+    {
+        if (index >= arguments.Count || arguments[index].IsNil)
+        {
+            return string.Empty;
+        }
+
+        if (arguments[index].Kind != LuaValueKind.String)
+        {
+            throw CreateArgumentTypeError("debug.sethook", index + 1, "string", arguments[index]);
+        }
+
+        var mask = arguments[index].AsString();
+        foreach (var option in mask)
+        {
+            if (option is not ('c' or 'r' or 'l'))
+            {
+                throw CreateArgumentError("debug.sethook", index + 1, "invalid hook mask");
+            }
+        }
+
+        return mask;
+    }
+
+    private static int GetHookCount(IReadOnlyList<LuaValue> arguments, int index)
+    {
+        if (index >= arguments.Count || arguments[index].IsNil)
+        {
+            return 0;
+        }
+
+        if (!TryGetInteger(arguments[index], out var count))
+        {
+            throw CreateArgumentTypeError("debug.sethook", index + 1, "integer", arguments[index]);
+        }
+
+        if (count < 0 || count > int.MaxValue)
+        {
+            throw CreateArgumentError("debug.sethook", index + 1, "count out of range");
+        }
+
+        return (int)count;
     }
 
     private static LuaValue[] DebugGetUserValue(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

@@ -858,6 +858,50 @@ return tostring(st), handled
     }
 
     [Fact]
+    public void Compile_ShouldRunReturnHooksAfterCloseAndExposeConfiguredHook()
+    {
+        const string source = """
+local debug = require("debug")
+
+local function func2close(f)
+    return setmetatable({}, { __close = f })
+end
+
+local trace = {}
+
+local function hook(event)
+    trace[#trace + 1] = event .. " " .. debug.getinfo(2).name
+end
+
+local function foo(...)
+    local x <close> = func2close(function(_, msg)
+        trace[#trace + 1] = "x"
+    end)
+
+    local y <close> = func2close(function(_, msg)
+        debug.sethook(hook, "r")
+    end)
+
+    return ...
+end
+
+local t = { foo(10, 20, 30) }
+debug.sethook()
+
+return t[1], t[2], t[3], table.concat(trace, "|"), debug.gethook() == nil
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(5);
+        results[0].AsInteger().ShouldBe(10);
+        results[1].AsInteger().ShouldBe(20);
+        results[2].AsInteger().ShouldBe(30);
+        results[3].AsString().ShouldBe("return sethook|return close|x|return close|return foo");
+        results[4].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
     public void Compile_ShouldSupportGlobalFunctionDeclarations()
     {
         const string source = """
