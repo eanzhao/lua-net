@@ -65,7 +65,9 @@ public static class LuaCompiler
         private readonly List<UpvalueInfo> _upvalues = [];
         private readonly Dictionary<string, int> _upvalueIndices = new(StringComparer.Ordinal);
         private readonly List<LocalInfo> _visibleLocals = [];
+        private readonly List<GlobalDeclarationInfo> _visibleGlobalDeclarations = [];
         private readonly Stack<int> _scopeStarts = [];
+        private readonly Stack<int> _globalScopeStarts = [];
         private readonly Stack<LoopContext> _loops = [];
         private int _persistentRegisterCount;
         private int _tempRegisterTop;
@@ -226,11 +228,14 @@ public static class LuaCompiler
                 case LuaGenericForStatementSyntax genericFor:
                     throw CreateUnsupported(genericFor, "for loops are not supported yet");
                 case LuaGlobalDeclarationStatementSyntax globalDeclaration:
-                    throw CreateUnsupported(globalDeclaration, "global declarations are not supported yet");
+                    CompileGlobalDeclaration(globalDeclaration);
+                    return;
                 case LuaGlobalWildcardStatementSyntax globalWildcard:
-                    throw CreateUnsupported(globalWildcard, "global declarations are not supported yet");
+                    CompileGlobalWildcard(globalWildcard);
+                    return;
                 case LuaGlobalFunctionStatementSyntax globalFunction:
-                    throw CreateUnsupported(globalFunction, "global functions are not supported yet");
+                    CompileGlobalFunction(globalFunction);
+                    return;
                 default:
                     throw CreateUnsupported(statement, $"unsupported statement '{statement.GetType().Name}'");
             }
@@ -323,7 +328,7 @@ public static class LuaCompiler
 
         private void CompileLocalDeclaration(LuaLocalDeclarationStatementSyntax statement)
         {
-            EnsureDeclarationAttributesSupported(statement.Names);
+            EnsureLocalDeclarationAttributesSupported(statement.Names);
 
             if (statement.Initializers.Count == 0)
             {
@@ -351,6 +356,50 @@ public static class LuaCompiler
                     EmitLoadNilRange(localRegister, 1);
                 }
             }
+        }
+
+        private void CompileGlobalDeclaration(LuaGlobalDeclarationStatementSyntax statement)
+        {
+            var declarations = CreateGlobalDeclarations(statement.Names);
+
+            if (statement.Initializers.Count > 0)
+            {
+                var valueRegisters = EvaluateAssignmentValues(statement.Initializers, declarations.Count, statement.Range);
+                int? nilRegister = null;
+
+                for (var index = declarations.Count - 1; index >= 0; index--)
+                {
+                    var valueRegister = index < valueRegisters.Count
+                        ? valueRegisters[index]
+                        : nilRegister ??= LoadNilIntoTemp();
+
+                    EmitGlobalInitializationCheck(declarations[index].Name!, statement.Range);
+                    StoreAssignmentTarget(CreateGlobalAssignmentTarget(declarations[index].Name!, statement.Range), valueRegister);
+                }
+            }
+
+            AddVisibleGlobalDeclarations(declarations);
+        }
+
+        private void CompileGlobalWildcard(LuaGlobalWildcardStatementSyntax statement)
+        {
+            AddVisibleGlobalDeclaration(new GlobalDeclarationInfo(
+                Name: null,
+                IsReadOnly: GetGlobalAttributeIsReadOnly(statement.Attribute),
+                Position: statement.Range.Start));
+        }
+
+        private void CompileGlobalFunction(LuaGlobalFunctionStatementSyntax statement)
+        {
+            AddVisibleGlobalDeclaration(new GlobalDeclarationInfo(
+                statement.Name.Identifier,
+                IsReadOnly: false,
+                Position: statement.Name.Range.Start));
+
+            var functionRegister = AllocateTemp();
+            CompileNestedFunction(statement.Body, injectSelf: false, functionRegister);
+            EmitGlobalInitializationCheck(statement.Name.Identifier, statement.Range);
+            StoreAssignmentTarget(CreateGlobalAssignmentTarget(statement.Name.Identifier, statement.Range), functionRegister);
         }
 
         private void CompileLocalFunction(LuaLocalFunctionStatementSyntax statement)
@@ -463,6 +512,23 @@ public static class LuaCompiler
                 return reference.Kind == ReferenceKind.Local
                     ? AssignmentTarget.Local(reference.Index)
                     : AssignmentTarget.Upvalue(reference.Index);
+            }
+
+            if (TryResolveExplicitGlobal(nameExpression.Name.Identifier, out var globalDeclaration))
+            {
+                if (globalDeclaration.IsReadOnly)
+                {
+                    throw CreateError(
+                        nameExpression.Range,
+                        $"attempt to assign to const variable '{nameExpression.Name.Identifier}'");
+                }
+
+                return CreateGlobalAssignmentTarget(nameExpression.Name.Identifier, nameExpression.Range);
+            }
+
+            if (HasActiveExplicitGlobalDeclarations)
+            {
+                throw CreateError(nameExpression.Range, $"variable '{nameExpression.Name.Identifier}' not declared");
             }
 
             return CreateGlobalAssignmentTarget(nameExpression.Name.Identifier, nameExpression.Range);
@@ -840,6 +906,17 @@ public static class LuaCompiler
                 return;
             }
 
+            if (TryResolveExplicitGlobal(name, out _))
+            {
+                EmitGlobalRead(name, range, targetRegister);
+                return;
+            }
+
+            if (HasActiveExplicitGlobalDeclarations)
+            {
+                throw CreateError(range, $"variable '{name}' not declared");
+            }
+
             EmitGlobalRead(name, range, targetRegister);
         }
 
@@ -947,6 +1024,32 @@ public static class LuaCompiler
             return false;
         }
 
+        private bool TryResolveExplicitGlobal(string name, out GlobalDeclarationInfo declaration)
+        {
+            for (var index = _visibleGlobalDeclarations.Count - 1; index >= 0; index--)
+            {
+                var candidate = _visibleGlobalDeclarations[index];
+                if (candidate.Name is not null && StringComparer.Ordinal.Equals(candidate.Name, name))
+                {
+                    declaration = candidate;
+                    return true;
+                }
+            }
+
+            for (var index = _visibleGlobalDeclarations.Count - 1; index >= 0; index--)
+            {
+                var candidate = _visibleGlobalDeclarations[index];
+                if (candidate.Name is null)
+                {
+                    declaration = candidate;
+                    return true;
+                }
+            }
+
+            declaration = default!;
+            return false;
+        }
+
         private void EmitReferenceRead(Reference reference, int targetRegister)
         {
             switch (reference.Kind)
@@ -972,7 +1075,47 @@ public static class LuaCompiler
             return register;
         }
 
-        private void EnsureDeclarationAttributesSupported(LuaDeclarationNameListSyntax declaration)
+        private void AddVisibleGlobalDeclarations(IReadOnlyList<GlobalDeclarationInfo> declarations)
+        {
+            _visibleGlobalDeclarations.AddRange(declarations);
+        }
+
+        private void AddVisibleGlobalDeclaration(GlobalDeclarationInfo declaration)
+        {
+            _visibleGlobalDeclarations.Add(declaration);
+        }
+
+        private List<GlobalDeclarationInfo> CreateGlobalDeclarations(LuaDeclarationNameListSyntax declaration)
+        {
+            var declarations = new List<GlobalDeclarationInfo>(declaration.Names.Count);
+            foreach (var name in declaration.Names)
+            {
+                declarations.Add(new GlobalDeclarationInfo(
+                    name.Name.Identifier,
+                    GetGlobalAttributeIsReadOnly(declaration.LeadingAttribute) ||
+                        GetGlobalAttributeIsReadOnly(name.Attribute),
+                    name.Range.Start));
+            }
+
+            return declarations;
+        }
+
+        private bool GetGlobalAttributeIsReadOnly(LuaVariableAttributeSyntax? attribute)
+        {
+            if (attribute is null)
+            {
+                return false;
+            }
+
+            return attribute.Kind switch
+            {
+                LuaVariableAttributeKind.Const => true,
+                LuaVariableAttributeKind.Close => throw CreateError(attribute.Range, "global variables cannot be to-be-closed"),
+                _ => throw CreateUnsupported(attribute, "unsupported global variable attribute")
+            };
+        }
+
+        private void EnsureLocalDeclarationAttributesSupported(LuaDeclarationNameListSyntax declaration)
         {
             if (declaration.LeadingAttribute is not null)
             {
@@ -986,6 +1129,13 @@ public static class LuaCompiler
                     throw CreateUnsupported(name.Attribute, "variable attributes are not supported yet");
                 }
             }
+        }
+
+        private void EmitGlobalInitializationCheck(string name, LuaSourceRange range)
+        {
+            var currentValueRegister = AllocateTemp();
+            EmitGlobalRead(name, range, currentValueRegister);
+            EmitErrNNil(currentValueRegister, name);
         }
 
         private void CompileNestedFunction(LuaFunctionBodySyntax body, bool injectSelf, int targetRegister)
@@ -1089,9 +1239,12 @@ public static class LuaCompiler
             };
         }
 
+        private bool HasActiveExplicitGlobalDeclarations => _visibleGlobalDeclarations.Count > 0;
+
         private void EnterScope()
         {
             _scopeStarts.Push(_visibleLocals.Count);
+            _globalScopeStarts.Push(_visibleGlobalDeclarations.Count);
         }
 
         private void ExitScope()
@@ -1100,6 +1253,12 @@ public static class LuaCompiler
             if (start < _visibleLocals.Count)
             {
                 _visibleLocals.RemoveRange(start, _visibleLocals.Count - start);
+            }
+
+            var globalStart = _globalScopeStarts.Pop();
+            if (globalStart < _visibleGlobalDeclarations.Count)
+            {
+                _visibleGlobalDeclarations.RemoveRange(globalStart, _visibleGlobalDeclarations.Count - globalStart);
             }
         }
 
@@ -1329,6 +1488,12 @@ public static class LuaCompiler
             _code.Add(EncodeAbc(LuaOpcode.SetTable, tableRegister, keyRegister, valueRegister));
         }
 
+        private void EmitErrNNil(int registerIndex, string globalName)
+        {
+            var constantIndex = AddConstant(LuaConstant.FromString(globalName));
+            _code.Add(EncodeAbx(LuaOpcode.ErrNNil, registerIndex, constantIndex + 1));
+        }
+
         private void EmitSetIntegerKey(int tableRegister, int integerKey, int valueRegister)
         {
             _code.Add(EncodeAbc(LuaOpcode.SetI, tableRegister, integerKey, valueRegister));
@@ -1484,6 +1649,8 @@ public static class LuaCompiler
         }
 
         private sealed record LocalInfo(string Name, int Register, LuaSourcePosition Position);
+
+        private sealed record GlobalDeclarationInfo(string? Name, bool IsReadOnly, LuaSourcePosition Position);
 
         private sealed record UpvalueInfo(string Name, byte InStack, byte Index);
 

@@ -56,11 +56,11 @@ public class LuaLexerTests
     [Fact]
     public void Tokenize_ShouldReadNumericLiterals()
     {
-        var tokens = new LuaLexer("42 3.14e-2 0xff 0x1.fp+2 .5").Tokenize();
+        var tokens = new LuaLexer("42 3.14e-2 0xff 0x1.fp+2 0xF0.0 .5").Tokenize();
 
         tokens.Where(token => token.Kind == LuaTokenKind.Number)
             .Select(token => token.Lexeme)
-            .ShouldBe(["42", "3.14e-2", "0xff", "0x1.fp+2", ".5"]);
+            .ShouldBe(["42", "3.14e-2", "0xff", "0x1.fp+2", "0xF0.0", ".5"]);
     }
 
     [Fact]
@@ -101,9 +101,9 @@ beta]=]
     }
 
     [Fact]
-    public void Tokenize_ShouldSkipUtf8BomAndUnixShebang()
+    public void Tokenize_ShouldSkipUtf8BomAndHashPreamble()
     {
-        const string source = "\uFEFF#!/usr/bin/env lua\nreturn 1";
+        const string source = "\uFEFF# testing special comment on first line\nreturn 1";
 
         var tokens = new LuaLexer(source).Tokenize();
 

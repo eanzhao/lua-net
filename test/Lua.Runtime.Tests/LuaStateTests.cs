@@ -1415,6 +1415,9 @@ public class LuaStateTests
         InvokeBaseFunction(state, tonumber, LuaValue.FromString("0x1.8p1"))
             .ShouldHaveSingleItem()
             .AsFloat().ShouldBe(3.0d);
+        InvokeBaseFunction(state, tonumber, LuaValue.FromString("0xF0.0"))
+            .ShouldHaveSingleItem()
+            .AsInteger().ShouldBe(240);
         InvokeBaseFunction(state, tonumber, LuaValue.FromString("3.5"))
             .ShouldHaveSingleItem()
             .AsFloat().ShouldBe(3.5d);

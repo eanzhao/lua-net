@@ -323,11 +323,17 @@ public static class LuaValueHelper
 
         var fractionPart = 0d;
         var fractionDivisor = 16d;
+        var dotIndex = -1;
+        var sawFractionDigits = false;
+        var fractionDigitsAreZero = true;
         if (index < text.Length && text[index] == '.')
         {
+            dotIndex = index;
             index++;
             while (index < text.Length && TryGetHexDigit(text[index], out var fractionDigit))
             {
+                sawFractionDigits = true;
+                fractionDigitsAreZero &= fractionDigit == 0;
                 fractionPart += fractionDigit / fractionDivisor;
                 fractionDivisor *= 16d;
                 index++;
@@ -384,9 +390,20 @@ public static class LuaValueHelper
             return false;
         }
 
-        if (!hasExponent && fractionPart == 0d)
+        if (!hasExponent)
         {
-            return TryParseLuaHexInteger(text, negative, out result);
+            if (dotIndex < 0)
+            {
+                return TryParseLuaHexInteger(text, negative, out result);
+            }
+
+            if (sawFractionDigits && fractionDigitsAreZero)
+            {
+                return TryParseLuaHexInteger(text[..dotIndex], negative, out result);
+            }
+
+            result = LuaValue.Nil;
+            return false;
         }
 
         var number = (integerPart + fractionPart) * Math.Pow(2d, exponent);

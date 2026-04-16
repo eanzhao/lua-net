@@ -1,4 +1,5 @@
 using System.Text;
+using Lua.Runtime.Execution;
 using Lua.Runtime.Objects;
 using Lua.Runtime.Values;
 using Lua.VM;
@@ -196,11 +197,76 @@ return
     }
 
     [Fact]
-    public void Compile_ShouldRejectUnsupportedGlobalDeclarations()
+    public void Compile_ShouldSupportGlobalDeclarations()
     {
-        var exception = Should.Throw<LuaCompilerException>(() => LuaCompiler.Compile("global answer = 42"));
+        const string source = """
+local print = print
+global none
+global answer
+answer = 42
+return answer
+""";
 
-        exception.Message.ShouldContain("global declarations are not supported yet");
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(42);
+    }
+
+    [Fact]
+    public void Compile_ShouldRejectUndeclaredNameInsideExplicitGlobalScope()
+    {
+        var exception = Should.Throw<LuaCompilerException>(() => LuaCompiler.Compile("""
+global none
+return missing
+"""));
+
+        exception.Message.ShouldContain("variable 'missing' not declared");
+    }
+
+    [Fact]
+    public void Compile_ShouldRejectAssignmentToConstGlobal()
+    {
+        var exception = Should.Throw<LuaCompilerException>(() => LuaCompiler.Compile("""
+global<const> *
+answer = 42
+"""));
+
+        exception.Message.ShouldContain("attempt to assign to const variable 'answer'");
+    }
+
+    [Fact]
+    public void Compile_ShouldSupportGlobalFunctionDeclarations()
+    {
+        const string source = """
+global none
+global function fib(n)
+    if n < 2 then
+        return n
+    end
+
+    return fib(n - 1) + fib(n - 2)
+end
+
+return fib(6)
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(8);
+    }
+
+    [Fact]
+    public void Compile_ShouldRaiseWhenGlobalInitializationFindsExistingValue()
+    {
+        var vm = new LuaVirtualMachine();
+        vm.State.GlobalEnvironment.SetValue(LuaValue.FromString("answer"), LuaValue.FromInteger(1));
+
+        var chunk = LuaCompiler.Compile("global answer = 42", "global_init.lua");
+        var exception = Should.Throw<LuaRuntimeException>(() => vm.Execute(chunk));
+
+        exception.ErrorObject.AsString().ShouldBe("global 'answer' already defined");
     }
 
     private static LuaValue[] Execute(string source)

@@ -78,10 +78,10 @@ public sealed class LuaLexer
     {
         if (!IsAtEnd && Current == '\uFEFF')
         {
-            _index++;
+            AdvanceSingle();
         }
 
-        if (Current == '#' && Peek(1) == '!')
+        if (Current == '#')
         {
             while (!IsAtEnd && !IsNewLine(Current))
             {
@@ -816,11 +816,13 @@ public sealed class LuaLexer
         var digitsBeforeDot = ConsumeHexDigits(text, ref index);
         var digitsAfterDot = false;
         var hasDot = false;
+        var fractionStart = -1;
 
         if (index < text.Length && text[index] == '.')
         {
             hasDot = true;
             index++;
+            fractionStart = index;
             digitsAfterDot = ConsumeHexDigits(text, ref index);
         }
 
@@ -831,7 +833,8 @@ public sealed class LuaLexer
 
         if (index == text.Length)
         {
-            return !hasDot;
+            return !hasDot ||
+                (digitsAfterDot && IsAllHexZero(text[fractionStart..index]));
         }
 
         if (text[index] != 'p' && text[index] != 'P')
@@ -868,5 +871,18 @@ public sealed class LuaLexer
         }
 
         return index > start;
+    }
+
+    private static bool IsAllHexZero(ReadOnlySpan<char> text)
+    {
+        foreach (var c in text)
+        {
+            if (c != '0')
+            {
+                return false;
+            }
+        }
+
+        return !text.IsEmpty;
     }
 }
