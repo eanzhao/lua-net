@@ -5,6 +5,9 @@ namespace Lua.Runtime.Objects;
 
 public sealed class LuaClosure
 {
+    private static readonly object RegistrySync = new();
+    private static readonly List<WeakReference<LuaClosure>> RegisteredClosures = [];
+
     public LuaClosure(
         string? debugName = null,
         int upvalueCount = 0,
@@ -34,6 +37,11 @@ public sealed class LuaClosure
         UpvalueNames = upvalueNames;
         SourceName = sourceName;
         LineDefined = lineDefined;
+
+        lock (RegistrySync)
+        {
+            RegisteredClosures.Add(new WeakReference<LuaClosure>(this));
+        }
     }
 
     public string? DebugName { get; }
@@ -49,6 +57,60 @@ public sealed class LuaClosure
     public string? SourceName { get; }
 
     public int LineDefined { get; }
+
+    internal static List<LuaClosure> GetRegisteredClosuresSnapshot()
+    {
+        lock (RegistrySync)
+        {
+            var snapshot = new List<LuaClosure>(RegisteredClosures.Count);
+            for (var index = RegisteredClosures.Count - 1; index >= 0; index--)
+            {
+                if (!RegisteredClosures[index].TryGetTarget(out var closure))
+                {
+                    RegisteredClosures.RemoveAt(index);
+                    continue;
+                }
+
+                snapshot.Add(closure);
+            }
+
+            snapshot.Reverse();
+            return snapshot;
+        }
+    }
+
+    internal int GetApproximateMemorySize()
+    {
+        return 64 + (Upvalues.Length * 24);
+    }
+
+    internal void VisitReferencedStrings(Action<string> visitor)
+    {
+        ArgumentNullException.ThrowIfNull(visitor);
+
+        if (DebugName is not null)
+        {
+            visitor(DebugName);
+        }
+
+        if (SourceName is not null)
+        {
+            visitor(SourceName);
+        }
+
+        if (UpvalueNames is null)
+        {
+            return;
+        }
+
+        foreach (var upvalueName in UpvalueNames)
+        {
+            if (upvalueName is not null)
+            {
+                visitor(upvalueName);
+            }
+        }
+    }
 
     private static LuaUpvalue[] CreateEmptyUpvalues(int upvalueCount)
     {

@@ -14,7 +14,7 @@ public sealed partial class LuaState
 
     public void MaybeRunAutomaticGarbageCollection()
     {
-        if (!_gcRunning || _gcCollecting)
+        if (!_gcRunning || _gcCollecting || !HasPendingAutomaticGarbageCollectionWork())
         {
             return;
         }
@@ -291,4 +291,107 @@ public sealed partial class LuaState
         LuaValue Value,
         Func<LuaValue> GetFinalizer,
         Action MarkFinalizerRun);
+
+    private double EstimateLuaMemoryUsageInKilobytes()
+    {
+        long totalBytes = 0;
+        var accountedStrings = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var closures = LuaClosure.GetRegisteredClosuresSnapshot();
+        var tables = LuaTable.GetRegisteredTablesSnapshot();
+        var threads = LuaThread.GetRegisteredThreadsSnapshot();
+        var userDataObjects = LuaUserData.GetRegisteredUserDataSnapshot();
+
+        foreach (var table in tables)
+        {
+            totalBytes += table.GetApproximateMemorySize();
+            table.VisitLiveValues(AccountValue);
+        }
+
+        foreach (var userdata in userDataObjects)
+        {
+            totalBytes += userdata.GetApproximateMemorySize();
+            userdata.VisitStrongReferences(AccountValue);
+        }
+
+        foreach (var closure in closures)
+        {
+            totalBytes += closure.GetApproximateMemorySize();
+            closure.VisitReferencedStrings(AccountString);
+            foreach (var upvalue in closure.Upvalues)
+            {
+                AccountValue(upvalue.GetValue(this));
+            }
+        }
+
+        foreach (var thread in threads)
+        {
+            totalBytes += thread.GetApproximateMemorySize();
+            if (thread.DebugName is not null)
+            {
+                AccountString(thread.DebugName);
+            }
+
+            if (!string.IsNullOrEmpty(thread.HookMask))
+            {
+                AccountString(thread.HookMask);
+            }
+
+            thread.VisitReferencedValues(AccountValue);
+            AccountThreadStack(thread);
+        }
+
+        return totalBytes / 1024d;
+
+        void AccountThreadStack(LuaThread thread)
+        {
+            foreach (var frame in thread.Frames)
+            {
+                if (frame.Closure.DebugName is not null)
+                {
+                    AccountString(frame.Closure.DebugName);
+                }
+            }
+
+            foreach (var frame in thread.Frames)
+            {
+                var liveRegisterTop = Math.Max(frame.LiveRegisterTop, frame.RegisterTop);
+                var maxRegisterCount = Math.Min(liveRegisterTop, Math.Max(0, thread.Stack.Count - frame.BaseIndex));
+                for (var registerIndex = 0; registerIndex < maxRegisterCount; registerIndex++)
+                {
+                    AccountValue(thread.Stack[frame.BaseIndex + registerIndex]);
+                }
+            }
+        }
+
+        void AccountValue(LuaValue value)
+        {
+            if (value.Kind == LuaValueKind.String)
+            {
+                AccountString(value.AsString());
+            }
+        }
+
+        void AccountString(string text)
+        {
+            if (!accountedStrings.Add(text))
+            {
+                return;
+            }
+
+            totalBytes += EstimateStringMemoryUsage(text);
+        }
+    }
+
+    private static int EstimateStringMemoryUsage(string text)
+    {
+        var byteCount = LuaStringBytes.GetBytes(text).Length;
+        return IntPtr.Size == 8
+            ? 24 + (text.Length * 2) + byteCount
+            : 12 + (text.Length * 2) + byteCount;
+    }
+
+    private static bool HasPendingAutomaticGarbageCollectionWork()
+    {
+        return LuaTable.HasPendingFinalizers() || LuaUserData.HasPendingFinalizers();
+    }
 }

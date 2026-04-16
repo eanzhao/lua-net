@@ -47,6 +47,19 @@ public class OfficialLuaCompatibilityTests
         result.Error.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void OfficialGc_ShouldRunSuccessfully()
+    {
+        var result = RunOfficialScript("gc.lua");
+
+        result.ExitCode.ShouldBe(0);
+        result.Output.ShouldContain("testing incremental garbage collection");
+        result.Output.ShouldContain("weak tables");
+        result.Output.ShouldContain("self-referenced threads");
+        result.Output.ShouldContain("OK");
+        result.Error.ShouldBeEmpty();
+    }
+
     private static ScriptRunResult RunOfficialScript(string scriptPath)
     {
         var output = new StringWriter();

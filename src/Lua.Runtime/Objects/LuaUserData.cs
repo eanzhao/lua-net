@@ -56,6 +56,22 @@ public sealed class LuaUserData : IMetatableOwner
         }
     }
 
+    internal static bool HasPendingFinalizers()
+    {
+        lock (RegistrySync)
+        {
+            for (var index = PendingFinalizationUserData.Count - 1; index >= 0; index--)
+            {
+                if (PendingFinalizationUserData[index].HasFinalizerRun)
+                {
+                    PendingFinalizationUserData.RemoveAt(index);
+                }
+            }
+
+            return PendingFinalizationUserData.Count != 0;
+        }
+    }
+
     public void SetMetatable(LuaTable? metatable)
     {
         Metatable = metatable;
@@ -79,6 +95,11 @@ public sealed class LuaUserData : IMetatableOwner
                 visitor(value);
             }
         }
+    }
+
+    internal int GetApproximateMemorySize()
+    {
+        return 64 + (_userValues.Length * 16);
     }
 
     internal void MarkFinalizerRun()

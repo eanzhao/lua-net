@@ -75,6 +75,22 @@ public sealed class LuaTable : IMetatableOwner
         }
     }
 
+    internal static bool HasPendingFinalizers()
+    {
+        lock (RegistrySync)
+        {
+            for (var index = PendingFinalizationTables.Count - 1; index >= 0; index--)
+            {
+                if (PendingFinalizationTables[index].HasFinalizerRun)
+                {
+                    PendingFinalizationTables.RemoveAt(index);
+                }
+            }
+
+            return PendingFinalizationTables.Count != 0;
+        }
+    }
+
     internal void VisitStrongReferences(Action<LuaValue> visitor)
     {
         ArgumentNullException.ThrowIfNull(visitor);
@@ -99,6 +115,30 @@ public sealed class LuaTable : IMetatableOwner
             }
 
             if (!entry.HasWeakKey && !entry.HasWeakValue)
+            {
+                visitor(value);
+            }
+        }
+    }
+
+    internal void VisitLiveValues(Action<LuaValue> visitor)
+    {
+        ArgumentNullException.ThrowIfNull(visitor);
+        RefreshEntries();
+
+        if (Metatable is not null)
+        {
+            visitor(LuaValue.FromTable(Metatable));
+        }
+
+        foreach (var entry in _entriesInOrder)
+        {
+            if (entry.TryGetKey(out var key))
+            {
+                visitor(key);
+            }
+
+            if (entry.TryGetValue(out var value))
             {
                 visitor(value);
             }
@@ -289,6 +329,12 @@ public sealed class LuaTable : IMetatableOwner
         {
             PendingFinalizationTables.Remove(this);
         }
+    }
+
+    internal int GetApproximateMemorySize()
+    {
+        RefreshEntries();
+        return 80 + (_entriesInOrder.Count * 40);
     }
 
     public long GetSequenceLength()

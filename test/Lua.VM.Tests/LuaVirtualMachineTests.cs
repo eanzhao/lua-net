@@ -2319,6 +2319,49 @@ end
         ]);
     }
 
+    [Fact]
+    public void CollectGarbageCount_ShouldTrackLuaMemoryInsteadOfHostHeapNoise()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function()
+    collectgarbage()
+    collectgarbage()
+    local baseline = collectgarbage("count")
+    local a = setmetatable({}, { __mode = "kv" })
+    a[string.rep("a", 2^22)] = 25
+    a[string.rep("b", 2^22)] = {}
+    a[{}] = 14
+    collectgarbage()
+    local k = next(a)
+    a[k] = nil
+    k = nil
+    collectgarbage()
+    return collectgarbage("count") <= baseline + 1
+end
+""");
+
+        vm.Call(target).ShouldBe([LuaValue.FromBoolean(true)]);
+    }
+
+    [Fact]
+    public void CollectGarbage_ShouldReturnFalseWhenCalledFromFinalizer()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function()
+    local result = true
+    setmetatable({}, { __gc = function()
+        result = collectgarbage()
+    end })
+    collectgarbage()
+    return result == false
+end
+""");
+
+        vm.Call(target).ShouldBe([LuaValue.FromBoolean(true)]);
+    }
+
     private static string GetFixturePath(string folder, string fileName)
     {
         return Path.Combine(AppContext.BaseDirectory, "fixtures", "lua55", folder, fileName);

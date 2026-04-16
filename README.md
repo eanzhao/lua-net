@@ -57,8 +57,8 @@ dotnet sln lua-net.sln list
 | 第 15 步 | 字节码序列化与 REPL | 已完成 |
 | 第 16 步 | 兼容性收口 | 进行中 |
 
-当前 297 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
-GC 兼容线已补到 `__gc` / 自动 GC / ephemeron，手工推进 `gc.lua` 的当前下一缺口是 `collectgarbage("count")` 对长字符串场景的内存统计口径。
+当前 300 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
+GC 兼容线已经把 `gengc.lua` 和 `gc.lua` 都推成了正式绿测，下一步可以从 GC 转向更多官方脚本的 compatibility 接入与缺口收口。
 
 ## 仓库结构
 
@@ -92,16 +92,16 @@ src/
 └── Lua.Core/                 共享二进制 chunk 工具（早期遗留）
 
 test/
-├── Lua.Compatibility.Tests/  官方 Lua 5.5.0 脚本兼容性测试（4 个）
+├── Lua.Compatibility.Tests/  官方 Lua 5.5.0 脚本兼容性测试（5 个）
 ├── Lua.Cli.Tests/            CLI / REPL / 脚本入口测试（5 个）
 ├── Lua.Runtime.Tests/        运行时单元测试（89 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（15 个）
 ├── Lua.Syntax.Tests/         词法分析与语法分析测试
 ├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（41 个）
-├── Lua.VM.Tests/             VM 集成测试（109 个，使用真实 Lua 5.5 chunk fixture）
+├── Lua.VM.Tests/             VM 集成测试（111 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（55 份）
+docs/                         阶段规划和设计文档（56 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -241,6 +241,7 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 053 | [gc-api-modes](docs/053-step-16-gc-api-modes.md) | `collectgarbage` mode / param API、`gengc.lua` 缺口推进到 weak tables |
 | 054 | [weak-tables](docs/054-step-16-weak-tables.md) | 弱表 `__mode` 语义、live register 清理、`gengc.lua` 转绿与 `gc.lua` ephemeron 缺口 |
 | 055 | [gc-finalizers-ephemerons](docs/055-step-16-gc-finalizers-ephemerons.md) | `__gc` 终结器、自动 GC、ephemeron 固定点传播与 `gc.lua` 当前 count 缺口 |
+| 056 | [gc-count-official-gc](docs/056-step-16-gc-count-and-official-gc.md) | `collectgarbage("count")` Lua 侧估算、GC 不可重入返回语义与 `gc.lua` 转绿 |
 
 ## 开发方式
 

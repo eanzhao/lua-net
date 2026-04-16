@@ -5,6 +5,8 @@ namespace Lua.Runtime.Objects;
 
 public sealed class LuaThread
 {
+    private static readonly object RegistrySync = new();
+    private static readonly List<WeakReference<LuaThread>> RegisteredThreads = [];
     private readonly List<CallFrame> _frames = [];
     private LuaClosure? _entryClosure;
     private LuaValue[] _resumeValues = [];
@@ -17,6 +19,11 @@ public sealed class LuaThread
         DebugName = debugName;
         IsMainThread = isMainThread;
         Stack = new LuaStack();
+
+        lock (RegistrySync)
+        {
+            RegisteredThreads.Add(new WeakReference<LuaThread>(this));
+        }
     }
 
     public string? DebugName { get; }
@@ -52,6 +59,47 @@ public sealed class LuaThread
     public int HookCount { get; private set; }
 
     public bool IsExecutingHook => _hookInvocationDepth > 0;
+
+    internal static List<LuaThread> GetRegisteredThreadsSnapshot()
+    {
+        lock (RegistrySync)
+        {
+            var snapshot = new List<LuaThread>(RegisteredThreads.Count);
+            for (var index = RegisteredThreads.Count - 1; index >= 0; index--)
+            {
+                if (!RegisteredThreads[index].TryGetTarget(out var thread))
+                {
+                    RegisteredThreads.RemoveAt(index);
+                    continue;
+                }
+
+                snapshot.Add(thread);
+            }
+
+            snapshot.Reverse();
+            return snapshot;
+        }
+    }
+
+    internal int GetApproximateMemorySize()
+    {
+        return 96 + (_frames.Count * 80) + (Stack.Count * 16) + (_resumeValues.Length * 16);
+    }
+
+    internal void VisitReferencedValues(Action<LuaValue> visitor)
+    {
+        ArgumentNullException.ThrowIfNull(visitor);
+
+        foreach (var value in _resumeValues)
+        {
+            visitor(value);
+        }
+
+        if (!ErrorObject.IsNil)
+        {
+            visitor(ErrorObject);
+        }
+    }
 
     public void PushFrame(CallFrame frame)
     {

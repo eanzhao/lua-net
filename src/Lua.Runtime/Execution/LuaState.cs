@@ -709,12 +709,22 @@ public sealed partial class LuaState
                 state._gcRunning = true;
                 return [LuaValue.FromInteger(0)];
             case "collect":
+                if (state._gcCollecting)
+                {
+                    return [LuaValue.FromBoolean(false)];
+                }
+
                 state.RunHostGarbageCollection();
                 return [LuaValue.FromInteger(0)];
             case "count":
-                return [LuaValue.FromFloat(GC.GetTotalMemory(forceFullCollection: false) / 1024d)];
+                return [LuaValue.FromFloat(state.EstimateLuaMemoryUsageInKilobytes())];
             case "step":
             {
+                if (state._gcCollecting)
+                {
+                    return [LuaValue.FromBoolean(false)];
+                }
+
                 var stepSize = arguments.Count > 1 && !arguments[1].IsNil
                     ? RequireGarbageCollectorParameter(arguments[1], 2)
                     : 0;
