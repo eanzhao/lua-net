@@ -241,27 +241,62 @@ public sealed partial class LuaState
     private static LuaValue[] DebugGetUserValue(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         var ud = RequireArgument(arguments, 0, "debug.getuservalue");
-        if (ud.Kind != LuaValueKind.UserData)
+        var slot = 1;
+        if (arguments.Count >= 2 && !arguments[1].IsNil)
         {
-            return [LuaValue.Nil, LuaValue.FromBoolean(false)];
+            if (!TryGetInteger(arguments[1], out var slotInt))
+            {
+                throw CreateArgumentTypeError("debug.getuservalue", 2, "integer", arguments[1]);
+            }
+
+            if (slotInt < int.MinValue || slotInt > int.MaxValue)
+            {
+                return [LuaValue.Nil];
+            }
+
+            slot = (int)slotInt;
         }
 
-        var n = arguments.Count >= 2 && TryGetInteger(arguments[1], out var nInt) ? (int)nInt : 1;
-        if (n != 1)
+        if (ud.Kind != LuaValueKind.UserData)
         {
-            return [LuaValue.Nil, LuaValue.FromBoolean(false)];
+            return [LuaValue.Nil];
         }
 
         var userdata = ud.AsUserData();
-        return userdata.Value is not null
-            ? [LuaValue.Nil, LuaValue.FromBoolean(true)]
-            : [LuaValue.Nil, LuaValue.FromBoolean(false)];
+        return userdata.TryGetUserValue(slot, out var value)
+            ? [value, LuaValue.FromBoolean(true)]
+            : [LuaValue.Nil];
     }
 
     private static LuaValue[] DebugSetUserValue(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         var ud = RequireArgument(arguments, 0, "debug.setuservalue");
-        return [ud];
+        var slot = 1;
+        if (arguments.Count >= 3 && !arguments[2].IsNil)
+        {
+            if (!TryGetInteger(arguments[2], out var slotInt))
+            {
+                throw CreateArgumentTypeError("debug.setuservalue", 3, "integer", arguments[2]);
+            }
+
+            if (slotInt < int.MinValue || slotInt > int.MaxValue)
+            {
+                return [LuaValue.Nil];
+            }
+
+            slot = (int)slotInt;
+        }
+
+        if (ud.Kind != LuaValueKind.UserData)
+        {
+            throw CreateArgumentTypeError("debug.setuservalue", 1, "userdata", ud);
+        }
+
+        var value = RequireArgument(arguments, 1, "debug.setuservalue");
+        var userdata = ud.AsUserData();
+        return userdata.TrySetUserValue(slot, value)
+            ? [ud]
+            : [LuaValue.Nil];
     }
 
     private static LuaValue[] DebugUpvalueId(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
@@ -285,7 +320,7 @@ public sealed partial class LuaState
             throw CreateRuntimeError("invalid upvalue index");
         }
 
-        return [LuaValue.FromUserData(new LuaUserData(func.Upvalues[index]))];
+        return [LuaValue.FromUserData(new LuaUserData(func.Upvalues[index], userValueCount: 0))];
     }
 
     private static LuaValue[] DebugUpvalueJoin(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

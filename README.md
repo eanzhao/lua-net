@@ -55,7 +55,7 @@ dotnet sln lua-net.sln list
 | 第 13 步 | 编译器（AST → 字节码） | 进行中 |
 | 第 14 步 | io / os / package / debug 库 | 进行中 |
 | 第 15 步 | 字节码序列化与 REPL | 已完成 |
-| 第 16 步 | 兼容性收口 | 未开始 |
+| 第 16 步 | 兼容性收口 | 进行中 |
 
 ### 第 7 步当前覆盖范围
 
@@ -102,14 +102,14 @@ src/
 
 test/
 ├── Lua.Cli.Tests/            CLI / REPL / 脚本入口测试（5 个）
-├── Lua.Runtime.Tests/        运行时单元测试（79 个）
+├── Lua.Runtime.Tests/        运行时单元测试（83 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（15 个）
 ├── Lua.Syntax.Tests/         词法分析与语法分析测试
 ├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（7 个）
 ├── Lua.VM.Tests/             VM 集成测试（105 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（43 份）
+docs/                         阶段规划和设计文档（44 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -232,6 +232,12 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 |------|------|------|
 | 042 | [bytecode-dump](docs/042-step-15-bytecode-dump.md) | `LuaChunkWriter`、`string.dump`、debug info strip 与二进制 roundtrip |
 | 043 | [cli-repl](docs/043-step-15-cli-repl.md) | `Lua.Cli`、REPL、脚本执行入口、`arg` 注入与参数解析 |
+
+### 第 16 步：兼容性收口
+
+| 编号 | 文档 | 主题 |
+|------|------|------|
+| 044 | [userdata-uservalues](docs/044-step-16-userdata-uservalues.md) | `LuaUserData` 多槽位 user value、`debug.getuservalue` / `setuservalue` |
 
 ## 开发方式
 

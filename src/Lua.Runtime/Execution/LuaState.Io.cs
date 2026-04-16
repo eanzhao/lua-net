@@ -16,10 +16,10 @@ public sealed partial class LuaState
         var metatable = new LuaTable("file_metatable");
 
         handle.SetValue(LuaValue.FromString("__reader"), reader is not null
-            ? LuaValue.FromUserData(new LuaUserData(reader))
+            ? LuaValue.FromUserData(new LuaUserData(reader, userValueCount: 0))
             : LuaValue.Nil);
         handle.SetValue(LuaValue.FromString("__writer"), writer is not null
-            ? LuaValue.FromUserData(new LuaUserData(writer))
+            ? LuaValue.FromUserData(new LuaUserData(writer, userValueCount: 0))
             : LuaValue.Nil);
         handle.SetValue(LuaValue.FromString("__closed"), LuaValue.FromBoolean(false));
 

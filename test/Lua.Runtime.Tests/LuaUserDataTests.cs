@@ -31,4 +31,33 @@ public class LuaUserDataTests
 
         userData.TryGetMetamethod("__len", out _).ShouldBeFalse();
     }
+
+    [Fact]
+    public void UserValues_ShouldExposeConfiguredSlots()
+    {
+        var userData = new LuaUserData(new object(), userValueCount: 2);
+
+        userData.UserValueCount.ShouldBe(2);
+        userData.TryGetUserValue(1, out var first).ShouldBeTrue();
+        first.IsNil.ShouldBeTrue();
+        userData.TryGetUserValue(2, out var second).ShouldBeTrue();
+        second.IsNil.ShouldBeTrue();
+        userData.TryGetUserValue(3, out var missing).ShouldBeFalse();
+        missing.IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void UserValues_ShouldAllowSettingExistingSlotsOnly()
+    {
+        var userData = new LuaUserData(new object(), userValueCount: 2);
+
+        userData.TrySetUserValue(1, LuaValue.FromString("first")).ShouldBeTrue();
+        userData.TrySetUserValue(2, LuaValue.FromInteger(42)).ShouldBeTrue();
+        userData.TrySetUserValue(3, LuaValue.FromBoolean(true)).ShouldBeFalse();
+
+        userData.TryGetUserValue(1, out var first).ShouldBeTrue();
+        first.AsString().ShouldBe("first");
+        userData.TryGetUserValue(2, out var second).ShouldBeTrue();
+        second.AsInteger().ShouldBe(42);
+    }
 }

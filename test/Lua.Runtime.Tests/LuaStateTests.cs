@@ -1793,6 +1793,66 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void DebugLibrary_ShouldSupportMultiSlotUserValues()
+    {
+        var state = new LuaState();
+        var debugGetUserValue = GetLibraryFunction(state.DebugLibrary, "getuservalue");
+        var debugSetUserValue = GetLibraryFunction(state.DebugLibrary, "setuservalue");
+        var userdata = LuaValue.FromUserData(new LuaUserData(new object(), userValueCount: 2));
+
+        var firstSlot = InvokeBaseFunction(state, debugGetUserValue, userdata);
+        firstSlot.Length.ShouldBe(2);
+        firstSlot[0].IsNil.ShouldBeTrue();
+        firstSlot[1].AsBoolean().ShouldBeTrue();
+
+        var secondSet = InvokeBaseFunction(
+            state,
+            debugSetUserValue,
+            userdata,
+            LuaValue.FromString("payload"),
+            LuaValue.FromInteger(2));
+        secondSet.ShouldHaveSingleItem().ShouldBe(userdata);
+
+        var secondSlot = InvokeBaseFunction(state, debugGetUserValue, userdata, LuaValue.FromInteger(2));
+        secondSlot.Length.ShouldBe(2);
+        secondSlot[0].AsString().ShouldBe("payload");
+        secondSlot[1].AsBoolean().ShouldBeTrue();
+
+        var nilSlotArgument = InvokeBaseFunction(state, debugGetUserValue, userdata, LuaValue.Nil);
+        nilSlotArgument.Length.ShouldBe(2);
+        nilSlotArgument[0].IsNil.ShouldBeTrue();
+        nilSlotArgument[1].AsBoolean().ShouldBeTrue();
+
+        InvokeBaseFunction(state, debugSetUserValue, userdata, LuaValue.FromInteger(99))
+            .ShouldHaveSingleItem().ShouldBe(userdata);
+
+        InvokeBaseFunction(state, debugSetUserValue, userdata, LuaValue.FromInteger(123), LuaValue.Nil)
+            .ShouldHaveSingleItem().ShouldBe(userdata);
+
+        var updatedFirstSlot = InvokeBaseFunction(state, debugGetUserValue, userdata);
+        updatedFirstSlot[0].AsInteger().ShouldBe(123);
+        updatedFirstSlot[1].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void DebugLibrary_ShouldReturnFailForMissingUserValueSlot()
+    {
+        var state = new LuaState();
+        var debugGetUserValue = GetLibraryFunction(state.DebugLibrary, "getuservalue");
+        var debugSetUserValue = GetLibraryFunction(state.DebugLibrary, "setuservalue");
+        var userdata = LuaValue.FromUserData(new LuaUserData(new object(), userValueCount: 1));
+
+        InvokeBaseFunction(state, debugGetUserValue, userdata, LuaValue.FromInteger(2))
+            .ShouldHaveSingleItem().IsNil.ShouldBeTrue();
+
+        InvokeBaseFunction(state, debugSetUserValue, userdata, LuaValue.FromString("x"), LuaValue.FromInteger(2))
+            .ShouldHaveSingleItem().IsNil.ShouldBeTrue();
+
+        InvokeBaseFunction(state, debugGetUserValue, LuaValue.FromString("not userdata"))
+            .ShouldHaveSingleItem().IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
     public void PopFrame_ShouldRejectEmptyStack()
     {
         var state = new LuaState();
