@@ -48,6 +48,8 @@ public sealed class CallFrame
 
     public LuaPendingCall? PendingCall { get; private set; }
 
+    public LuaPendingClose? PendingClose { get; private set; }
+
     public void SetPendingCall(int registerIndex, int resultCount)
     {
         PendingCall = LuaPendingCall.ForRegisters(registerIndex, resultCount);
@@ -61,6 +63,17 @@ public sealed class CallFrame
     public void ClearPendingCall()
     {
         PendingCall = null;
+    }
+
+    public void SetPendingClose(LuaPendingClose pendingClose)
+    {
+        ArgumentNullException.ThrowIfNull(pendingClose);
+        PendingClose = pendingClose;
+    }
+
+    public void ClearPendingClose()
+    {
+        PendingClose = null;
     }
 
     public void SetRegisterTop(int registerTop)

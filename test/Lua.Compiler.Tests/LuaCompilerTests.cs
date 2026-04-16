@@ -902,6 +902,117 @@ return t[1], t[2], t[3], table.concat(trace, "|"), debug.gethook() == nil
     }
 
     [Fact]
+    public void Compile_ShouldResumeLuaCloseCallbacksWithoutLosingReturnValues()
+    {
+        const string source = """
+local function func2close(f)
+    return setmetatable({}, { __close = f })
+end
+
+local trace = {}
+local co = coroutine.wrap(function ()
+    local x <close> = func2close(function (_, msg)
+        trace[#trace + 1] = "x1"
+        coroutine.yield("pause")
+        trace[#trace + 1] = "x2"
+    end)
+
+    return 10, 20
+end)
+
+local first = co()
+local a, b = co()
+
+return first, a, b, table.concat(trace, "|")
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(4);
+        results[0].AsString().ShouldBe("pause");
+        results[1].AsInteger().ShouldBe(10);
+        results[2].AsInteger().ShouldBe(20);
+        results[3].AsString().ShouldBe("x1|x2");
+    }
+
+    [Fact]
+    public void Compile_ShouldResumeScopeCloseBeforeContinuingExecution()
+    {
+        const string source = """
+local function func2close(f)
+    return setmetatable({}, { __close = f })
+end
+
+local trace = {}
+local co = coroutine.wrap(function ()
+    do
+        local z <close> = func2close(function (_, msg)
+            trace[#trace + 1] = "z1"
+            coroutine.yield("scope")
+            trace[#trace + 1] = "z2"
+        end)
+    end
+
+    trace[#trace + 1] = "after"
+    return 42
+end)
+
+local first = co()
+local second = co()
+
+return first, second, table.concat(trace, "|")
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(3);
+        results[0].AsString().ShouldBe("scope");
+        results[1].AsInteger().ShouldBe(42);
+        results[2].AsString().ShouldBe("z1|z2|after");
+    }
+
+    [Fact]
+    public void Compile_ShouldPropagateLatestNestedCloseError()
+    {
+        const string source = """
+local function func2close(f)
+    return setmetatable({}, { __close = f })
+end
+
+local track = {}
+
+local function foo()
+    local x0 <close> = func2close(function(_, msg)
+        track[#track + 1] = "x0:" .. tostring(msg)
+    end)
+
+    local x <close> = func2close(function()
+        local xx <close> = func2close(function(_, msg)
+            track[#track + 1] = "xx:" .. tostring(msg)
+            error(202)
+        end)
+
+        track[#track + 1] = "x"
+        error(101)
+    end)
+
+    track[#track + 1] = "foo"
+    return 20, 30, 40
+end
+
+local st, msg = pcall(foo)
+return tostring(st), tostring(msg), table.concat(track, "|")
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(3);
+        results[0].AsString().ShouldBe("false");
+        results[1].AsString().ShouldBe("202");
+        results[2].AsString().ShouldBe("foo|x|xx:101|x0:202");
+    }
+
+    [Fact]
     public void Compile_ShouldSupportGlobalFunctionDeclarations()
     {
         const string source = """

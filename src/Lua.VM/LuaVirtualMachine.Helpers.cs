@@ -314,6 +314,142 @@ public sealed partial class LuaVirtualMachine
         }
     }
 
+    private bool StartCloseContinuation(
+        CallFrame frame,
+        int registerIndex,
+        LuaPendingCloseContinuationKind continuationKind,
+        IReadOnlyList<LuaValue>? returnResults,
+        Exception? pendingException = null)
+    {
+        if (State.CurrentThread.IsMainThread)
+        {
+            return false;
+        }
+
+        if (frame.PendingClose is not null)
+        {
+            return true;
+        }
+
+        var registers = frame.ConsumeToBeClosedRegistersFrom(registerIndex);
+        if (registers.Count == 0)
+        {
+            if (pendingException is null)
+            {
+                frame.CloseOpenUpvaluesFrom(registerIndex);
+                return false;
+            }
+
+            RethrowIfNeeded(CloseResourcesFrom(frame, registerIndex, pendingException));
+            return false;
+        }
+
+        frame.CloseOpenUpvaluesFrom(registerIndex);
+        frame.SetPendingClose(new LuaPendingClose(registers, continuationKind, returnResults, pendingException));
+        return true;
+    }
+
+    private bool TryResumePendingClose(
+        CallFrame frame,
+        int hostCallId,
+        out bool completedFrame,
+        out LuaValue[] completedResults)
+    {
+        completedFrame = false;
+        completedResults = [];
+
+        var pendingClose = frame.PendingClose;
+        if (pendingClose is null)
+        {
+            return false;
+        }
+
+        if (pendingClose.AwaitingResumeValues)
+        {
+            if (!State.CurrentThread.HasResumeValues())
+            {
+                return false;
+            }
+
+            State.CurrentThread.ConsumeResumeValues();
+            pendingClose.ConsumeResumeValues();
+        }
+
+        while (pendingClose.HasRemainingRegisters)
+        {
+            var registerIndex = pendingClose.DequeueNextRegister();
+
+            try
+            {
+                if (TryStartCloseCall(frame, registerIndex, pendingClose))
+                {
+                    return true;
+                }
+            }
+            catch (LuaYieldException ex) when (ReferenceEquals(ex.Thread, State.CurrentThread))
+            {
+                pendingClose.WaitForResumeValues();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                pendingClose.PendingException = AnnotateCloseError(ex);
+            }
+        }
+
+        frame.ClearPendingClose();
+        if (pendingClose.PendingException is not null)
+        {
+            ExceptionDispatchInfo.Capture(pendingClose.PendingException).Throw();
+        }
+
+        if (pendingClose.ContinuationKind == LuaPendingCloseContinuationKind.Return)
+        {
+            completedFrame = CompleteFrameAfterClose(frame, pendingClose.ReturnResults, hostCallId, out completedResults);
+            return true;
+        }
+
+        return true;
+    }
+
+    private bool TryStartCloseCall(CallFrame frame, int registerIndex, LuaPendingClose pendingClose)
+    {
+        var value = GetRegister(frame, registerIndex);
+        if (value.IsNil || (value.Kind == LuaValueKind.Boolean && !value.AsBoolean()))
+        {
+            return false;
+        }
+
+        var closeMethod = GetCloseMethod(value);
+        if (closeMethod.Kind != LuaValueKind.Function)
+        {
+            throw CreateCloseMethodRuntimeException(closeMethod);
+        }
+
+        var closeClosure = GetCloseCallable(closeMethod.AsFunction());
+        var closeArguments = pendingClose.PendingException is null
+            ? new[] { value }
+            : new[] { value, GetErrorObject(pendingClose.PendingException) };
+
+        switch (closeClosure.Body)
+        {
+            case LuaBytecodeClosureBody body:
+                PushBytecodeFrame(
+                    closeClosure,
+                    body.Prototype,
+                    closeArguments,
+                    LuaCallReturnTarget.ForCloseContinuation(frame));
+                return true;
+            case LuaNativeClosureBody body:
+                ExecuteNativeClosure(closeClosure, body, closeArguments);
+                return false;
+            case null:
+                throw new InvalidOperationException("The closure does not contain an executable body.");
+            default:
+                throw new InvalidOperationException($"Unsupported closure body type '{closeClosure.Body.GetType().Name}'.");
+        }
+    }
+
     private void CloseToBeClosedValue(CallFrame frame, int registerIndex, Exception? pendingException)
     {
         var value = GetRegister(frame, registerIndex);

@@ -25,7 +25,7 @@ public class OfficialLuaCompatibilityTests
     }
 
     [Fact]
-    public void OfficialLocals_ShouldCurrentlyStopAtCoroutineCloseYieldGap()
+    public void OfficialLocals_ShouldCurrentlyStopAtYieldableProtectedCallGap()
     {
         var result = RunOfficialScript("locals.lua");
 
@@ -34,6 +34,7 @@ public class OfficialLuaCompatibilityTests
         result.Output.ShouldContain("to-be-closed variables in coroutines");
         result.Output.ShouldNotContain("OK");
         result.Error.ShouldContain("assertion failed!");
+        result.Error.ShouldContain("in metamethod 'close'");
     }
 
     private static ScriptRunResult RunOfficialScript(string scriptPath)

@@ -5,7 +5,8 @@ public enum LuaCallReturnTargetKind
     None,
     HostCall,
     Registers,
-    ThreadRoot
+    ThreadRoot,
+    CloseContinuation
 }
 
 public sealed class LuaCallReturnTarget
@@ -52,5 +53,11 @@ public sealed class LuaCallReturnTarget
     public static LuaCallReturnTarget ForThreadRoot()
     {
         return new LuaCallReturnTarget(LuaCallReturnTargetKind.ThreadRoot, 0, null, 0, 0);
+    }
+
+    public static LuaCallReturnTarget ForCloseContinuation(CallFrame callerFrame)
+    {
+        ArgumentNullException.ThrowIfNull(callerFrame);
+        return new LuaCallReturnTarget(LuaCallReturnTargetKind.CloseContinuation, 0, callerFrame, 0, 0);
     }
 }

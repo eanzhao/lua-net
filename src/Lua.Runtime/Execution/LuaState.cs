@@ -2642,6 +2642,10 @@ public sealed partial class LuaState
             var results = state.InvokeCallable(callable, callArguments);
             return PrependSuccessResult(results);
         }
+        catch (LuaYieldException ex) when (ReferenceEquals(ex.Thread, state.CurrentThread))
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             var errorObject = GetErrorObject(ex);

@@ -116,6 +116,10 @@ public sealed partial class LuaVirtualMachine
         {
             return RunInterpreter(hostCallId);
         }
+        catch (LuaYieldException ex) when (ReferenceEquals(ex.Thread, State.CurrentThread))
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             AbortFramesToDepth(frameDepth, ex);
@@ -188,7 +192,9 @@ public sealed partial class LuaVirtualMachine
     {
         var shouldTrackBoundary =
             !string.Equals(closure.DebugName, "coroutine.yield", StringComparison.Ordinal) &&
-            !string.Equals(closure.DebugName, "coroutine.isyieldable", StringComparison.Ordinal);
+            !string.Equals(closure.DebugName, "coroutine.isyieldable", StringComparison.Ordinal) &&
+            !string.Equals(closure.DebugName, "pcall", StringComparison.Ordinal) &&
+            !string.Equals(closure.DebugName, "xpcall", StringComparison.Ordinal);
         EnsureCallFrameCapacity();
         var nativeFrame = new CallFrame(
             closure,
@@ -258,306 +264,333 @@ public sealed partial class LuaVirtualMachine
     {
         while (true)
         {
-            var frame = State.CurrentFrame
-                ?? throw new InvalidOperationException("The interpreter has no active call frame.");
-            var prototype = GetCurrentPrototype(frame);
-
-            if (TryResumePendingCall(frame, hostCallId, out var resumedCompleted, out var resumedResults))
+            try
             {
-                if (resumedCompleted)
+                var frame = State.CurrentFrame
+                    ?? throw new InvalidOperationException("The interpreter has no active call frame.");
+
+                if (TryResumePendingCall(frame, hostCallId, out var resumedCompleted, out var resumedResults))
                 {
-                    return resumedResults;
+                    if (resumedCompleted)
+                    {
+                        return resumedResults;
+                    }
+
+                    continue;
                 }
 
-                continue;
-            }
-
-            if (frame.ProgramCounter >= prototype.Code.Length)
-            {
-                if (TryCompleteFrame(frame, [], hostCallId, out var finishedResults))
+                if (TryResumePendingClose(frame, hostCallId, out var closeCompleted, out var closeResults))
                 {
-                    return finishedResults;
+                    if (closeCompleted)
+                    {
+                        return closeResults;
+                    }
+
+                    continue;
                 }
 
-                continue;
+                var prototype = GetCurrentPrototype(frame);
+
+                if (frame.ProgramCounter >= prototype.Code.Length)
+                {
+                    if (TryCompleteFrame(frame, [], hostCallId, out var finishedResults))
+                    {
+                        return finishedResults;
+                    }
+
+                    continue;
+                }
+
+                var instruction = LuaInstruction.FromRaw(prototype.Code[frame.ProgramCounter]);
+                frame.Advance();
+
+                switch (instruction.Opcode)
+                {
+                    case LuaOpcode.Move:
+                        SetRegister(frame, instruction.A, GetRegister(frame, instruction.B));
+                        break;
+                    case LuaOpcode.LoadFalse:
+                        SetRegister(frame, instruction.A, LuaValue.FromBoolean(false));
+                        break;
+                    case LuaOpcode.LFalseSkip:
+                        SetRegister(frame, instruction.A, LuaValue.FromBoolean(false));
+                        frame.Advance();
+                        break;
+                    case LuaOpcode.LoadTrue:
+                        SetRegister(frame, instruction.A, LuaValue.FromBoolean(true));
+                        break;
+                    case LuaOpcode.LoadNil:
+                        ExecuteLoadNil(frame, instruction);
+                        break;
+                    case LuaOpcode.LoadI:
+                        SetRegister(frame, instruction.A, LuaValue.FromInteger(instruction.SBx));
+                        break;
+                    case LuaOpcode.LoadF:
+                        SetRegister(frame, instruction.A, LuaValue.FromFloat(instruction.SBx));
+                        break;
+                    case LuaOpcode.LoadK:
+                        SetRegister(frame, instruction.A, ConvertConstant(prototype.Constants[instruction.Bx]));
+                        break;
+                    case LuaOpcode.LoadKx:
+                        ExecuteLoadKx(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.GetUpVal:
+                        SetRegister(frame, instruction.A, GetUpvalue(frame, instruction.B));
+                        break;
+                    case LuaOpcode.GetTabUp:
+                        ExecuteTableGet(frame, instruction.A, GetUpvalue(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]));
+                        break;
+                    case LuaOpcode.GetTable:
+                        ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C));
+                        break;
+                    case LuaOpcode.GetI:
+                        ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), LuaValue.FromInteger(instruction.C));
+                        break;
+                    case LuaOpcode.GetField:
+                        ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]));
+                        break;
+                    case LuaOpcode.SetUpVal:
+                        SetUpvalue(frame, instruction.B, GetRegister(frame, instruction.A));
+                        break;
+                    case LuaOpcode.SetTabUp:
+                        ExecuteTableSet(frame, GetUpvalue(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), GetRkValue(frame, prototype, instruction.C, instruction.K));
+                        break;
+                    case LuaOpcode.SetTable:
+                        ExecuteTableSet(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), GetRkValue(frame, prototype, instruction.C, instruction.K));
+                        break;
+                    case LuaOpcode.SetI:
+                        ExecuteTableSet(frame, GetRegister(frame, instruction.A), LuaValue.FromInteger(instruction.B), GetRkValue(frame, prototype, instruction.C, instruction.K));
+                        break;
+                    case LuaOpcode.SetField:
+                        ExecuteTableSet(frame, GetRegister(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), GetRkValue(frame, prototype, instruction.C, instruction.K));
+                        break;
+                    case LuaOpcode.NewTable:
+                        ExecuteNewTable(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.Self:
+                        ExecuteSelf(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.AddI:
+                        ExecuteAddImmediate(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.AddK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryAdd, AddMetamethodEvent);
+                        break;
+                    case LuaOpcode.SubK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TrySubtract, SubtractMetamethodEvent);
+                        break;
+                    case LuaOpcode.MulK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryMultiply, MultiplyMetamethodEvent);
+                        break;
+                    case LuaOpcode.ModK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryModulo, ModuloMetamethodEvent);
+                        break;
+                    case LuaOpcode.PowK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryPower, PowerMetamethodEvent);
+                        break;
+                    case LuaOpcode.DivK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryDivide, DivideMetamethodEvent);
+                        break;
+                    case LuaOpcode.IDivK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryIntegerDivide, IntegerDivideMetamethodEvent);
+                        break;
+                    case LuaOpcode.BandK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseAnd, BitwiseAndMetamethodEvent);
+                        break;
+                    case LuaOpcode.BorK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseOr, BitwiseOrMetamethodEvent);
+                        break;
+                    case LuaOpcode.BXorK:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseXor, BitwiseXorMetamethodEvent);
+                        break;
+                    case LuaOpcode.ShlI:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, LuaValue.FromInteger(ToSignedC(instruction.C)), GetRegister(frame, instruction.B), TryShiftLeft, ShiftLeftMetamethodEvent);
+                        break;
+                    case LuaOpcode.ShrI:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), LuaValue.FromInteger(ToSignedC(instruction.C)), TryShiftRight, ShiftRightMetamethodEvent);
+                        break;
+                    case LuaOpcode.Add:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryAdd, AddMetamethodEvent);
+                        break;
+                    case LuaOpcode.Sub:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TrySubtract, SubtractMetamethodEvent);
+                        break;
+                    case LuaOpcode.Mul:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryMultiply, MultiplyMetamethodEvent);
+                        break;
+                    case LuaOpcode.Mod:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryModulo, ModuloMetamethodEvent);
+                        break;
+                    case LuaOpcode.Pow:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryPower, PowerMetamethodEvent);
+                        break;
+                    case LuaOpcode.Div:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryDivide, DivideMetamethodEvent);
+                        break;
+                    case LuaOpcode.IDiv:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryIntegerDivide, IntegerDivideMetamethodEvent);
+                        break;
+                    case LuaOpcode.Band:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseAnd, BitwiseAndMetamethodEvent);
+                        break;
+                    case LuaOpcode.Bor:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseOr, BitwiseOrMetamethodEvent);
+                        break;
+                    case LuaOpcode.BXor:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseXor, BitwiseXorMetamethodEvent);
+                        break;
+                    case LuaOpcode.Shl:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftLeft, ShiftLeftMetamethodEvent);
+                        break;
+                    case LuaOpcode.Shr:
+                        ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftRight, ShiftRightMetamethodEvent);
+                        break;
+                    case LuaOpcode.Unm:
+                        ExecuteUnaryArithmetic(frame, instruction, TryUnaryMinus, UnaryMinusMetamethodEvent);
+                        break;
+                    case LuaOpcode.BNot:
+                        ExecuteUnaryArithmetic(frame, instruction, TryBitwiseNot, BitwiseNotMetamethodEvent);
+                        break;
+                    case LuaOpcode.Not:
+                        SetRegister(frame, instruction.A, LuaValue.FromBoolean(!IsTruthy(GetRegister(frame, instruction.B))));
+                        break;
+                    case LuaOpcode.Len:
+                        ExecuteLength(frame, instruction);
+                        break;
+                    case LuaOpcode.Concat:
+                        ExecuteConcat(frame, instruction);
+                        break;
+                    case LuaOpcode.Close:
+                        if (StartCloseContinuation(
+                                frame,
+                                instruction.A,
+                                LuaPendingCloseContinuationKind.ContinueExecution,
+                                returnResults: null))
+                        {
+                            continue;
+                        }
+
+                        RethrowIfNeeded(CloseResourcesFrom(frame, instruction.A));
+                        break;
+                    case LuaOpcode.Tbc:
+                        ExecuteToBeClosed(prototype, frame, instruction);
+                        break;
+                    case LuaOpcode.Call:
+                        ExecuteCall(frame, instruction);
+                        break;
+                    case LuaOpcode.TailCall:
+                        if (ExecuteTailCall(frame, instruction, hostCallId, out var tailCallResults))
+                        {
+                            return tailCallResults;
+                        }
+
+                        break;
+                    case LuaOpcode.Return:
+                        if (TryCompleteFrame(frame, ExecuteReturn(frame, instruction), hostCallId, out var returnResults))
+                        {
+                            return returnResults;
+                        }
+
+                        break;
+                    case LuaOpcode.Return0:
+                        if (TryCompleteFrame(frame, [], hostCallId, out var return0Results))
+                        {
+                            return return0Results;
+                        }
+
+                        break;
+                    case LuaOpcode.Return1:
+                        if (TryCompleteFrame(frame, [GetRegister(frame, instruction.A)], hostCallId, out var return1Results))
+                        {
+                            return return1Results;
+                        }
+
+                        break;
+                    case LuaOpcode.ForLoop:
+                        ExecuteForLoop(frame, instruction);
+                        break;
+                    case LuaOpcode.ForPrep:
+                        ExecuteForPrep(frame, instruction);
+                        break;
+                    case LuaOpcode.TForPrep:
+                        ExecuteTForPrep(frame, instruction);
+                        break;
+                    case LuaOpcode.TForCall:
+                        ExecuteTForCall(frame, instruction);
+                        break;
+                    case LuaOpcode.TForLoop:
+                        ExecuteTForLoop(frame, instruction);
+                        break;
+                    case LuaOpcode.SetList:
+                        ExecuteSetList(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.Closure:
+                        ExecuteClosureInstruction(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.VarArg:
+                        ExecuteVarArg(frame, instruction);
+                        break;
+                    case LuaOpcode.GetVArg:
+                        ExecuteGetVarArg(frame, instruction);
+                        break;
+                    case LuaOpcode.VarArgPrep:
+                        ExecuteVarArgPrep(frame, prototype);
+                        break;
+                    case LuaOpcode.ErrNNil:
+                        ExecuteErrNNil(prototype, frame, instruction);
+                        break;
+                    case LuaOpcode.Jmp:
+                        ExecuteJump(frame, instruction);
+                        break;
+                    case LuaOpcode.Eq:
+                        ExecuteEqualityComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K);
+                        break;
+                    case LuaOpcode.Lt:
+                        ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison < 0, LessThanMetamethodEvent);
+                        break;
+                    case LuaOpcode.Le:
+                        ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison <= 0, LessEqualMetamethodEvent);
+                        break;
+                    case LuaOpcode.EqK:
+                        ExecuteEqualityComparison(frame, GetRegister(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), instruction.K);
+                        break;
+                    case LuaOpcode.EqI:
+                        ExecuteImmediateComparison(frame, instruction, static (left, right) => left == right, allowNonNumericAsFalse: true);
+                        break;
+                    case LuaOpcode.LtI:
+                        ExecuteImmediateComparison(frame, instruction, static (left, right) => left < right, metamethodEvent: LessThanMetamethodEvent);
+                        break;
+                    case LuaOpcode.LeI:
+                        ExecuteImmediateComparison(frame, instruction, static (left, right) => left <= right, metamethodEvent: LessEqualMetamethodEvent);
+                        break;
+                    case LuaOpcode.GtI:
+                        ExecuteImmediateComparison(frame, instruction, static (left, right) => left > right, metamethodEvent: LessThanMetamethodEvent, flipOperands: true);
+                        break;
+                    case LuaOpcode.GeI:
+                        ExecuteImmediateComparison(frame, instruction, static (left, right) => left >= right, metamethodEvent: LessEqualMetamethodEvent, flipOperands: true);
+                        break;
+                    case LuaOpcode.Test:
+                        ExecuteConditionalJump(frame, IsTruthy(GetRegister(frame, instruction.A)), instruction.K);
+                        break;
+                    case LuaOpcode.TestSet:
+                        ExecuteTestSet(frame, instruction);
+                        break;
+                    case LuaOpcode.MmBin:
+                        ExecuteMetamethodBinary(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.MmBinI:
+                        ExecuteMetamethodBinaryImmediate(frame, prototype, instruction);
+                        break;
+                    case LuaOpcode.MmBinK:
+                        ExecuteMetamethodBinaryConstant(frame, prototype, instruction);
+                        break;
+                    default:
+                        throw new NotImplementedException($"Opcode '{instruction.Name}' is not implemented yet.");
+                }
             }
-
-            var instruction = LuaInstruction.FromRaw(prototype.Code[frame.ProgramCounter]);
-            frame.Advance();
-
-            switch (instruction.Opcode)
+            catch (Exception ex) when (ex is not LuaYieldException && ex is not LuaThreadCloseException && TryHandlePendingCloseException(ex))
             {
-                case LuaOpcode.Move:
-                    SetRegister(frame, instruction.A, GetRegister(frame, instruction.B));
-                    break;
-                case LuaOpcode.LoadFalse:
-                    SetRegister(frame, instruction.A, LuaValue.FromBoolean(false));
-                    break;
-                case LuaOpcode.LFalseSkip:
-                    SetRegister(frame, instruction.A, LuaValue.FromBoolean(false));
-                    frame.Advance();
-                    break;
-                case LuaOpcode.LoadTrue:
-                    SetRegister(frame, instruction.A, LuaValue.FromBoolean(true));
-                    break;
-                case LuaOpcode.LoadNil:
-                    ExecuteLoadNil(frame, instruction);
-                    break;
-                case LuaOpcode.LoadI:
-                    SetRegister(frame, instruction.A, LuaValue.FromInteger(instruction.SBx));
-                    break;
-                case LuaOpcode.LoadF:
-                    SetRegister(frame, instruction.A, LuaValue.FromFloat(instruction.SBx));
-                    break;
-                case LuaOpcode.LoadK:
-                    SetRegister(frame, instruction.A, ConvertConstant(prototype.Constants[instruction.Bx]));
-                    break;
-                case LuaOpcode.LoadKx:
-                    ExecuteLoadKx(frame, prototype, instruction);
-                    break;
-                case LuaOpcode.GetUpVal:
-                    SetRegister(frame, instruction.A, GetUpvalue(frame, instruction.B));
-                    break;
-                case LuaOpcode.GetTabUp:
-                    ExecuteTableGet(frame, instruction.A, GetUpvalue(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]));
-                    break;
-                case LuaOpcode.GetTable:
-                    ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C));
-                    break;
-                case LuaOpcode.GetI:
-                    ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), LuaValue.FromInteger(instruction.C));
-                    break;
-                case LuaOpcode.GetField:
-                    ExecuteTableGet(frame, instruction.A, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]));
-                    break;
-                case LuaOpcode.SetUpVal:
-                    SetUpvalue(frame, instruction.B, GetRegister(frame, instruction.A));
-                    break;
-                case LuaOpcode.SetTabUp:
-                    ExecuteTableSet(frame, GetUpvalue(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), GetRkValue(frame, prototype, instruction.C, instruction.K));
-                    break;
-                case LuaOpcode.SetTable:
-                    ExecuteTableSet(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), GetRkValue(frame, prototype, instruction.C, instruction.K));
-                    break;
-                case LuaOpcode.SetI:
-                    ExecuteTableSet(frame, GetRegister(frame, instruction.A), LuaValue.FromInteger(instruction.B), GetRkValue(frame, prototype, instruction.C, instruction.K));
-                    break;
-                case LuaOpcode.SetField:
-                    ExecuteTableSet(frame, GetRegister(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), GetRkValue(frame, prototype, instruction.C, instruction.K));
-                    break;
-                case LuaOpcode.NewTable:
-                    ExecuteNewTable(frame, prototype, instruction);
-                    break;
-                case LuaOpcode.Self:
-                    ExecuteSelf(frame, prototype, instruction);
-                    break;
-                case LuaOpcode.AddI:
-                    ExecuteAddImmediate(frame, prototype, instruction);
-                    break;
-                case LuaOpcode.AddK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryAdd, AddMetamethodEvent);
-                    break;
-                case LuaOpcode.SubK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TrySubtract, SubtractMetamethodEvent);
-                    break;
-                case LuaOpcode.MulK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryMultiply, MultiplyMetamethodEvent);
-                    break;
-                case LuaOpcode.ModK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryModulo, ModuloMetamethodEvent);
-                    break;
-                case LuaOpcode.PowK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryPower, PowerMetamethodEvent);
-                    break;
-                case LuaOpcode.DivK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryDivide, DivideMetamethodEvent);
-                    break;
-                case LuaOpcode.IDivK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryIntegerDivide, IntegerDivideMetamethodEvent);
-                    break;
-                case LuaOpcode.BandK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseAnd, BitwiseAndMetamethodEvent);
-                    break;
-                case LuaOpcode.BorK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseOr, BitwiseOrMetamethodEvent);
-                    break;
-                case LuaOpcode.BXorK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseXor, BitwiseXorMetamethodEvent);
-                    break;
-                case LuaOpcode.ShlI:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, LuaValue.FromInteger(ToSignedC(instruction.C)), GetRegister(frame, instruction.B), TryShiftLeft, ShiftLeftMetamethodEvent);
-                    break;
-                case LuaOpcode.ShrI:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), LuaValue.FromInteger(ToSignedC(instruction.C)), TryShiftRight, ShiftRightMetamethodEvent);
-                    break;
-                case LuaOpcode.Add:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryAdd, AddMetamethodEvent);
-                    break;
-                case LuaOpcode.Sub:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TrySubtract, SubtractMetamethodEvent);
-                    break;
-                case LuaOpcode.Mul:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryMultiply, MultiplyMetamethodEvent);
-                    break;
-                case LuaOpcode.Mod:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryModulo, ModuloMetamethodEvent);
-                    break;
-                case LuaOpcode.Pow:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryPower, PowerMetamethodEvent);
-                    break;
-                case LuaOpcode.Div:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryDivide, DivideMetamethodEvent);
-                    break;
-                case LuaOpcode.IDiv:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryIntegerDivide, IntegerDivideMetamethodEvent);
-                    break;
-                case LuaOpcode.Band:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseAnd, BitwiseAndMetamethodEvent);
-                    break;
-                case LuaOpcode.Bor:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseOr, BitwiseOrMetamethodEvent);
-                    break;
-                case LuaOpcode.BXor:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseXor, BitwiseXorMetamethodEvent);
-                    break;
-                case LuaOpcode.Shl:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftLeft, ShiftLeftMetamethodEvent);
-                    break;
-                case LuaOpcode.Shr:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftRight, ShiftRightMetamethodEvent);
-                    break;
-                case LuaOpcode.Unm:
-                    ExecuteUnaryArithmetic(frame, instruction, TryUnaryMinus, UnaryMinusMetamethodEvent);
-                    break;
-                case LuaOpcode.BNot:
-                    ExecuteUnaryArithmetic(frame, instruction, TryBitwiseNot, BitwiseNotMetamethodEvent);
-                    break;
-                case LuaOpcode.Not:
-                    SetRegister(frame, instruction.A, LuaValue.FromBoolean(!IsTruthy(GetRegister(frame, instruction.B))));
-                    break;
-                case LuaOpcode.Len:
-                    ExecuteLength(frame, instruction);
-                    break;
-                case LuaOpcode.Concat:
-                    ExecuteConcat(frame, instruction);
-                    break;
-                case LuaOpcode.Close:
-                    RethrowIfNeeded(CloseResourcesFrom(frame, instruction.A));
-                    break;
-                case LuaOpcode.Tbc:
-                    ExecuteToBeClosed(prototype, frame, instruction);
-                    break;
-                case LuaOpcode.Call:
-                    ExecuteCall(frame, instruction);
-                    break;
-                case LuaOpcode.TailCall:
-                    if (ExecuteTailCall(frame, instruction, hostCallId, out var tailCallResults))
-                    {
-                        return tailCallResults;
-                    }
-
-                    break;
-                case LuaOpcode.Return:
-                    if (TryCompleteFrame(frame, ExecuteReturn(frame, instruction), hostCallId, out var returnResults))
-                    {
-                        return returnResults;
-                    }
-
-                    break;
-                case LuaOpcode.Return0:
-                    if (TryCompleteFrame(frame, [], hostCallId, out var return0Results))
-                    {
-                        return return0Results;
-                    }
-
-                    break;
-                case LuaOpcode.Return1:
-                    if (TryCompleteFrame(frame, [GetRegister(frame, instruction.A)], hostCallId, out var return1Results))
-                    {
-                        return return1Results;
-                    }
-
-                    break;
-                case LuaOpcode.ForLoop:
-                    ExecuteForLoop(frame, instruction);
-                    break;
-                case LuaOpcode.ForPrep:
-                    ExecuteForPrep(frame, instruction);
-                    break;
-                case LuaOpcode.TForPrep:
-                    ExecuteTForPrep(frame, instruction);
-                    break;
-                case LuaOpcode.TForCall:
-                    ExecuteTForCall(frame, instruction);
-                    break;
-                case LuaOpcode.TForLoop:
-                    ExecuteTForLoop(frame, instruction);
-                    break;
-                case LuaOpcode.SetList:
-                    ExecuteSetList(frame, prototype, instruction);
-                    break;
-                case LuaOpcode.Closure:
-                    ExecuteClosureInstruction(frame, prototype, instruction);
-                    break;
-                case LuaOpcode.VarArg:
-                    ExecuteVarArg(frame, instruction);
-                    break;
-                case LuaOpcode.GetVArg:
-                    ExecuteGetVarArg(frame, instruction);
-                    break;
-                case LuaOpcode.VarArgPrep:
-                    ExecuteVarArgPrep(frame, prototype);
-                    break;
-                case LuaOpcode.ErrNNil:
-                    ExecuteErrNNil(prototype, frame, instruction);
-                    break;
-                case LuaOpcode.Jmp:
-                    ExecuteJump(frame, instruction);
-                    break;
-                case LuaOpcode.Eq:
-                    ExecuteEqualityComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K);
-                    break;
-                case LuaOpcode.Lt:
-                    ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison < 0, LessThanMetamethodEvent);
-                    break;
-                case LuaOpcode.Le:
-                    ExecuteRegisterComparison(frame, GetRegister(frame, instruction.A), GetRegister(frame, instruction.B), instruction.K, static comparison => comparison <= 0, LessEqualMetamethodEvent);
-                    break;
-                case LuaOpcode.EqK:
-                    ExecuteEqualityComparison(frame, GetRegister(frame, instruction.A), ConvertConstant(prototype.Constants[instruction.B]), instruction.K);
-                    break;
-                case LuaOpcode.EqI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left == right, allowNonNumericAsFalse: true);
-                    break;
-                case LuaOpcode.LtI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left < right, metamethodEvent: LessThanMetamethodEvent);
-                    break;
-                case LuaOpcode.LeI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left <= right, metamethodEvent: LessEqualMetamethodEvent);
-                    break;
-                case LuaOpcode.GtI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left > right, metamethodEvent: LessThanMetamethodEvent, flipOperands: true);
-                    break;
-                case LuaOpcode.GeI:
-                    ExecuteImmediateComparison(frame, instruction, static (left, right) => left >= right, metamethodEvent: LessEqualMetamethodEvent, flipOperands: true);
-                    break;
-                case LuaOpcode.Test:
-                    ExecuteConditionalJump(frame, IsTruthy(GetRegister(frame, instruction.A)), instruction.K);
-                    break;
-                case LuaOpcode.TestSet:
-                    ExecuteTestSet(frame, instruction);
-                    break;
-                case LuaOpcode.MmBin:
-                    ExecuteMetamethodBinary(frame, prototype, instruction);
-                    break;
-                case LuaOpcode.MmBinI:
-                    ExecuteMetamethodBinaryImmediate(frame, prototype, instruction);
-                    break;
-                case LuaOpcode.MmBinK:
-                    ExecuteMetamethodBinaryConstant(frame, prototype, instruction);
-                    break;
-                default:
-                    throw new NotImplementedException($"Opcode '{instruction.Name}' is not implemented yet.");
+                continue;
             }
         }
     }
@@ -637,12 +670,31 @@ public sealed partial class LuaVirtualMachine
     {
         completedResults = [];
 
+        if (StartCloseContinuation(
+                frame,
+                registerIndex: 0,
+                LuaPendingCloseContinuationKind.Return,
+                results))
+        {
+            return false;
+        }
+
         var pendingException = CloseResourcesFrom(frame, 0);
         if (pendingException is not null)
         {
             ExceptionDispatchInfo.Capture(pendingException).Throw();
         }
 
+        return CompleteFrameAfterClose(frame, results, hostCallId, out completedResults);
+    }
+
+    private bool CompleteFrameAfterClose(
+        CallFrame frame,
+        IReadOnlyList<LuaValue> results,
+        int hostCallId,
+        out LuaValue[] completedResults)
+    {
+        completedResults = [];
         ExecuteReturnHook(frame);
         State.PopFrame();
         State.Stack.SetTop(frame.BaseIndex);
@@ -665,6 +717,8 @@ public sealed partial class LuaVirtualMachine
                 var callerFrame = frame.ReturnTarget.CallerFrame
                     ?? throw new InvalidOperationException("Register return target is missing the caller frame.");
                 WriteCallResults(callerFrame, frame.ReturnTarget.RegisterIndex, frame.ReturnTarget.ResultCount, results);
+                return false;
+            case LuaCallReturnTargetKind.CloseContinuation:
                 return false;
             case LuaCallReturnTargetKind.None:
                 return false;
@@ -737,5 +791,24 @@ public sealed partial class LuaVirtualMachine
         var nestedClosure = CreateClosure(nestedPrototype, frame);
 
         SetRegister(frame, instruction.A, LuaValue.FromFunction(nestedClosure));
+    }
+
+    private bool TryHandlePendingCloseException(Exception exception)
+    {
+        var frames = State.CurrentThread.Frames;
+        for (var index = frames.Count - 1; index >= 0; index--)
+        {
+            if (frames[index].PendingClose is null)
+            {
+                continue;
+            }
+
+            var frameDepth = index + 1;
+            var cleanedException = CleanupFramesToDepth(frameDepth, exception) ?? exception;
+            frames[index].PendingClose!.PendingException = AnnotateCloseError(cleanedException);
+            return true;
+        }
+
+        return false;
     }
 }

@@ -57,7 +57,7 @@ dotnet sln lua-net.sln list
 | 第 15 步 | 字节码序列化与 REPL | 已完成 |
 | 第 16 步 | 兼容性收口 | 进行中 |
 
-当前 284 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
+当前 287 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
 
 ## 仓库结构
 
@@ -96,11 +96,11 @@ test/
 ├── Lua.Runtime.Tests/        运行时单元测试（85 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（15 个）
 ├── Lua.Syntax.Tests/         词法分析与语法分析测试
-├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（37 个）
+├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（40 个）
 ├── Lua.VM.Tests/             VM 集成测试（105 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（50 份）
+docs/                         阶段规划和设计文档（51 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -235,6 +235,7 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 048 | [local-variable-attributes](docs/048-step-16-local-variable-attributes.md) | 局部变量 `<const>` / `<close>`、作用域 `CLOSE` 与 `locals.lua` 缺口推进 |
 | 049 | [locals-close-runtime](docs/049-step-16-locals-close-runtime.md) | `goto` / `label`、`__close` / `error` / `traceback` 语义修正与 `locals.lua` 当前 hook 缺口 |
 | 050 | [return-hooks](docs/050-step-16-return-hooks.md) | `debug.sethook` / `gethook`、return hook 触发顺序与 `locals.lua` 当前 coroutine close/yield 缺口 |
+| 051 | [coroutine-close-continuations](docs/051-step-16-coroutine-close-continuations.md) | coroutine close continuation、`return` / `CLOSE` suspend-resume 与当前 protected-call 恢复缺口 |
 
 ## 开发方式
 
