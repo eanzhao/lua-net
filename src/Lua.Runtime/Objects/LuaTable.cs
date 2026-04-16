@@ -242,6 +242,12 @@ public sealed class LuaTable : IMetatableOwner
     public bool TryGetValue(LuaValue key, out LuaValue value)
     {
         RefreshEntries();
+        if (key.IsNil)
+        {
+            value = LuaValue.Nil;
+            return false;
+        }
+
         var normalizedKey = NormalizeKey(key);
         if (_strongKeyEntries.TryGetValue(normalizedKey, out var strongEntry))
         {
@@ -614,18 +620,14 @@ public sealed class LuaTable : IMetatableOwner
 
         if (key.Kind == LuaValueKind.Float)
         {
-            var number = key.AsFloat();
-            if (double.IsNaN(number))
+            if (double.IsNaN(key.AsFloat()))
             {
                 throw new LuaRuntimeException(LuaValue.FromString("table index is NaN"));
             }
 
-            if (double.IsFinite(number) &&
-                number >= long.MinValue &&
-                number <= long.MaxValue &&
-                Math.Truncate(number) == number)
+            if (LuaValueHelper.TryGetInteger(key, out var integer))
             {
-                return LuaValue.FromInteger((long)number);
+                return LuaValue.FromInteger(integer);
             }
         }
 

@@ -7,6 +7,7 @@ namespace Lua.Runtime.Execution;
 
 public sealed partial class LuaState
 {
+    private static readonly UTF8Encoding Utf8FileEncoding = new(encoderShouldEmitUTF8Identifier: false);
     private LuaTable? _ioDefaultInput;
     private LuaTable? _ioDefaultOutput;
 
@@ -45,6 +46,7 @@ public sealed partial class LuaState
     private LuaValue[] IoOpen(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         var filename = RequireStringArgument(arguments, 0, "io.open");
+        var resolvedFilename = state.ResolveFilePath(filename);
         var mode = arguments.Count >= 2 && arguments[1].Kind == LuaValueKind.String
             ? arguments[1].AsString()
             : "r";
@@ -57,28 +59,28 @@ public sealed partial class LuaState
             switch (mode)
             {
                 case "r":
-                    reader = new StreamReader(filename, Encoding.UTF8);
+                    reader = new StreamReader(resolvedFilename, Utf8FileEncoding);
                     break;
                 case "w":
-                    writer = new StreamWriter(filename, false, Encoding.UTF8);
+                    writer = new StreamWriter(resolvedFilename, false, Utf8FileEncoding);
                     break;
                 case "a":
-                    writer = new StreamWriter(filename, true, Encoding.UTF8);
+                    writer = new StreamWriter(resolvedFilename, true, Utf8FileEncoding);
                     break;
                 case "r+":
-                    var rStream = new FileStream(filename, FileMode.Open, FileAccess.ReadWrite);
-                    reader = new StreamReader(rStream, Encoding.UTF8, leaveOpen: true);
-                    writer = new StreamWriter(rStream, Encoding.UTF8, leaveOpen: true);
+                    var rStream = new FileStream(resolvedFilename, FileMode.Open, FileAccess.ReadWrite);
+                    reader = new StreamReader(rStream, Utf8FileEncoding, leaveOpen: true);
+                    writer = new StreamWriter(rStream, Utf8FileEncoding, leaveOpen: true);
                     break;
                 case "w+":
-                    var wStream = new FileStream(filename, FileMode.Create, FileAccess.ReadWrite);
-                    reader = new StreamReader(wStream, Encoding.UTF8, leaveOpen: true);
-                    writer = new StreamWriter(wStream, Encoding.UTF8, leaveOpen: true);
+                    var wStream = new FileStream(resolvedFilename, FileMode.Create, FileAccess.ReadWrite);
+                    reader = new StreamReader(wStream, Utf8FileEncoding, leaveOpen: true);
+                    writer = new StreamWriter(wStream, Utf8FileEncoding, leaveOpen: true);
                     break;
                 case "a+":
-                    var aStream = new FileStream(filename, FileMode.Append, FileAccess.ReadWrite);
-                    reader = new StreamReader(aStream, Encoding.UTF8, leaveOpen: true);
-                    writer = new StreamWriter(aStream, Encoding.UTF8, leaveOpen: true);
+                    var aStream = new FileStream(resolvedFilename, FileMode.Append, FileAccess.ReadWrite);
+                    reader = new StreamReader(aStream, Utf8FileEncoding, leaveOpen: true);
+                    writer = new StreamWriter(aStream, Utf8FileEncoding, leaveOpen: true);
                     break;
                 default:
                     return [LuaValue.Nil, LuaValue.FromString($"invalid mode '{mode}'")];
@@ -150,7 +152,7 @@ public sealed partial class LuaState
         }
 
         _ioDefaultInput ??= CreateFileHandle(
-            new StreamReader(Console.OpenStandardInput(), Encoding.UTF8), null, "stdin");
+            new StreamReader(Console.OpenStandardInput(), Utf8FileEncoding), null, "stdin");
 
         return [LuaValue.FromTable(_ioDefaultInput)];
     }
@@ -177,7 +179,7 @@ public sealed partial class LuaState
         }
 
         _ioDefaultOutput ??= CreateFileHandle(
-            null, new StreamWriter(Console.OpenStandardOutput(), Encoding.UTF8) { AutoFlush = true }, "stdout");
+            null, new StreamWriter(Console.OpenStandardOutput(), Utf8FileEncoding) { AutoFlush = true }, "stdout");
 
         return [LuaValue.FromTable(_ioDefaultOutput)];
     }

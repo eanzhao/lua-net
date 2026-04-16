@@ -98,7 +98,7 @@ public static class LuaCompiler
                 lastLineDefined: 0,
                 parameterCount: 0,
                 syntax.Range,
-                flags: 0);
+                flags: VarArgFunctionFlag);
         }
 
         public LuaPrototype CompileFunction(LuaFunctionBodySyntax body, bool injectSelf)

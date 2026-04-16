@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Lua.Cli;
 using Shouldly;
 
@@ -60,7 +61,26 @@ public class OfficialLuaCompatibilityTests
         result.Error.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void OfficialAttrib_ShouldRunSuccessfully()
+    {
+        var result = RunOfficialScript("attrib.lua");
+
+        result.ExitCode.ShouldBe(0);
+        result.Output.ShouldContain("testing require");
+        result.Output.ShouldContain("testing external strings");
+        result.Output.ShouldContain("OK");
+        result.Error.ShouldBeEmpty();
+    }
+
     private static ScriptRunResult RunOfficialScript(string scriptPath)
+    {
+        return string.Equals(scriptPath, "attrib.lua", StringComparison.Ordinal)
+            ? RunOfficialScriptViaCliProcess(scriptPath)
+            : RunOfficialScriptInProcess(scriptPath);
+    }
+
+    private static ScriptRunResult RunOfficialScriptInProcess(string scriptPath)
     {
         var output = new StringWriter();
         var error = new StringWriter();
@@ -69,7 +89,7 @@ public class OfficialLuaCompatibilityTests
             output: output,
             error: error);
         var suiteRoot = GetOfficialSuiteRoot();
-
+        application.VirtualMachine.State.WorkingDirectory = suiteRoot;
         application.VirtualMachine.State.FileReader = path =>
         {
             var fullPath = Path.IsPathRooted(path)
@@ -81,6 +101,54 @@ public class OfficialLuaCompatibilityTests
 
         var exitCode = application.Run([scriptPath]);
         return new ScriptRunResult(exitCode, output.ToString(), error.ToString());
+    }
+
+    private static ScriptRunResult RunOfficialScriptViaCliProcess(string scriptPath)
+    {
+        var suiteRoot = GetOfficialSuiteRoot();
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                WorkingDirectory = suiteRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            }
+        };
+
+        process.StartInfo.ArgumentList.Add(typeof(LuaCliApplication).Assembly.Location);
+        foreach (var argument in BuildCliArguments(scriptPath))
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
+
+        process.Start();
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        return new ScriptRunResult(process.ExitCode, output, error);
+    }
+
+    private static IReadOnlyList<string> BuildCliArguments(string scriptPath)
+    {
+        if (!string.Equals(scriptPath, "attrib.lua", StringComparison.Ordinal))
+        {
+            return [scriptPath];
+        }
+
+        const string preloadChunk = """
+package.preload["lib2-v2"] = function (...)
+  return {
+    id = function (...) return true end,
+    newstr = function (s) return s end,
+  }
+end
+""";
+
+        return ["-e", preloadChunk, scriptPath];
     }
 
     private static string GetOfficialSuiteRoot()

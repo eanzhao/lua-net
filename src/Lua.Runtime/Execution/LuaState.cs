@@ -139,6 +139,8 @@ public sealed partial class LuaState
 
     public Action<string> WarningOutput { get; set; } = static _ => { };
 
+    public string WorkingDirectory { get; set; } = Environment.CurrentDirectory;
+
     public Func<string, byte[]> FileReader { get; set; } = static path => File.ReadAllBytes(path);
 
     public IReadOnlyList<CallFrame> Frames => CurrentThread.Frames;
@@ -2553,7 +2555,7 @@ public sealed partial class LuaState
     {
         try
         {
-            bytes = FileReader(fileName);
+            bytes = TryReadFileBytes(fileName);
             errorMessage = string.Empty;
             return true;
         }
@@ -2563,6 +2565,34 @@ public sealed partial class LuaState
             errorMessage = $"cannot open {fileName}: {ex.Message}";
             return false;
         }
+    }
+
+    private byte[] TryReadFileBytes(string fileName)
+    {
+        try
+        {
+            return FileReader(fileName);
+        }
+        catch when (!Path.IsPathRooted(fileName))
+        {
+            var resolvedPath = ResolveFilePath(fileName);
+            if (string.Equals(resolvedPath, fileName, StringComparison.Ordinal))
+            {
+                throw;
+            }
+
+            return FileReader(resolvedPath);
+        }
+    }
+
+    private string ResolveFilePath(string path)
+    {
+        if (string.IsNullOrEmpty(path) || Path.IsPathRooted(path))
+        {
+            return path;
+        }
+
+        return Path.GetFullPath(Path.Combine(WorkingDirectory, path));
     }
 
     private static byte[] EncodeLuaString(string text)
@@ -2595,9 +2625,7 @@ public sealed partial class LuaState
             return left == right;
         }
 
-        return TryGetNumber(left, out var leftNumber) &&
-               TryGetNumber(right, out var rightNumber) &&
-               leftNumber.Equals(rightNumber);
+        return TryCompareNumbers(left, right, out var comparison) && comparison == 0;
     }
 
 

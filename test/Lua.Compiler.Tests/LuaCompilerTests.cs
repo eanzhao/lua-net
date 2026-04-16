@@ -171,6 +171,112 @@ return f(5, 10, 20, 30)
     }
 
     [Fact]
+    public void Compile_ShouldTreatMainChunkAsVararg()
+    {
+        const string source = """
+local t = {...}
+return select("#", ...), t[1], t[2], t[3]
+""";
+
+        var vm = new LuaVirtualMachine();
+        var chunk = LuaCompiler.Compile(source, "sample.lua");
+        var closure = vm.CreateClosure(chunk.MainFunction);
+        var results = vm.Call(
+            closure,
+            [LuaValue.FromString("names"), LuaValue.FromString("libs/names.lua")]);
+
+        results.Length.ShouldBe(4);
+        results[0].AsInteger().ShouldBe(2);
+        results[1].AsString().ShouldBe("names");
+        results[2].AsString().ShouldBe("libs/names.lua");
+        results[3].IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldUseArithmeticRuntimeErrorTextForMissingOperands()
+    {
+        const string source = """
+local st, msg = pcall(function ()
+    local a = nil
+    return a + 1
+end)
+
+return tostring(st), string.find(msg, "arithmetic") ~= nil
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(2);
+        results[0].AsString().ShouldBe("false");
+        results[1].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldKeepLargeRoundedFloatsDistinctFromNeighborIntegers()
+    {
+        const string source = """
+local a = {}
+local maxint = math.maxinteger
+while maxint ~= (maxint + 0.0) or (maxint - 1) ~= (maxint - 1.0) do
+  maxint = maxint // 2
+end
+
+local maxintF = maxint + 0.0
+a[maxintF] = 10
+a[maxintF - 1.0] = 11
+a[-maxintF] = 12
+a[-maxintF + 1.0] = 13
+
+return maxint, a[maxint], a[maxint - 1], a[-maxint], a[-maxint + 1]
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(5);
+        results[0].AsInteger().ShouldBeLessThan(long.MaxValue);
+        results[1].AsInteger().ShouldBe(10);
+        results[2].AsInteger().ShouldBe(11);
+        results[3].AsInteger().ShouldBe(12);
+        results[4].AsInteger().ShouldBe(13);
+    }
+
+    [Fact]
+    public void Compile_ShouldTreatNegativeTwoToSixtyThreeAsIntegerMinimum()
+    {
+        const string source = """
+local shifted = load("return -1 >> -9223372036854775808")()
+return shifted, math.type(-9223372036854775808)
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(2);
+        results[0].AsInteger().ShouldBe(0);
+        results[1].AsString().ShouldBe("integer");
+    }
+
+    [Fact]
+    public void Compile_ShouldTreatExactlyRepresentableFloatPowersAsEqualToIntegers()
+    {
+        const string source = """
+local a = -3
+a = a + 1125899906842627
+local t = {}
+t[2^50] = "match"
+
+return a == 2^50, a <= 2^50, a >= 2^50, t[1125899906842624]
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(4);
+        results[0].AsBoolean().ShouldBeTrue();
+        results[1].AsBoolean().ShouldBeTrue();
+        results[2].AsBoolean().ShouldBeTrue();
+        results[3].AsString().ShouldBe("match");
+    }
+
+    [Fact]
     public void Compile_ShouldSupportNumericForWithDefaultStep()
     {
         const string source = """

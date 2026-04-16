@@ -108,9 +108,7 @@ public sealed partial class LuaVirtualMachine
     {
         if (left.Kind != right.Kind)
         {
-            return TryGetNumber(left, out var leftNumber) &&
-                   TryGetNumber(right, out var rightNumber) &&
-                   leftNumber.Equals(rightNumber);
+            return TryCompareNumbers(left, right, out var comparison) && comparison == 0;
         }
 
         return left == right;
@@ -120,9 +118,7 @@ public sealed partial class LuaVirtualMachine
     {
         if (left.Kind != right.Kind)
         {
-            return TryGetNumber(left, out var leftNumber) &&
-                   TryGetNumber(right, out var rightNumber) &&
-                   leftNumber.Equals(rightNumber);
+            return TryCompareNumbers(left, right, out var comparison) && comparison == 0;
         }
 
         if (left == right)
@@ -150,9 +146,8 @@ public sealed partial class LuaVirtualMachine
             return true;
         }
 
-        if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
+        if (TryCompareNumbers(left, right, out comparison))
         {
-            comparison = leftNumber.CompareTo(rightNumber);
             return true;
         }
 

@@ -65,6 +65,17 @@ public class LuaTableTests
     }
 
     [Fact]
+    public void TryGetValue_ShouldNormalizeLargeExactlyRepresentableFloatKeys()
+    {
+        var table = new LuaTable();
+
+        table.SetValue(LuaValue.FromFloat(1125899906842624.0), LuaValue.FromString("lua"));
+
+        table.TryGetValue(LuaValue.FromInteger(1125899906842624), out var value).ShouldBeTrue();
+        value.AsString().ShouldBe("lua");
+    }
+
+    [Fact]
     public void SetValue_ShouldRejectNilKey()
     {
         var table = new LuaTable();
@@ -73,6 +84,15 @@ public class LuaTableTests
             table.SetValue(LuaValue.Nil, LuaValue.FromInteger(1)));
 
         exception.ErrorObject.AsString().ShouldBe("table index is nil");
+    }
+
+    [Fact]
+    public void GetValue_ShouldReturnNilForNilKey()
+    {
+        var table = new LuaTable();
+
+        table.GetValue(LuaValue.Nil).IsNil.ShouldBeTrue();
+        table.TryGetValue(LuaValue.Nil, out _).ShouldBeFalse();
     }
 
     [Fact]

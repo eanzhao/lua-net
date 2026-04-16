@@ -11,7 +11,7 @@ public sealed partial class LuaState
     private const string PackageNameSeparator = ".";
     private const string PackageIgnoreMark = "-";
     private const string PackageOpenFunctionPrefix = "luaopen_";
-    private const string PackageLoadLibOpenErrorKind = "open";
+    private const string PackageLoadLibAbsentErrorKind = "absent";
     private const string PackageLoadLibInitErrorKind = "init";
     private readonly HashSet<string> _registeredNativeLibraries = new(StringComparer.Ordinal);
     private readonly Dictionary<(string LibraryPath, string FunctionName), LuaClosure> _registeredNativeLibraryClosures = [];
@@ -187,14 +187,17 @@ public sealed partial class LuaState
 
     private bool DoesSearchPathCandidateExist(string candidate)
     {
-        if (_registeredNativeLibraries.Contains(candidate) || File.Exists(candidate))
+        var resolvedCandidate = ResolveFilePath(candidate);
+        if (_registeredNativeLibraries.Contains(candidate) ||
+            _registeredNativeLibraries.Contains(resolvedCandidate) ||
+            File.Exists(resolvedCandidate))
         {
             return true;
         }
 
         try
         {
-            FileReader(candidate);
+            TryReadFileBytes(candidate);
             return true;
         }
         catch
@@ -230,7 +233,7 @@ public sealed partial class LuaState
                 return true;
             }
 
-            if (errorKind == PackageLoadLibOpenErrorKind)
+            if (errorKind == PackageLoadLibAbsentErrorKind)
             {
                 return false;
             }
@@ -249,11 +252,13 @@ public sealed partial class LuaState
         out string errorMessage,
         out string errorKind)
     {
-        if (!_registeredNativeLibraries.Contains(libraryPath))
+        var resolvedLibraryPath = ResolveFilePath(libraryPath);
+        if (!_registeredNativeLibraries.Contains(libraryPath) &&
+            !_registeredNativeLibraries.Contains(resolvedLibraryPath))
         {
             loader = LuaValue.Nil;
             errorMessage = $"cannot open {libraryPath}: native library is not registered";
-            errorKind = PackageLoadLibOpenErrorKind;
+            errorKind = PackageLoadLibAbsentErrorKind;
             return false;
         }
 
@@ -265,7 +270,8 @@ public sealed partial class LuaState
             return true;
         }
 
-        if (_registeredNativeLibraryClosures.TryGetValue((libraryPath, functionName), out var closure))
+        if (_registeredNativeLibraryClosures.TryGetValue((libraryPath, functionName), out var closure) ||
+            _registeredNativeLibraryClosures.TryGetValue((resolvedLibraryPath, functionName), out closure))
         {
             loader = LuaValue.FromFunction(closure);
             errorMessage = string.Empty;

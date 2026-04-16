@@ -979,6 +979,42 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void LoadFile_ShouldResolveRelativePathsAgainstWorkingDirectory()
+    {
+        var state = new LuaState();
+        var loadfile = GetBaseFunction(state, "loadfile");
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"lua-net-loadfile-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            state.WorkingDirectory = tempDirectory;
+            var expectedPath = Path.Combine(tempDirectory, "module.lua");
+            var observedPaths = new List<string>();
+            state.FileReader = path =>
+            {
+                observedPaths.Add(path);
+                return path == expectedPath
+                    ? Encoding.Latin1.GetBytes("return 1")
+                    : throw new FileNotFoundException("missing");
+            };
+            state.SetTextChunkLoader((chunkBytes, chunkName, hasEnvironment, environment) =>
+                new LuaClosure(
+                    chunkName ?? "loaded",
+                    body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromInteger(1)])));
+
+            var result = InvokeBaseFunction(state, loadfile, LuaValue.FromString("module.lua"));
+
+            result.ShouldHaveSingleItem().Kind.ShouldBe(LuaValueKind.Function);
+            observedPaths.ShouldBe(["module.lua", expectedPath]);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void CollectGarbage_ShouldSupportModeSwitchingAndParameters()
     {
         var state = new LuaState();
@@ -1228,6 +1264,64 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void RelativeFileApis_ShouldUseWorkingDirectory()
+    {
+        var state = new LuaState();
+        var searchPath = GetLibraryFunction(state.PackageLibrary, "searchpath");
+        var ioOpen = GetLibraryFunction(state.IoLibrary, "open");
+        var osRename = GetLibraryFunction(state.OsLibrary, "rename");
+        var osRemove = GetLibraryFunction(state.OsLibrary, "remove");
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"lua-net-paths-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            state.WorkingDirectory = tempDirectory;
+            File.WriteAllText(Path.Combine(tempDirectory, "module.lua"), "return 1");
+
+            InvokeClosure(
+                state,
+                searchPath,
+                LuaValue.FromString("module"),
+                LuaValue.FromString("./?.lua"))
+                .ShouldHaveSingleItem()
+                .AsString().ShouldBe($"./module.lua");
+
+            var openResult = InvokeBaseFunction(
+                state,
+                ioOpen,
+                LuaValue.FromString("note.txt"),
+                LuaValue.FromString("w"));
+            var handle = openResult[0].AsTable();
+            var fileWrite = GetLibraryFunction(handle.Metatable!, "write");
+            var fileClose = GetLibraryFunction(handle.Metatable!, "close");
+
+            InvokeBaseFunction(state, fileWrite, openResult[0], LuaValue.FromString("hello"));
+            InvokeBaseFunction(state, fileClose, openResult[0]);
+
+            File.ReadAllText(Path.Combine(tempDirectory, "note.txt")).ShouldBe("hello");
+
+            InvokeBaseFunction(
+                state,
+                osRename,
+                LuaValue.FromString("note.txt"),
+                LuaValue.FromString("renamed.txt"))
+                .ShouldHaveSingleItem()
+                .AsBoolean().ShouldBeTrue();
+            File.Exists(Path.Combine(tempDirectory, "renamed.txt")).ShouldBeTrue();
+
+            InvokeBaseFunction(state, osRemove, LuaValue.FromString("renamed.txt"))
+                .ShouldHaveSingleItem()
+                .AsBoolean().ShouldBeTrue();
+            File.Exists(Path.Combine(tempDirectory, "renamed.txt")).ShouldBeFalse();
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void PackageLoadLib_AndRequire_ShouldUseRegisteredNativeLibraries()
     {
         var state = new LuaState();
@@ -1287,6 +1381,15 @@ public class LuaStateTests
         missingInit[0].IsNil.ShouldBeTrue();
         missingInit[1].AsString().ShouldBe($"cannot find symbol 'luaopen_missing' in native library '{directLibraryPath}'");
         missingInit[2].AsString().ShouldBe("init");
+
+        var missingLibrary = InvokeClosure(
+            state,
+            loadlib,
+            LuaValue.FromString($"./native/missing.{extension}"),
+            LuaValue.FromString("luaopen_missing"));
+
+        missingLibrary[0].IsNil.ShouldBeTrue();
+        missingLibrary[2].AsString().ShouldBe("absent");
 
         var directModule = InvokeBaseFunction(state, require, LuaValue.FromString("native_mod"));
         directModule.Length.ShouldBe(2);
@@ -1850,6 +1953,7 @@ public class LuaStateTests
 
             var fileClose = GetLibraryFunction(writeHandle.Metatable!, "close");
             InvokeBaseFunction(state, fileClose, writeResult[0]);
+            File.ReadAllBytes(tmpFile).ShouldBe(Encoding.UTF8.GetBytes("hello lua-net"));
 
             InvokeBaseFunction(state, ioType, writeResult[0])
                 .ShouldHaveSingleItem().AsString().ShouldBe("closed file");

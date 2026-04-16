@@ -30,13 +30,8 @@ public static class LuaValueHelper
                 return true;
             case LuaValueKind.Float:
             {
-                var number = value.AsFloat();
-                if (double.IsFinite(number) &&
-                    number >= long.MinValue &&
-                    number <= long.MaxValue &&
-                    Math.Truncate(number) == number)
+                if (TryConvertIntegralDoubleToInt64(value.AsFloat(), out result))
                 {
-                    result = (long)number;
                     return true;
                 }
 
@@ -46,6 +41,40 @@ public static class LuaValueHelper
 
         result = default;
         return false;
+    }
+
+    public static bool TryCompareNumbers(LuaValue left, LuaValue right, out int comparison)
+    {
+        switch (left.Kind, right.Kind)
+        {
+            case (LuaValueKind.Integer, LuaValueKind.Integer):
+                comparison = left.AsInteger().CompareTo(right.AsInteger());
+                return true;
+            case (LuaValueKind.Float, LuaValueKind.Float):
+            {
+                var leftNumber = left.AsFloat();
+                var rightNumber = right.AsFloat();
+                if (double.IsNaN(leftNumber) || double.IsNaN(rightNumber))
+                {
+                    comparison = default;
+                    return false;
+                }
+
+                comparison = leftNumber.CompareTo(rightNumber);
+                return true;
+            }
+            case (LuaValueKind.Integer, LuaValueKind.Float):
+                return TryCompareIntegerAndFloat(left.AsInteger(), right.AsFloat(), out comparison);
+            case (LuaValueKind.Float, LuaValueKind.Integer):
+            {
+                var success = TryCompareIntegerAndFloat(right.AsInteger(), left.AsFloat(), out comparison);
+                comparison = -comparison;
+                return success;
+            }
+            default:
+                comparison = default;
+                return false;
+        }
     }
 
     public static bool TryParseLuaStringNumber(string text, out LuaValue result)
@@ -172,7 +201,9 @@ public static class LuaValueHelper
         return value.Kind switch
         {
             LuaValueKind.Integer => (true, LuaValue.FromInteger(-value.AsInteger())),
-            LuaValueKind.Float => (true, LuaValue.FromFloat(-value.AsFloat())),
+            LuaValueKind.Float => value.AsFloat() == -(double)long.MinValue
+                ? (true, LuaValue.FromInteger(long.MinValue))
+                : (true, LuaValue.FromFloat(-value.AsFloat())),
             _ => (false, LuaValue.Nil)
         };
     }
@@ -266,6 +297,127 @@ public static class LuaValueHelper
         }
 
         return remainder;
+    }
+
+    private static bool TryCompareIntegerAndFloat(long integer, double number, out int comparison)
+    {
+        if (double.IsNaN(number))
+        {
+            comparison = default;
+            return false;
+        }
+
+        if (double.IsPositiveInfinity(number))
+        {
+            comparison = -1;
+            return true;
+        }
+
+        if (double.IsNegativeInfinity(number))
+        {
+            comparison = 1;
+            return true;
+        }
+
+        if (TryConvertIntegralDoubleToInt64(number, out var otherInteger))
+        {
+            comparison = integer.CompareTo(otherInteger);
+            return true;
+        }
+
+        var truncated = Math.Truncate(number);
+        if (!TryConvertIntegralDoubleToInt64(truncated, out var truncatedInteger))
+        {
+            comparison = number > 0d ? -1 : 1;
+            return true;
+        }
+
+        comparison = integer.CompareTo(truncatedInteger);
+        if (comparison != 0)
+        {
+            return true;
+        }
+
+        comparison = number > truncated ? -1 : 1;
+        return true;
+    }
+
+    private static bool TryConvertIntegralDoubleToInt64(double number, out long result)
+    {
+        if (!double.IsFinite(number))
+        {
+            result = default;
+            return false;
+        }
+
+        if (number == 0d)
+        {
+            result = 0;
+            return true;
+        }
+
+        var bits = (ulong)BitConverter.DoubleToInt64Bits(number);
+        var rawExponent = (int)((bits >> 52) & 0x7ffUL);
+        if (rawExponent == 0)
+        {
+            result = default;
+            return false;
+        }
+
+        var exponent = rawExponent - 1023;
+        if (exponent < 0 || exponent > 63)
+        {
+            result = default;
+            return false;
+        }
+
+        var significand = (bits & ((1UL << 52) - 1)) | (1UL << 52);
+        ulong magnitude;
+
+        if (exponent <= 52)
+        {
+            var fractionalBits = 52 - exponent;
+            var fractionalMask = (1UL << fractionalBits) - 1;
+            if ((significand & fractionalMask) != 0)
+            {
+                result = default;
+                return false;
+            }
+
+            magnitude = significand >> fractionalBits;
+        }
+        else
+        {
+            magnitude = significand << (exponent - 52);
+        }
+
+        var negative = (bits & (1UL << 63)) != 0;
+        if (negative)
+        {
+            if (magnitude == 1UL << 63)
+            {
+                result = long.MinValue;
+                return true;
+            }
+
+            if (magnitude > long.MaxValue)
+            {
+                result = default;
+                return false;
+            }
+
+            result = -(long)magnitude;
+            return true;
+        }
+
+        if (magnitude > long.MaxValue)
+        {
+            result = default;
+            return false;
+        }
+
+        result = (long)magnitude;
+        return true;
     }
 
     private static bool TryParseLuaDecimalNumber(ReadOnlySpan<char> text, out LuaValue result)

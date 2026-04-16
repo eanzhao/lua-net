@@ -72,6 +72,13 @@ public sealed partial class LuaVirtualMachine
             return metamethod;
         }
 
+        if (IsArithmeticMetamethodEvent(eventIndex))
+        {
+            var operand = IsArithmeticOperandCompatible(left) ? right : left;
+            throw new LuaRuntimeException(
+                LuaValue.FromString($"attempt to perform arithmetic on a {GetTypeName(operand)} value"));
+        }
+
         throw new LuaRuntimeException(
             LuaValue.FromString($"no metamethod '{metamethodName}' for {GetTypeName(left)} and {GetTypeName(right)}"));
     }
@@ -138,6 +145,17 @@ public sealed partial class LuaVirtualMachine
         }
 
         return MetamethodNames[eventIndex];
+    }
+
+    private static bool IsArithmeticMetamethodEvent(int eventIndex)
+    {
+        return eventIndex >= AddMetamethodEvent && eventIndex <= ShiftRightMetamethodEvent;
+    }
+
+    private static bool IsArithmeticOperandCompatible(LuaValue value)
+    {
+        return TryGetNumber(value, out _) ||
+               (value.Kind == LuaValueKind.String && TryParseLuaStringNumber(value.AsString(), out _));
     }
 
     private static bool HasFollowingMetamethodInstruction(CallFrame frame, LuaPrototype prototype)

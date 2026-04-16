@@ -69,7 +69,7 @@ public sealed partial class LuaState
         var filename = RequireStringArgument(arguments, 0, "os.remove");
         try
         {
-            File.Delete(filename);
+            File.Delete(state.ResolveFilePath(filename));
             return [LuaValue.FromBoolean(true)];
         }
         catch (Exception ex)
@@ -84,7 +84,7 @@ public sealed partial class LuaState
         var newName = RequireStringArgument(arguments, 1, "os.rename");
         try
         {
-            File.Move(oldName, newName);
+            File.Move(state.ResolveFilePath(oldName), state.ResolveFilePath(newName));
             return [LuaValue.FromBoolean(true)];
         }
         catch (Exception ex)
