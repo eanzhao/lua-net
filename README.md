@@ -57,7 +57,7 @@ dotnet sln lua-net.sln list
 | 第 15 步 | 字节码序列化与 REPL | 已完成 |
 | 第 16 步 | 兼容性收口 | 进行中 |
 
-当前 255 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
+当前 258 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
 
 ## 仓库结构
 
@@ -96,11 +96,11 @@ test/
 ├── Lua.Runtime.Tests/        运行时单元测试（83 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（15 个）
 ├── Lua.Syntax.Tests/         词法分析与语法分析测试
-├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（11 个）
+├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（14 个）
 ├── Lua.VM.Tests/             VM 集成测试（105 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（45 份）
+docs/                         阶段规划和设计文档（46 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -230,6 +230,7 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 |------|------|------|
 | 044 | [userdata-uservalues](docs/044-step-16-userdata-uservalues.md) | `LuaUserData` 多槽位 user value、`debug.getuservalue` / `setuservalue` |
 | 045 | [official-test-suite](docs/045-step-16-official-test-suite.md) | 官方 Lua 5.5.0 测试集接入、compatibility harness 与当前缺口量化 |
+| 046 | [vararg-functions](docs/046-step-16-vararg-functions.md) | vararg 函数定义、`...` 多返回编译与 `{...}` 表构造展开 |
 
 ## 开发方式
 

@@ -16,12 +16,12 @@ public class OfficialLuaCompatibilityTests
     }
 
     [Fact]
-    public void OfficialBitwise_ShouldCurrentlyStopAtVarargCompilerGap()
+    public void OfficialBitwise_ShouldCurrentlyStopAtForLoopCompilerGap()
     {
         var result = RunOfficialScript("bitwise.lua");
 
         result.ExitCode.ShouldBe(1);
-        result.Error.ShouldContain("vararg functions are not supported yet");
+        result.Error.ShouldContain("for loops are not supported yet");
     }
 
     private static ScriptRunResult RunOfficialScript(string scriptPath)

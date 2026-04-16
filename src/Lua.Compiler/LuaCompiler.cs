@@ -56,6 +56,8 @@ public static class LuaCompiler
     private sealed class FunctionCompiler(string sourceName, FunctionCompiler? parent)
     {
         private const string EnvironmentName = "_ENV";
+        private const byte VarArgFunctionFlag = 0b00000001;
+        private const byte VarArgTableFlag = 0b00000010;
         private readonly string _sourceName = sourceName;
         private readonly FunctionCompiler? _parent = parent;
         private readonly List<uint> _code = [];
@@ -90,16 +92,15 @@ public static class LuaCompiler
                 lineDefined: 0,
                 lastLineDefined: 0,
                 parameterCount: 0,
-                syntax.Range);
+                syntax.Range,
+                flags: 0);
         }
 
         public LuaPrototype CompileFunction(LuaFunctionBodySyntax body, bool injectSelf)
         {
             _fallbackPosition = body.Range.Start;
-            if (body.VarargParameter is not null)
-            {
-                throw CreateUnsupported(body.VarargParameter, "vararg functions are not supported yet");
-            }
+            var parameterCount = body.Parameters.Count + (injectSelf ? 1 : 0);
+            var flags = GetFunctionFlags(body);
 
             EnterScope();
 
@@ -113,6 +114,12 @@ public static class LuaCompiler
                 AddLocal(parameter.Identifier, parameter.Range.Start);
             }
 
+            if (body.VarargParameter?.Name is not null)
+            {
+                AddLocal(body.VarargParameter.Name.Identifier, body.VarargParameter.Name.Range.Start);
+                EmitVarArgPrep();
+            }
+
             CompileBlockStatements(body.Block.Statements);
             ExitScope();
 
@@ -124,11 +131,28 @@ public static class LuaCompiler
             return BuildPrototype(
                 lineDefined: body.Range.Start.Line,
                 lastLineDefined: body.Range.End.Line,
-                parameterCount: body.Parameters.Count + (injectSelf ? 1 : 0),
-                body.Range);
+                parameterCount,
+                body.Range,
+                flags);
         }
 
-        private LuaPrototype BuildPrototype(int lineDefined, int lastLineDefined, int parameterCount, LuaSourceRange range)
+        private static byte GetFunctionFlags(LuaFunctionBodySyntax body)
+        {
+            var flags = body.VarargParameter is not null ? VarArgFunctionFlag : (byte)0;
+            if (body.VarargParameter?.Name is not null)
+            {
+                flags |= VarArgTableFlag;
+            }
+
+            return flags;
+        }
+
+        private LuaPrototype BuildPrototype(
+            int lineDefined,
+            int lastLineDefined,
+            int parameterCount,
+            LuaSourceRange range,
+            byte flags)
         {
             if (parameterCount > byte.MaxValue)
             {
@@ -145,7 +169,7 @@ public static class LuaCompiler
                 LineDefined = lineDefined,
                 LastLineDefined = lastLineDefined,
                 NumberOfParameters = checked((byte)parameterCount),
-                Flags = 0,
+                Flags = flags,
                 MaxStackSize = checked((byte)_maxRegisterCount),
                 Code = _code.ToArray(),
                 Constants = _constants.ToArray(),
@@ -614,7 +638,7 @@ public static class LuaCompiler
             var lastExpression = statement.Expressions[^1];
             if (IsMultiResultExpression(lastExpression))
             {
-                CompileFunctionCall((LuaFunctionCallExpressionSyntax)lastExpression, startRegister + statement.Expressions.Count - 1, fixedResultCount: null, openResults: true);
+                CompileExpressionWithOpenResults(lastExpression, startRegister + statement.Expressions.Count - 1);
                 EmitReturnOpen(startRegister);
                 return;
             }
@@ -652,10 +676,33 @@ public static class LuaCompiler
                 return;
             }
 
+            if (expression is LuaVarargExpressionSyntax)
+            {
+                EmitVarArg(targetRegister, resultCount);
+                return;
+            }
+
             CompileExpressionInto(expression, targetRegister);
             if (resultCount > 1)
             {
                 EmitLoadNilRange(targetRegister + 1, resultCount - 1);
+            }
+        }
+
+        private void CompileExpressionWithOpenResults(LuaExpressionSyntax expression, int targetRegister)
+        {
+            ReserveRegisterRange(targetRegister, 1);
+
+            switch (expression)
+            {
+                case LuaFunctionCallExpressionSyntax functionCall:
+                    CompileFunctionCall(functionCall, targetRegister, fixedResultCount: null, openResults: true);
+                    return;
+                case LuaVarargExpressionSyntax:
+                    EmitVarArg(targetRegister, resultCount: null);
+                    return;
+                default:
+                    throw new InvalidOperationException($"Expression '{expression.GetType().Name}' does not support open results.");
             }
         }
 
@@ -708,8 +755,9 @@ public static class LuaCompiler
                     CompileExpressionInto(indexExpression.Index, keyRegister);
                     EmitGetTable(targetRegister, targetRegister, keyRegister);
                     return;
-                case LuaVarargExpressionSyntax varargExpression:
-                    throw CreateUnsupported(varargExpression, "vararg expressions are not supported yet");
+                case LuaVarargExpressionSyntax:
+                    EmitVarArg(targetRegister, resultCount: 1);
+                    return;
                 default:
                     throw CreateUnsupported(expression, $"unsupported expression '{expression.GetType().Name}'");
             }
@@ -835,10 +883,16 @@ public static class LuaCompiler
             EmitNewTable(targetRegister);
 
             var arrayIndex = 1;
-            foreach (var field in expression.Fields)
+            for (var fieldIndex = 0; fieldIndex < expression.Fields.Count; fieldIndex++)
             {
+                var field = expression.Fields[fieldIndex];
+                var isLastField = fieldIndex == expression.Fields.Count - 1;
+
                 switch (field)
                 {
+                    case LuaExpressionTableFieldSyntax expressionField when isLastField && IsMultiResultExpression(expressionField.Expression):
+                        CompileOpenSequentialTableField(targetRegister, arrayIndex, expressionField.Expression);
+                        break;
                     case LuaExpressionTableFieldSyntax expressionField:
                         CompileSequentialTableField(targetRegister, arrayIndex, expressionField.Expression);
                         arrayIndex++;
@@ -853,6 +907,12 @@ public static class LuaCompiler
                         throw CreateUnsupported(field, $"unsupported table field '{field.GetType().Name}'");
                 }
             }
+        }
+
+        private void CompileOpenSequentialTableField(int tableRegister, int arrayIndex, LuaExpressionSyntax value)
+        {
+            CompileExpressionWithOpenResults(value, tableRegister + 1);
+            EmitSetList(tableRegister, elementCount: 0, startIndex: arrayIndex - 1);
         }
 
         private void CompileSequentialTableField(int tableRegister, int arrayIndex, LuaExpressionSyntax value)
@@ -1208,7 +1268,7 @@ public static class LuaCompiler
                 var isLast = index == arguments.Arguments.Count - 1;
                 if (allowOpenLast && isLast && IsMultiResultExpression(argument))
                 {
-                    CompileFunctionCall((LuaFunctionCallExpressionSyntax)argument, currentRegister, fixedResultCount: null, openResults: true);
+                    CompileExpressionWithOpenResults(argument, currentRegister);
                     return 0;
                 }
 
@@ -1221,7 +1281,7 @@ public static class LuaCompiler
 
         private static bool IsMultiResultExpression(LuaExpressionSyntax expression)
         {
-            return expression is LuaFunctionCallExpressionSyntax;
+            return expression is LuaFunctionCallExpressionSyntax or LuaVarargExpressionSyntax;
         }
 
         private LuaConstant ParseNumberConstant(LuaNumberLiteralExpressionSyntax expression)
@@ -1501,8 +1561,36 @@ public static class LuaCompiler
 
         private void EmitNewTable(int targetRegister)
         {
-            _code.Add(EncodeAbc(LuaOpcode.NewTable, targetRegister, 0, 0));
+            _code.Add(EncodeAVbc(LuaOpcode.NewTable, targetRegister, 0, 0));
             _code.Add(EncodeAx(LuaOpcode.ExtraArg, 0));
+        }
+
+        private void EmitSetList(int tableRegister, int elementCount, int startIndex)
+        {
+            if (elementCount < 0)
+            {
+                throw new InvalidOperationException("SETLIST element count cannot be negative.");
+            }
+
+            if (startIndex < 0)
+            {
+                throw new InvalidOperationException("SETLIST start index cannot be negative.");
+            }
+
+            if (elementCount > LuaInstructionLayout.MaxArgVB)
+            {
+                throw CreateError(_fallbackPosition, "table constructor has too many pending list elements");
+            }
+
+            var extraArg = startIndex / (LuaInstructionLayout.MaxArgVC + 1);
+            var encodedStartIndex = startIndex % (LuaInstructionLayout.MaxArgVC + 1);
+            var usesExtraArg = extraArg != 0;
+
+            _code.Add(EncodeAVbc(LuaOpcode.SetList, tableRegister, elementCount, encodedStartIndex, usesExtraArg ? 1 : 0));
+            if (usesExtraArg)
+            {
+                _code.Add(EncodeAx(LuaOpcode.ExtraArg, extraArg));
+            }
         }
 
         private void EmitSelf(int targetRegister, int receiverRegister, int constantIndex)
@@ -1545,6 +1633,17 @@ public static class LuaCompiler
         private void EmitCall(int functionRegister, int functionAndArgumentCount, int resultOperand)
         {
             _code.Add(EncodeAbc(LuaOpcode.Call, functionRegister, functionAndArgumentCount, resultOperand));
+        }
+
+        private void EmitVarArg(int targetRegister, int? resultCount)
+        {
+            var resultOperand = resultCount is null ? 0 : resultCount.Value + 1;
+            _code.Add(EncodeAbc(LuaOpcode.VarArg, targetRegister, 0, resultOperand));
+        }
+
+        private void EmitVarArgPrep()
+        {
+            _code.Add(EncodeAbc(LuaOpcode.VarArgPrep, 0, 0, 0));
         }
 
         private void EmitReturn(int startRegister, int resultCount)
@@ -1615,6 +1714,16 @@ public static class LuaCompiler
                 ((uint)k << LuaInstructionLayout.PosK) |
                 ((uint)b << LuaInstructionLayout.PosB) |
                 ((uint)c << LuaInstructionLayout.PosC);
+        }
+
+        private static uint EncodeAVbc(LuaOpcode opcode, int a, int vb, int vc, int k = 0)
+        {
+            return
+                ((uint)opcode << LuaInstructionLayout.PosOp) |
+                ((uint)a << LuaInstructionLayout.PosA) |
+                ((uint)k << LuaInstructionLayout.PosK) |
+                ((uint)vb << LuaInstructionLayout.PosVB) |
+                ((uint)vc << LuaInstructionLayout.PosVC);
         }
 
         private static uint EncodeAbx(LuaOpcode opcode, int a, int bx)

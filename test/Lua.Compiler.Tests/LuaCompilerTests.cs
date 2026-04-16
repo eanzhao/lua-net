@@ -96,6 +96,81 @@ return t:add(1), t.answer, t[1], t[2]
     }
 
     [Fact]
+    public void Compile_ShouldSupportUnnamedVarargFunctions()
+    {
+        const string source = """
+local function spread(...)
+    local a, b, c = ...
+    local t = {...}
+    return a, b, c, t[1], t[2], t[3], t[4]
+end
+
+return spread(10, 20, 30)
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(7);
+        results[0].AsInteger().ShouldBe(10);
+        results[1].AsInteger().ShouldBe(20);
+        results[2].AsInteger().ShouldBe(30);
+        results[3].AsInteger().ShouldBe(10);
+        results[4].AsInteger().ShouldBe(20);
+        results[5].AsInteger().ShouldBe(30);
+        results[6].IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldForwardVarargIntoLastCallArgument()
+    {
+        const string source = """
+local function pack(...)
+    return {...}
+end
+
+local function forward(...)
+    return pack("head", ...)
+end
+
+local t = forward(10, 20, 30)
+return t[1], t[2], t[3], t[4], t[5]
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(5);
+        results[0].AsString().ShouldBe("head");
+        results[1].AsInteger().ShouldBe(10);
+        results[2].AsInteger().ShouldBe(20);
+        results[3].AsInteger().ShouldBe(30);
+        results[4].IsNil.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldSupportNamedVarargTableParameters()
+    {
+        const string source = """
+local function f(x, ...args)
+    local first, second = ...
+    args[2] = args[2] + x
+    return first, second, args[1], args[2], args[3], args.n
+end
+
+return f(5, 10, 20, 30)
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(6);
+        results[0].AsInteger().ShouldBe(10);
+        results[1].AsInteger().ShouldBe(20);
+        results[2].AsInteger().ShouldBe(10);
+        results[3].AsInteger().ShouldBe(25);
+        results[4].AsInteger().ShouldBe(30);
+        results[5].AsInteger().ShouldBe(3);
+    }
+
+    [Fact]
     public void LoadAndLoadFile_ShouldCompileTextChunks()
     {
         var vm = new LuaVirtualMachine();
