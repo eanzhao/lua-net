@@ -13,7 +13,7 @@ public sealed partial class LuaVirtualMachine
         var left = GetRegister(frame, instruction.B);
         var right = LuaValue.FromInteger(ToSignedC(instruction.C));
 
-        ExecuteBinaryArithmetic(frame, prototype, instruction, left, right, TryAdd);
+        ExecuteBinaryArithmetic(frame, prototype, instruction, left, right, TryAdd, AddMetamethodEvent);
     }
 
     private void ExecuteBinaryArithmetic(
@@ -22,7 +22,8 @@ public sealed partial class LuaVirtualMachine
         LuaInstruction instruction,
         LuaValue left,
         LuaValue right,
-        Func<LuaValue, LuaValue, (bool Success, LuaValue Result)> operation)
+        Func<LuaValue, LuaValue, (bool Success, LuaValue Result)> operation,
+        int metamethodEvent)
     {
         var (success, result) = operation(left, right);
         if (!success)
@@ -32,7 +33,8 @@ public sealed partial class LuaVirtualMachine
                 return;
             }
 
-            throw new NotImplementedException("Arithmetic metamethod dispatch is not implemented yet.");
+            SetRegister(frame, instruction.A, CallBinaryMetamethodResult(left, right, metamethodEvent));
+            return;
         }
 
         SetRegister(frame, instruction.A, result);
@@ -136,7 +138,7 @@ public sealed partial class LuaVirtualMachine
 
     private static (bool Success, LuaValue Result) TryShiftRight(LuaValue left, LuaValue right)
     {
-        return TryBinaryIntegerOperation(left, right, static (x, y) => LuaShiftLeft(x, -y));
+        return TryBinaryIntegerOperation(left, right, static (x, y) => LuaShiftRight(x, y));
     }
 
     private static (bool Success, LuaValue Result) TryBitwiseNot(LuaValue value)
@@ -166,12 +168,12 @@ public sealed partial class LuaVirtualMachine
     {
         if (shift < 0)
         {
-            if (shift <= -64)
+            if (shift == long.MinValue || shift <= -64)
             {
                 return 0;
             }
 
-            return value >> (int)(-shift);
+            return unchecked((long)(unchecked((ulong)value) >> (int)(-shift)));
         }
 
         if (shift >= 64)
@@ -179,7 +181,27 @@ public sealed partial class LuaVirtualMachine
             return 0;
         }
 
-        return value << (int)shift;
+        return unchecked((long)(unchecked((ulong)value) << (int)shift));
+    }
+
+    private static long LuaShiftRight(long value, long shift)
+    {
+        if (shift < 0)
+        {
+            if (shift == long.MinValue || shift <= -64)
+            {
+                return 0;
+            }
+
+            return unchecked((long)(unchecked((ulong)value) << (int)(-shift)));
+        }
+
+        if (shift >= 64)
+        {
+            return 0;
+        }
+
+        return unchecked((long)(unchecked((ulong)value) >> (int)shift));
     }
 
     private static bool TryGetConcatenationString(LuaValue value, out string result)

@@ -399,7 +399,14 @@ public static class LuaValueHelper
 
             if (sawFractionDigits && fractionDigitsAreZero)
             {
-                return TryParseLuaHexInteger(text[..dotIndex], negative, out result);
+                if (TryParseLuaHexIntegerExact(text[..dotIndex], negative, out var integer))
+                {
+                    result = LuaValue.FromInteger(integer);
+                    return true;
+                }
+
+                result = LuaValue.FromFloat(negative ? -integerPart : integerPart);
+                return true;
             }
 
             result = LuaValue.Nil;
@@ -429,6 +436,40 @@ public static class LuaValueHelper
         result = negative
             ? LuaValue.FromInteger(unchecked((long)(0UL - number)))
             : LuaValue.FromInteger(unchecked((long)number));
+        return true;
+    }
+
+    private static bool TryParseLuaHexIntegerExact(ReadOnlySpan<char> text, bool negative, out long result)
+    {
+        var prefixStart = text[0] is '+' or '-' ? 3 : 2;
+        var digits = text[prefixStart..];
+        if (!ulong.TryParse(digits, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var number))
+        {
+            result = default;
+            return false;
+        }
+
+        if (negative)
+        {
+            if (number > 0x8000000000000000UL)
+            {
+                result = default;
+                return false;
+            }
+
+            result = number == 0x8000000000000000UL
+                ? long.MinValue
+                : -(long)number;
+            return true;
+        }
+
+        if (number > long.MaxValue)
+        {
+            result = default;
+            return false;
+        }
+
+        result = (long)number;
         return true;
     }
 

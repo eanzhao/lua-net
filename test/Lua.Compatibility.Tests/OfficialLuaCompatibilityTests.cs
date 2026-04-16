@@ -16,12 +16,21 @@ public class OfficialLuaCompatibilityTests
     }
 
     [Fact]
-    public void OfficialBitwise_ShouldCurrentlyStopAtForLoopCompilerGap()
+    public void OfficialBitwise_ShouldRunSuccessfully()
     {
         var result = RunOfficialScript("bitwise.lua");
 
+        result.ExitCode.ShouldBe(0);
+        result.Error.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void OfficialLocals_ShouldCurrentlyStopAtVariableAttributeGap()
+    {
+        var result = RunOfficialScript("locals.lua");
+
         result.ExitCode.ShouldBe(1);
-        result.Error.ShouldContain("for loops are not supported yet");
+        result.Error.ShouldContain("variable attributes are not supported yet");
     }
 
     private static ScriptRunResult RunOfficialScript(string scriptPath)

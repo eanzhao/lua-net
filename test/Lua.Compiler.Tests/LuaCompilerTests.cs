@@ -171,6 +171,147 @@ return f(5, 10, 20, 30)
     }
 
     [Fact]
+    public void Compile_ShouldSupportNumericForWithDefaultStep()
+    {
+        const string source = """
+local sum = 0
+
+for i = 1, 5 do
+    sum = sum + i
+end
+
+return sum
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(15);
+    }
+
+    [Fact]
+    public void Compile_ShouldSupportNumericForWithBreak()
+    {
+        const string source = """
+local sum = 0
+
+for i = 1, 10, 2 do
+    if i == 5 then
+        break
+    end
+
+    sum = sum + i
+end
+
+return sum
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(4);
+    }
+
+    [Fact]
+    public void Compile_ShouldSupportFloatFor()
+    {
+        const string source = """
+local sum = 0.0
+
+for x = 1.5, 4.5, 1.5 do
+    sum = sum + x
+end
+
+return sum
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsFloat().ShouldBe(9d, 1e-12);
+    }
+
+    [Fact]
+    public void Compile_ShouldSupportGenericForWithExplicitIterator()
+    {
+        const string source = """
+local function iter(state, control)
+    local next = control + 1
+    if next <= state then
+        return next, next * 10
+    end
+
+    return nil
+end
+
+local sum = 0
+
+for i, v in iter, 3, 0 do
+    sum = sum + i + v
+end
+
+return sum
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(66);
+    }
+
+    [Fact]
+    public void Compile_ShouldSupportGenericForWithCallMultiResults()
+    {
+        const string source = """
+local sum = 0
+
+for _, value in pairs({10, 20, 30}) do
+    sum = sum + value
+end
+
+return sum
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(60);
+    }
+
+    [Fact]
+    public void Compile_ShouldUseLogicalRightShiftSemantics()
+    {
+        const string source = """
+local a = 0xF0F0F0F0F0F0F0F0
+return a >> 4, ~a, 0x12345678 >> -8, 0x12345678 << 8
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(4);
+        results[0].AsInteger().ShouldBe(results[1].AsInteger());
+        results[2].AsInteger().ShouldBe(results[3].AsInteger());
+    }
+
+    [Fact]
+    public void Compile_ShouldFallbackToStringBitwiseMetamethods()
+    {
+        const string source = """
+local smt = getmetatable("")
+smt.__band = function (x, y)
+    return tonumber(x) & tonumber(y)
+end
+
+return "0xAA.0" & "0xF0.0"
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsInteger().ShouldBe(0xA0);
+    }
+
+    [Fact]
     public void LoadAndLoadFile_ShouldCompileTextChunks()
     {
         var vm = new LuaVirtualMachine();

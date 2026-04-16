@@ -1408,6 +1408,7 @@ public class LuaStateTests
     {
         var state = new LuaState();
         var tonumber = GetBaseFunction(state, "tonumber");
+        var tointeger = state.MathLibrary.GetValue(LuaValue.FromString("tointeger")).AsFunction();
 
         InvokeBaseFunction(state, tonumber, LuaValue.FromString(" 0x10 "))
             .ShouldHaveSingleItem()
@@ -1418,6 +1419,13 @@ public class LuaStateTests
         InvokeBaseFunction(state, tonumber, LuaValue.FromString("0xF0.0"))
             .ShouldHaveSingleItem()
             .AsInteger().ShouldBe(240);
+        var oversizedHex = InvokeBaseFunction(state, tonumber, LuaValue.FromString("0xffffffffffffffff.0"))
+            .ShouldHaveSingleItem();
+        oversizedHex.Kind.ShouldBe(LuaValueKind.Float);
+        oversizedHex.AsFloat().ShouldBeGreaterThan((double)long.MaxValue);
+        InvokeBaseFunction(state, tointeger, LuaValue.FromString("0xffffffffffffffff.0"))
+            .ShouldHaveSingleItem()
+            .IsNil.ShouldBeTrue();
         InvokeBaseFunction(state, tonumber, LuaValue.FromString("3.5"))
             .ShouldHaveSingleItem()
             .AsFloat().ShouldBe(3.5d);

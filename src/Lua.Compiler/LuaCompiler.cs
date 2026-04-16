@@ -231,6 +231,12 @@ public static class LuaCompiler
                 case LuaBreakStatementSyntax breakStatement:
                     CompileBreak(breakStatement);
                     return;
+                case LuaNumericForStatementSyntax numericFor:
+                    CompileNumericFor(numericFor);
+                    return;
+                case LuaGenericForStatementSyntax genericFor:
+                    CompileGenericFor(genericFor);
+                    return;
                 case LuaLocalDeclarationStatementSyntax localDeclaration:
                     CompileLocalDeclaration(localDeclaration);
                     return;
@@ -247,10 +253,6 @@ public static class LuaCompiler
                     throw CreateUnsupported(label, "goto and labels are not supported yet");
                 case LuaGotoStatementSyntax @goto:
                     throw CreateUnsupported(@goto, "goto and labels are not supported yet");
-                case LuaNumericForStatementSyntax numericFor:
-                    throw CreateUnsupported(numericFor, "for loops are not supported yet");
-                case LuaGenericForStatementSyntax genericFor:
-                    throw CreateUnsupported(genericFor, "for loops are not supported yet");
                 case LuaGlobalDeclarationStatementSyntax globalDeclaration:
                     CompileGlobalDeclaration(globalDeclaration);
                     return;
@@ -348,6 +350,100 @@ public static class LuaCompiler
             }
 
             _loops.Peek().BreakJumps.Add(EmitJumpPlaceholder());
+        }
+
+        private void CompileNumericFor(LuaNumericForStatementSyntax statement)
+        {
+            var stateRegister = AllocatePersistentRegister();
+            var limitRegister = AllocatePersistentRegister();
+            var variableRegister = AllocatePersistentRegister();
+
+            CompileExpressionInto(statement.InitialValue, stateRegister);
+            CompileExpressionInto(statement.Limit, limitRegister);
+
+            if (statement.Step is null)
+            {
+                EmitLoadConstant(variableRegister, LuaConstant.FromInteger(1));
+            }
+            else
+            {
+                CompileExpressionInto(statement.Step, variableRegister);
+            }
+
+            var prepProgramCounter = EmitForPrepPlaceholder(stateRegister);
+            var bodyProgramCounter = CurrentProgramCounter;
+
+            EnterScope();
+            AddExistingLocal(statement.Name.Identifier, variableRegister, statement.Name.Range.Start);
+
+            _loops.Push(new LoopContext());
+            CompileBlockStatements(statement.Block.Statements);
+            var loop = _loops.Pop();
+
+            ExitScope();
+
+            var forLoopProgramCounter = EmitForLoop(stateRegister, bodyProgramCounter);
+            PatchForPrep(prepProgramCounter, stateRegister, forLoopProgramCounter);
+
+            var loopEnd = CurrentProgramCounter;
+            PatchJumps(loop.BreakJumps, loopEnd);
+        }
+
+        private void CompileGenericFor(LuaGenericForStatementSyntax statement)
+        {
+            if (statement.Names.Count > byte.MaxValue)
+            {
+                throw CreateError(statement.Range, "generic for loop has too many variables");
+            }
+
+            var iteratorRegister = AllocatePersistentRegister();
+            var stateRegister = AllocatePersistentRegister();
+            var controlRegister = AllocatePersistentRegister();
+            var firstLoopVariableRegister = AllocatePersistentRegister();
+
+            for (var index = 1; index < statement.Names.Count; index++)
+            {
+                AllocatePersistentRegister();
+            }
+
+            var expressionRegisters = EvaluateAssignmentValues(statement.Expressions, 3, statement.Range);
+            int? nilRegister = null;
+            for (var index = 0; index < 3; index++)
+            {
+                var sourceRegister = index < expressionRegisters.Count
+                    ? expressionRegisters[index]
+                    : nilRegister ??= LoadNilIntoTemp();
+
+                EmitMove(iteratorRegister + index, sourceRegister);
+            }
+
+            EmitLoadNilRange(firstLoopVariableRegister, 1);
+
+            var prepProgramCounter = EmitTForPrepPlaceholder(iteratorRegister);
+            var bodyProgramCounter = CurrentProgramCounter;
+
+            EnterScope();
+            for (var index = 0; index < statement.Names.Count; index++)
+            {
+                AddExistingLocal(
+                    statement.Names[index].Identifier,
+                    firstLoopVariableRegister + index,
+                    statement.Names[index].Range.Start);
+            }
+
+            _loops.Push(new LoopContext());
+            CompileBlockStatements(statement.Block.Statements);
+            var loop = _loops.Pop();
+
+            ExitScope();
+
+            var callProgramCounter = EmitTForCall(iteratorRegister, statement.Names.Count);
+            EmitTForLoop(iteratorRegister, bodyProgramCounter);
+            var closeProgramCounter = CurrentProgramCounter;
+            EmitClose(iteratorRegister);
+
+            PatchTForPrep(prepProgramCounter, iteratorRegister, callProgramCounter);
+            PatchJumps(loop.BreakJumps, closeProgramCounter);
         }
 
         private void CompileLocalDeclaration(LuaLocalDeclarationStatementSyntax statement)
@@ -1127,12 +1223,14 @@ public static class LuaCompiler
 
         private int AddLocal(string name, LuaSourcePosition position)
         {
-            var register = _persistentRegisterCount;
-            _persistentRegisterCount++;
-            _tempRegisterTop = Math.Max(_tempRegisterTop, _persistentRegisterCount);
-            TrackRegister(register);
+            var register = AllocatePersistentRegister();
             _visibleLocals.Add(new LocalInfo(name, register, position));
             return register;
+        }
+
+        private void AddExistingLocal(string name, int register, LuaSourcePosition position)
+        {
+            _visibleLocals.Add(new LocalInfo(name, register, position));
         }
 
         private void AddVisibleGlobalDeclarations(IReadOnlyList<GlobalDeclarationInfo> declarations)
@@ -1336,6 +1434,15 @@ public static class LuaCompiler
             return register;
         }
 
+        private int AllocatePersistentRegister()
+        {
+            var register = _persistentRegisterCount;
+            _persistentRegisterCount++;
+            _tempRegisterTop = Math.Max(_tempRegisterTop, _persistentRegisterCount);
+            TrackRegister(register);
+            return register;
+        }
+
         private int LoadConstantIntoTemp(LuaConstant constant)
         {
             var register = AllocateTemp();
@@ -1465,6 +1572,55 @@ public static class LuaCompiler
         {
             var offset = targetProgramCounter - (CurrentProgramCounter + 1);
             _code.Add(EncodeSJ(LuaOpcode.Jmp, offset));
+        }
+
+        private int EmitForPrepPlaceholder(int registerIndex)
+        {
+            var programCounter = CurrentProgramCounter;
+            _code.Add(EncodeAbx(LuaOpcode.ForPrep, registerIndex, 0));
+            return programCounter;
+        }
+
+        private void PatchForPrep(int prepProgramCounter, int registerIndex, int forLoopProgramCounter)
+        {
+            var offset = forLoopProgramCounter - (prepProgramCounter + 1);
+            _code[prepProgramCounter] = EncodeAbx(LuaOpcode.ForPrep, registerIndex, offset);
+        }
+
+        private int EmitForLoop(int registerIndex, int targetProgramCounter)
+        {
+            var programCounter = CurrentProgramCounter;
+            var offset = (programCounter + 1) - targetProgramCounter;
+            _code.Add(EncodeAbx(LuaOpcode.ForLoop, registerIndex, offset));
+            return programCounter;
+        }
+
+        private int EmitTForPrepPlaceholder(int registerIndex)
+        {
+            var programCounter = CurrentProgramCounter;
+            _code.Add(EncodeAbx(LuaOpcode.TForPrep, registerIndex, 0));
+            return programCounter;
+        }
+
+        private void PatchTForPrep(int prepProgramCounter, int registerIndex, int callProgramCounter)
+        {
+            var offset = callProgramCounter - (prepProgramCounter + 1);
+            _code[prepProgramCounter] = EncodeAbx(LuaOpcode.TForPrep, registerIndex, offset);
+        }
+
+        private int EmitTForCall(int registerIndex, int resultCount)
+        {
+            var programCounter = CurrentProgramCounter;
+            _code.Add(EncodeAbc(LuaOpcode.TForCall, registerIndex, 0, resultCount));
+            return programCounter;
+        }
+
+        private int EmitTForLoop(int registerIndex, int targetProgramCounter)
+        {
+            var programCounter = CurrentProgramCounter;
+            var offset = (programCounter + 1) - targetProgramCounter;
+            _code.Add(EncodeAbx(LuaOpcode.TForLoop, registerIndex, offset));
+            return programCounter;
         }
 
         private void EmitLoadConstant(int targetRegister, LuaConstant constant)
@@ -1633,6 +1789,11 @@ public static class LuaCompiler
         private void EmitCall(int functionRegister, int functionAndArgumentCount, int resultOperand)
         {
             _code.Add(EncodeAbc(LuaOpcode.Call, functionRegister, functionAndArgumentCount, resultOperand));
+        }
+
+        private void EmitClose(int registerIndex)
+        {
+            _code.Add(EncodeAbc(LuaOpcode.Close, registerIndex, 0, 0));
         }
 
         private void EmitVarArg(int targetRegister, int? resultCount)

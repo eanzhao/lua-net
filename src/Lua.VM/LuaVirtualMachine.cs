@@ -18,6 +18,18 @@ public sealed partial class LuaVirtualMachine
     private const int NewIndexMetamethodEvent = 1;
     private const int LengthMetamethodEvent = 4;
     private const int EqualityMetamethodEvent = 5;
+    private const int AddMetamethodEvent = 6;
+    private const int SubtractMetamethodEvent = 7;
+    private const int MultiplyMetamethodEvent = 8;
+    private const int ModuloMetamethodEvent = 9;
+    private const int PowerMetamethodEvent = 10;
+    private const int DivideMetamethodEvent = 11;
+    private const int IntegerDivideMetamethodEvent = 12;
+    private const int BitwiseAndMetamethodEvent = 13;
+    private const int BitwiseOrMetamethodEvent = 14;
+    private const int BitwiseXorMetamethodEvent = 15;
+    private const int ShiftLeftMetamethodEvent = 16;
+    private const int ShiftRightMetamethodEvent = 17;
     private const int UnaryMinusMetamethodEvent = 18;
     private const int BitwiseNotMetamethodEvent = 19;
     private const int LessThanMetamethodEvent = 20;
@@ -322,76 +334,76 @@ public sealed partial class LuaVirtualMachine
                     ExecuteAddImmediate(frame, prototype, instruction);
                     break;
                 case LuaOpcode.AddK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryAdd);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryAdd, AddMetamethodEvent);
                     break;
                 case LuaOpcode.SubK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TrySubtract);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TrySubtract, SubtractMetamethodEvent);
                     break;
                 case LuaOpcode.MulK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryMultiply);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryMultiply, MultiplyMetamethodEvent);
                     break;
                 case LuaOpcode.ModK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryModulo);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryModulo, ModuloMetamethodEvent);
                     break;
                 case LuaOpcode.PowK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryPower);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryPower, PowerMetamethodEvent);
                     break;
                 case LuaOpcode.DivK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryDivide);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryDivide, DivideMetamethodEvent);
                     break;
                 case LuaOpcode.IDivK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryIntegerDivide);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryIntegerDivide, IntegerDivideMetamethodEvent);
                     break;
                 case LuaOpcode.BandK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseAnd);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseAnd, BitwiseAndMetamethodEvent);
                     break;
                 case LuaOpcode.BorK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseOr);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseOr, BitwiseOrMetamethodEvent);
                     break;
                 case LuaOpcode.BXorK:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseXor);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), ConvertConstant(prototype.Constants[instruction.C]), TryBitwiseXor, BitwiseXorMetamethodEvent);
                     break;
                 case LuaOpcode.ShlI:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, LuaValue.FromInteger(ToSignedC(instruction.C)), GetRegister(frame, instruction.B), TryShiftLeft);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, LuaValue.FromInteger(ToSignedC(instruction.C)), GetRegister(frame, instruction.B), TryShiftLeft, ShiftLeftMetamethodEvent);
                     break;
                 case LuaOpcode.ShrI:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), LuaValue.FromInteger(ToSignedC(instruction.C)), TryShiftRight);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), LuaValue.FromInteger(ToSignedC(instruction.C)), TryShiftRight, ShiftRightMetamethodEvent);
                     break;
                 case LuaOpcode.Add:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryAdd);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryAdd, AddMetamethodEvent);
                     break;
                 case LuaOpcode.Sub:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TrySubtract);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TrySubtract, SubtractMetamethodEvent);
                     break;
                 case LuaOpcode.Mul:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryMultiply);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryMultiply, MultiplyMetamethodEvent);
                     break;
                 case LuaOpcode.Mod:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryModulo);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryModulo, ModuloMetamethodEvent);
                     break;
                 case LuaOpcode.Pow:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryPower);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryPower, PowerMetamethodEvent);
                     break;
                 case LuaOpcode.Div:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryDivide);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryDivide, DivideMetamethodEvent);
                     break;
                 case LuaOpcode.IDiv:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryIntegerDivide);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryIntegerDivide, IntegerDivideMetamethodEvent);
                     break;
                 case LuaOpcode.Band:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseAnd);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseAnd, BitwiseAndMetamethodEvent);
                     break;
                 case LuaOpcode.Bor:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseOr);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseOr, BitwiseOrMetamethodEvent);
                     break;
                 case LuaOpcode.BXor:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseXor);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryBitwiseXor, BitwiseXorMetamethodEvent);
                     break;
                 case LuaOpcode.Shl:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftLeft);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftLeft, ShiftLeftMetamethodEvent);
                     break;
                 case LuaOpcode.Shr:
-                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftRight);
+                    ExecuteBinaryArithmetic(frame, prototype, instruction, GetRegister(frame, instruction.B), GetRegister(frame, instruction.C), TryShiftRight, ShiftRightMetamethodEvent);
                     break;
                 case LuaOpcode.Unm:
                     ExecuteUnaryArithmetic(frame, instruction, TryUnaryMinus, UnaryMinusMetamethodEvent);
