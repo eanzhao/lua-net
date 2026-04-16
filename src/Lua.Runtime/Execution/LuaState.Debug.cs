@@ -81,6 +81,11 @@ public sealed partial class LuaState
     private static LuaValue[] DebugTraceback(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         var message = arguments.Count >= 1 && !arguments[0].IsNil ? arguments[0] : LuaValue.Nil;
+        if (!message.IsNil && message.Kind != LuaValueKind.String)
+        {
+            return [message];
+        }
+
         var level = arguments.Count >= 2 && TryGetInteger(arguments[1], out var levelInt) ? (int)levelInt : 1;
 
         var sb = new System.Text.StringBuilder();
@@ -92,7 +97,9 @@ public sealed partial class LuaState
         sb.Append("stack traceback:");
 
         var frames = state.CurrentThread.Frames;
-        var startIndex = frames.Count - level;
+        var startIndex = level == 0
+            ? frames.Count - 1
+            : frames.Count - 1 - level;
         for (var i = startIndex; i >= 0 && i < frames.Count; i--)
         {
             var frame = frames[i];
@@ -197,7 +204,7 @@ public sealed partial class LuaState
             return [LuaValue.Nil];
         }
 
-        var name = $"(upvalue {upInt})";
+        var name = GetUpvalueName(func, index) ?? $"(upvalue {upInt})";
         return [LuaValue.FromString(name), func.Upvalues[index].GetValue(state)];
     }
 
@@ -225,7 +232,19 @@ public sealed partial class LuaState
         }
 
         func.Upvalues[index].SetValue(state, value);
-        return [LuaValue.FromString($"(upvalue {upInt})")];
+        return [LuaValue.FromString(GetUpvalueName(func, index) ?? $"(upvalue {upInt})")];
+    }
+
+    private static string? GetUpvalueName(LuaClosure closure, int index)
+    {
+        if (closure.UpvalueNames is null || index >= closure.UpvalueNames.Length)
+        {
+            return null;
+        }
+
+        return string.IsNullOrEmpty(closure.UpvalueNames[index])
+            ? null
+            : closure.UpvalueNames[index];
     }
 
     private static LuaValue[] DebugSetHook(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

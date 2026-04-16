@@ -98,6 +98,7 @@ public class LuaStateTests
         packageTable.GetValue(LuaValue.FromString("loaded")).AsTable().ShouldBeSameAs(state.PackageLoaded);
         packageTable.GetValue(LuaValue.FromString("preload")).AsTable().ShouldBeSameAs(state.PackagePreload);
         packageTable.GetValue(LuaValue.FromString("searchers")).AsTable().ShouldBeSameAs(state.PackageSearchers);
+        state.GlobalEnvironment.GetValue(LuaValue.FromString("_G")).AsTable().ShouldBeSameAs(state.GlobalEnvironment);
         packageTable.GetValue(LuaValue.FromString("path")).AsString().ShouldBe("./?.lua;./?/init.lua;./?.luac;./?/init.luac");
         packageTable.GetValue(LuaValue.FromString("cpath")).AsString().ShouldBe(GetExpectedDefaultNativePackagePath());
         packageTable.GetValue(LuaValue.FromString("config")).AsString().ShouldBe($"{Path.DirectorySeparatorChar}\n;\n?\n!\n-\n");
@@ -1244,6 +1245,22 @@ public class LuaStateTests
     }
 
     [Fact]
+    public void Require_ShouldLoadBuiltinDebugLibraryFromPreload()
+    {
+        var state = new LuaState();
+        var require = GetBaseFunction(state, "require");
+
+        state.GlobalEnvironment.SetValue(LuaValue.FromString("debug"), LuaValue.Nil);
+
+        var result = InvokeBaseFunction(state, require, LuaValue.FromString("debug"));
+
+        result.Length.ShouldBe(2);
+        result[0].AsTable().ShouldBeSameAs(state.DebugLibrary);
+        result[1].AsString().ShouldBe(":preload:");
+        state.PackageLoaded.GetValue(LuaValue.FromString("debug")).AsTable().ShouldBeSameAs(state.DebugLibrary);
+    }
+
+    [Fact]
     public void StringLibraryAndMetamethods_ShouldUseLuaSemantics()
     {
         var state = new LuaState();
@@ -1796,10 +1813,12 @@ public class LuaStateTests
 
         var getUpResult = InvokeBaseFunction(state, debugGetUpvalue, LuaValue.FromFunction(testClosure), LuaValue.FromInteger(1));
         getUpResult.Length.ShouldBe(2);
+        getUpResult[0].AsString().ShouldBe("(upvalue 1)");
         getUpResult[1].AsInteger().ShouldBe(99);
 
         InvokeBaseFunction(state, debugSetUpvalue, LuaValue.FromFunction(testClosure), LuaValue.FromInteger(1), LuaValue.FromInteger(200));
         var getUpResult2 = InvokeBaseFunction(state, debugGetUpvalue, LuaValue.FromFunction(testClosure), LuaValue.FromInteger(1));
+        getUpResult2[0].AsString().ShouldBe("(upvalue 1)");
         getUpResult2[1].AsInteger().ShouldBe(200);
     }
 

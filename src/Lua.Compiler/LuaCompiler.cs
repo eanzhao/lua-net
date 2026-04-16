@@ -53,23 +53,27 @@ public static class LuaCompiler
         }
     }
 
-    private sealed class FunctionCompiler(string sourceName, FunctionCompiler? parent)
+    private sealed class FunctionCompiler(string sourceName, FunctionCompiler? parent, string? debugName = null)
     {
         private const string EnvironmentName = "_ENV";
         private const byte VarArgFunctionFlag = 0b00000001;
         private const byte VarArgTableFlag = 0b00000010;
         private readonly string _sourceName = sourceName;
         private readonly FunctionCompiler? _parent = parent;
+        private readonly string? _debugName = debugName;
         private readonly List<uint> _code = [];
         private readonly List<LuaConstant> _constants = [];
         private readonly Dictionary<string, int> _constantIndices = new(StringComparer.Ordinal);
         private readonly List<LuaPrototype> _nestedPrototypes = [];
         private readonly List<UpvalueInfo> _upvalues = [];
         private readonly Dictionary<string, int> _upvalueIndices = new(StringComparer.Ordinal);
+        private readonly Dictionary<int, string> _toBeClosedNames = [];
         private readonly List<LocalInfo> _visibleLocals = [];
         private readonly List<GlobalDeclarationInfo> _visibleGlobalDeclarations = [];
         private readonly List<ScopeInfo> _scopes = [];
-        private readonly Stack<LoopContext> _loops = [];
+        private readonly List<LoopContext> _loops = [];
+        private readonly List<LabelInfo> _visibleLabels = [];
+        private readonly List<PendingGotoInfo> _pendingGotos = [];
         private int _persistentRegisterCount;
         private int _tempRegisterTop;
         private int _maxRegisterCount;
@@ -80,6 +84,7 @@ public static class LuaCompiler
             _fallbackPosition = syntax.Range.Start;
             EnterScope();
             CompileBlockStatements(syntax.Block.Statements);
+            EnsureAllGotosResolved();
             ExitScope();
 
             if (!EndsWithReturn())
@@ -120,6 +125,7 @@ public static class LuaCompiler
             }
 
             CompileBlockStatements(body.Block.Statements);
+            EnsureAllGotosResolved();
             ExitScope();
 
             if (!EndsWithReturn())
@@ -165,6 +171,7 @@ public static class LuaCompiler
 
             return new LuaPrototype
             {
+                DebugName = _debugName,
                 LineDefined = lineDefined,
                 LastLineDefined = lastLineDefined,
                 NumberOfParameters = checked((byte)parameterCount),
@@ -177,8 +184,25 @@ public static class LuaCompiler
                 Source = _sourceName,
                 LineInfo = Enumerable.Repeat((sbyte)0, _code.Count).ToArray(),
                 AbsoluteLineInfo = [],
-                LocalVariables = []
+                LocalVariables = [],
+                ToBeClosedNames = BuildToBeClosedNames()
             };
+        }
+
+        private string?[]? BuildToBeClosedNames()
+        {
+            if (_toBeClosedNames.Count == 0)
+            {
+                return null;
+            }
+
+            var names = new string?[_code.Count];
+            foreach (var entry in _toBeClosedNames)
+            {
+                names[entry.Key] = entry.Value;
+            }
+
+            return names;
         }
 
         private LuaUpvalueDescriptor[] BuildUpvalues()
@@ -249,9 +273,11 @@ public static class LuaCompiler
                     CompileReturn(returnStatement);
                     return;
                 case LuaLabelStatementSyntax label:
-                    throw CreateUnsupported(label, "goto and labels are not supported yet");
+                    CompileLabel(label);
+                    return;
                 case LuaGotoStatementSyntax @goto:
-                    throw CreateUnsupported(@goto, "goto and labels are not supported yet");
+                    CompileGoto(@goto);
+                    return;
                 case LuaGlobalDeclarationStatementSyntax globalDeclaration:
                     CompileGlobalDeclaration(globalDeclaration);
                     return;
@@ -313,9 +339,10 @@ public static class LuaCompiler
             var exitJump = EmitJumpPlaceholder();
 
             EnterScope();
-            _loops.Push(new LoopContext(_scopes.Count - 1));
+            _loops.Add(new LoopContext(CurrentScope));
             CompileBlockStatements(statement.Block.Statements);
-            var loop = _loops.Pop();
+            var loop = _loops[^1];
+            _loops.RemoveAt(_loops.Count - 1);
             ExitScope();
 
             EmitJump(loopStart);
@@ -329,7 +356,7 @@ public static class LuaCompiler
             var loopStart = CurrentProgramCounter;
 
             EnterScope();
-            _loops.Push(new LoopContext(_scopes.Count - 1));
+            _loops.Add(new LoopContext(CurrentScope));
             CompileBlockStatements(statement.Block.Statements);
 
             var conditionRegister = AllocateTemp();
@@ -342,7 +369,8 @@ public static class LuaCompiler
             EmitTest(conditionRegister, expectedTruthy: false);
             var continueJump = EmitJumpPlaceholder();
 
-            var loop = _loops.Pop();
+            var loop = _loops[^1];
+            _loops.RemoveAt(_loops.Count - 1);
             ExitScope(emitClose: false);
             PatchJump(continueJump, loopStart);
 
@@ -357,12 +385,13 @@ public static class LuaCompiler
                 throw CreateError(statement.Range, "break outside loop");
             }
 
-            EmitBreakScopeClose(_loops.Peek());
-            _loops.Peek().BreakJumps.Add(EmitJumpPlaceholder());
+            EmitBreakScopeClose(_loops[^1]);
+            _loops[^1].BreakJumps.Add(EmitJumpPlaceholder());
         }
 
         private void CompileNumericFor(LuaNumericForStatementSyntax statement)
         {
+            var registerMark = _persistentRegisterCount;
             var stateRegister = AllocatePersistentRegister();
             var limitRegister = AllocatePersistentRegister();
             var variableRegister = AllocatePersistentRegister();
@@ -389,9 +418,10 @@ public static class LuaCompiler
                 statement.Name.Range.Start,
                 isReadOnly: true);
 
-            _loops.Push(new LoopContext(_scopes.Count - 1));
+            _loops.Add(new LoopContext(CurrentScope));
             CompileBlockStatements(statement.Block.Statements);
-            var loop = _loops.Pop();
+            var loop = _loops[^1];
+            _loops.RemoveAt(_loops.Count - 1);
 
             ExitScope();
 
@@ -400,6 +430,7 @@ public static class LuaCompiler
 
             var loopEnd = CurrentProgramCounter;
             PatchJumps(loop.BreakJumps, loopEnd);
+            _persistentRegisterCount = registerMark;
         }
 
         private void CompileGenericFor(LuaGenericForStatementSyntax statement)
@@ -409,6 +440,7 @@ public static class LuaCompiler
                 throw CreateError(statement.Range, "generic for loop has too many variables");
             }
 
+            var registerMark = _persistentRegisterCount;
             var iteratorRegister = AllocatePersistentRegister();
             var stateRegister = AllocatePersistentRegister();
             var controlRegister = AllocatePersistentRegister();
@@ -419,9 +451,9 @@ public static class LuaCompiler
                 AllocatePersistentRegister();
             }
 
-            var expressionRegisters = EvaluateAssignmentValues(statement.Expressions, 3, statement.Range);
+            var expressionRegisters = EvaluateAssignmentValues(statement.Expressions, 4, statement.Range);
             int? nilRegister = null;
-            for (var index = 0; index < 3; index++)
+            for (var index = 0; index < 4; index++)
             {
                 var sourceRegister = index < expressionRegisters.Count
                     ? expressionRegisters[index]
@@ -429,8 +461,6 @@ public static class LuaCompiler
 
                 EmitMove(iteratorRegister + index, sourceRegister);
             }
-
-            EmitLoadNilRange(firstLoopVariableRegister, 1);
 
             var prepProgramCounter = EmitTForPrepPlaceholder(iteratorRegister);
             var bodyProgramCounter = CurrentProgramCounter;
@@ -445,9 +475,10 @@ public static class LuaCompiler
                     isReadOnly: true);
             }
 
-            _loops.Push(new LoopContext(_scopes.Count - 1));
+            _loops.Add(new LoopContext(CurrentScope, iteratorRegister));
             CompileBlockStatements(statement.Block.Statements);
-            var loop = _loops.Pop();
+            var loop = _loops[^1];
+            _loops.RemoveAt(_loops.Count - 1);
 
             ExitScope();
 
@@ -458,6 +489,47 @@ public static class LuaCompiler
 
             PatchTForPrep(prepProgramCounter, iteratorRegister, callProgramCounter);
             PatchJumps(loop.BreakJumps, closeProgramCounter);
+            _persistentRegisterCount = registerMark;
+        }
+
+        private void CompileGoto(LuaGotoStatementSyntax statement)
+        {
+            var pendingGoto = new PendingGotoInfo(
+                statement.Name.Identifier,
+                statement.Range.Start,
+                EmitJumpPlaceholder(),
+                EmitJumpPlaceholder(),
+                CaptureScopeStates(),
+                CaptureLoopStates());
+
+            if (TryGetVisibleLabel(statement.Name.Identifier, out var label))
+            {
+                ResolveGoto(pendingGoto, label);
+                return;
+            }
+
+            _pendingGotos.Add(pendingGoto);
+        }
+
+        private void CompileLabel(LuaLabelStatementSyntax statement)
+        {
+            for (var index = _visibleLabels.Count - 1; index >= 0; index--)
+            {
+                if (StringComparer.Ordinal.Equals(_visibleLabels[index].Name, statement.Name.Identifier))
+                {
+                    throw CreateError(statement.Range, $"label '{statement.Name.Identifier}' already defined");
+                }
+            }
+
+            var label = new LabelInfo(
+                statement.Name.Identifier,
+                statement.Range.Start,
+                CurrentProgramCounter,
+                CaptureScopeStates(),
+                CaptureLoopStates(),
+                CurrentScope);
+            _visibleLabels.Add(label);
+            ResolvePendingGotos(label);
         }
 
         private void CompileLocalDeclaration(LuaLocalDeclarationStatementSyntax statement)
@@ -465,7 +537,7 @@ public static class LuaCompiler
             if (statement.Initializers.Count == 0)
             {
                 var startRegister = _persistentRegisterCount;
-                var toBeClosedRegisters = new List<int>();
+                var toBeClosedRegisters = new List<(int Register, string Name)>();
                 foreach (var name in statement.Names.Names)
                 {
                     var attributes = GetLocalAttributes(statement.Names.LeadingAttribute, name.Attribute);
@@ -476,20 +548,26 @@ public static class LuaCompiler
                         attributes.IsToBeClosed);
                     if (attributes.IsToBeClosed)
                     {
-                        toBeClosedRegisters.Add(register);
+                        toBeClosedRegisters.Add((register, name.Name.Identifier));
                     }
                 }
 
                 EmitLoadNilRange(startRegister, statement.Names.Names.Count);
-                foreach (var register in toBeClosedRegisters)
+                for (var index = 0; index < toBeClosedRegisters.Count; index++)
                 {
-                    EmitToBeClosed(register);
+                    EmitToBeClosed(toBeClosedRegisters[index].Register, toBeClosedRegisters[index].Name);
                 }
 
                 return;
             }
 
-            var valueRegisters = EvaluateAssignmentValues(statement.Initializers, statement.Names.Names.Count, statement.Range);
+            var valueRegisters = EvaluateAssignmentValues(
+                statement.Initializers,
+                statement.Names.Names.Count,
+                statement.Range,
+                index => index < statement.Names.Names.Count
+                    ? statement.Names.Names[index].Name.Identifier
+                    : null);
 
             for (var index = 0; index < statement.Names.Names.Count; index++)
             {
@@ -510,7 +588,7 @@ public static class LuaCompiler
 
                 if (attributes.IsToBeClosed)
                 {
-                    EmitToBeClosed(localRegister);
+                    EmitToBeClosed(localRegister, statement.Names.Names[index].Name.Identifier);
                 }
             }
         }
@@ -521,7 +599,13 @@ public static class LuaCompiler
 
             if (statement.Initializers.Count > 0)
             {
-                var valueRegisters = EvaluateAssignmentValues(statement.Initializers, declarations.Count, statement.Range);
+                var valueRegisters = EvaluateAssignmentValues(
+                    statement.Initializers,
+                    declarations.Count,
+                    statement.Range,
+                    index => index < declarations.Count
+                        ? declarations[index].Name
+                        : null);
                 int? nilRegister = null;
 
                 for (var index = declarations.Count - 1; index >= 0; index--)
@@ -554,7 +638,7 @@ public static class LuaCompiler
                 Position: statement.Name.Range.Start));
 
             var functionRegister = AllocateTemp();
-            CompileNestedFunction(statement.Body, injectSelf: false, functionRegister);
+            CompileNestedFunction(statement.Body, injectSelf: false, functionRegister, statement.Name.Identifier);
             EmitGlobalInitializationCheck(statement.Name.Identifier, statement.Range);
             StoreAssignmentTarget(CreateGlobalAssignmentTarget(statement.Name.Identifier, statement.Range), functionRegister);
         }
@@ -562,14 +646,14 @@ public static class LuaCompiler
         private void CompileLocalFunction(LuaLocalFunctionStatementSyntax statement)
         {
             var register = AddLocal(statement.Name.Identifier, statement.Name.Range.Start);
-            CompileNestedFunction(statement.Body, injectSelf: false, register);
+            CompileNestedFunction(statement.Body, injectSelf: false, register, statement.Name.Identifier);
         }
 
         private void CompileNamedFunction(LuaFunctionNameSyntax name, LuaFunctionBodySyntax body, bool injectSelf)
         {
             var target = CreateFunctionAssignmentTarget(name);
             var functionRegister = AllocateTemp();
-            CompileNestedFunction(body, injectSelf, functionRegister);
+            CompileNestedFunction(body, injectSelf, functionRegister, GetFunctionDebugName(name));
             StoreAssignmentTarget(target, functionRegister);
         }
 
@@ -603,7 +687,13 @@ public static class LuaCompiler
 
         private void CompileAssignment(LuaAssignmentStatementSyntax statement)
         {
-            var valueRegisters = EvaluateAssignmentValues(statement.Values, statement.Variables.Count, statement.Range);
+            var valueRegisters = EvaluateAssignmentValues(
+                statement.Values,
+                statement.Variables.Count,
+                statement.Range,
+                index => index < statement.Variables.Count
+                    ? GetFunctionDebugName(statement.Variables[index])
+                    : null);
             var targets = statement.Variables.Select(CreateAssignmentTarget).ToArray();
 
             int? nilRegister = null;
@@ -620,7 +710,8 @@ public static class LuaCompiler
         private List<int> EvaluateAssignmentValues(
             IReadOnlyList<LuaExpressionSyntax> values,
             int targetCount,
-            LuaSourceRange range)
+            LuaSourceRange range,
+            Func<int, string?>? getFunctionDebugName = null)
         {
             var registers = new List<int>(Math.Max(values.Count, targetCount));
             for (var index = 0; index < values.Count; index++)
@@ -639,7 +730,7 @@ public static class LuaCompiler
                     continue;
                 }
 
-                CompileExpressionInto(values[index], register);
+                CompileExpressionInto(values[index], register, getFunctionDebugName?.Invoke(index));
                 registers.Add(register);
             }
 
@@ -846,7 +937,7 @@ public static class LuaCompiler
             }
         }
 
-        private void CompileExpressionInto(LuaExpressionSyntax expression, int targetRegister)
+        private void CompileExpressionInto(LuaExpressionSyntax expression, int targetRegister, string? functionDebugName = null)
         {
             ReserveRegisterRange(targetRegister, 1);
 
@@ -868,7 +959,7 @@ public static class LuaCompiler
                     CompileNameRead(nameExpression.Name.Identifier, nameExpression.Range, targetRegister);
                     return;
                 case LuaParenthesizedExpressionSyntax parenthesizedExpression:
-                    CompileExpressionInto(parenthesizedExpression.Expression, targetRegister);
+                    CompileExpressionInto(parenthesizedExpression.Expression, targetRegister, functionDebugName);
                     return;
                 case LuaUnaryExpressionSyntax unaryExpression:
                     CompileUnary(unaryExpression, targetRegister);
@@ -877,7 +968,7 @@ public static class LuaCompiler
                     CompileBinary(binaryExpression, targetRegister);
                     return;
                 case LuaFunctionExpressionSyntax functionExpression:
-                    CompileNestedFunction(functionExpression.Body, injectSelf: false, targetRegister);
+                    CompileNestedFunction(functionExpression.Body, injectSelf: false, targetRegister, functionDebugName);
                     return;
                 case LuaFunctionCallExpressionSyntax functionCall:
                     CompileFunctionCall(functionCall, targetRegister, fixedResultCount: 1, openResults: false);
@@ -1074,7 +1165,7 @@ public static class LuaCompiler
         private void CompileNamedTableField(int tableRegister, string name, LuaExpressionSyntax value, LuaSourceRange range)
         {
             var valueRegister = AllocateTemp();
-            CompileExpressionInto(value, valueRegister);
+            CompileExpressionInto(value, valueRegister, name);
 
             var keyConstant = LuaConstant.FromString(name);
             var constantIndex = GetConstantByteIndex(keyConstant);
@@ -1094,7 +1185,7 @@ public static class LuaCompiler
             var keyRegister = AllocateTemp();
             CompileExpressionInto(keyExpression, keyRegister);
             var valueRegister = AllocateTemp();
-            CompileExpressionInto(valueExpression, valueRegister);
+            CompileExpressionInto(valueExpression, valueRegister, GetFunctionDebugName(keyExpression));
             EmitSetTable(tableRegister, keyRegister, valueRegister);
         }
 
@@ -1205,6 +1296,8 @@ public static class LuaCompiler
             {
                 if (StringComparer.Ordinal.Equals(_visibleLocals[index].Name, name))
                 {
+                    _visibleLocals[index].MarkCaptured();
+                    TrackScopeClose(_visibleLocals[index].Scope, _visibleLocals[index].Register);
                     capture = new CaptureSource(
                         InStack: 1,
                         Index: checked((byte)_visibleLocals[index].Register),
@@ -1269,6 +1362,11 @@ public static class LuaCompiler
                 }
             }
 
+            if (_parent is not null && _parent.TryResolveExplicitGlobal(name, out declaration))
+            {
+                return true;
+            }
+
             declaration = default!;
             return false;
         }
@@ -1295,8 +1393,14 @@ public static class LuaCompiler
             bool isToBeClosed = false)
         {
             var register = AllocatePersistentRegister();
-            _visibleLocals.Add(new LocalInfo(name, register, position, isReadOnly, isToBeClosed));
-            TrackClosableLocal(register, isToBeClosed);
+            var local = new LocalInfo(name, register, position, isReadOnly, isToBeClosed, CurrentScope);
+            _visibleLocals.Add(local);
+            CurrentScope.Declarations.Add(ScopeDeclarationInfo.ForLocal(local));
+            if (isToBeClosed)
+            {
+                TrackScopeClose(CurrentScope, register);
+            }
+
             return register;
         }
 
@@ -1307,18 +1411,28 @@ public static class LuaCompiler
             bool isReadOnly = false,
             bool isToBeClosed = false)
         {
-            _visibleLocals.Add(new LocalInfo(name, register, position, isReadOnly, isToBeClosed));
-            TrackClosableLocal(register, isToBeClosed);
+            var local = new LocalInfo(name, register, position, isReadOnly, isToBeClosed, CurrentScope);
+            _visibleLocals.Add(local);
+            CurrentScope.Declarations.Add(ScopeDeclarationInfo.ForLocal(local));
+            if (isToBeClosed)
+            {
+                TrackScopeClose(CurrentScope, register);
+            }
         }
 
         private void AddVisibleGlobalDeclarations(IReadOnlyList<GlobalDeclarationInfo> declarations)
         {
             _visibleGlobalDeclarations.AddRange(declarations);
+            foreach (var declaration in declarations)
+            {
+                CurrentScope.Declarations.Add(ScopeDeclarationInfo.ForGlobal(declaration.Name ?? "*"));
+            }
         }
 
         private void AddVisibleGlobalDeclaration(GlobalDeclarationInfo declaration)
         {
             _visibleGlobalDeclarations.Add(declaration);
+            CurrentScope.Declarations.Add(ScopeDeclarationInfo.ForGlobal(declaration.Name ?? "*"));
         }
 
         private List<GlobalDeclarationInfo> CreateGlobalDeclarations(LuaDeclarationNameListSyntax declaration)
@@ -1371,13 +1485,42 @@ public static class LuaCompiler
             EmitErrNNil(currentValueRegister, name);
         }
 
-        private void CompileNestedFunction(LuaFunctionBodySyntax body, bool injectSelf, int targetRegister)
+        private void CompileNestedFunction(
+            LuaFunctionBodySyntax body,
+            bool injectSelf,
+            int targetRegister,
+            string? debugName = null)
         {
-            var compiler = new FunctionCompiler(_sourceName, this);
+            var compiler = new FunctionCompiler(_sourceName, this, debugName);
             var prototype = compiler.CompileFunction(body, injectSelf);
             var prototypeIndex = _nestedPrototypes.Count;
             _nestedPrototypes.Add(prototype);
             EmitClosure(targetRegister, prototypeIndex);
+        }
+
+        private static string GetFunctionDebugName(LuaFunctionNameSyntax name)
+        {
+            return name.MethodName?.Identifier ?? name.Segments[^1].Identifier;
+        }
+
+        private static string? GetFunctionDebugName(LuaVariableExpressionSyntax variable)
+        {
+            return variable switch
+            {
+                LuaNameExpressionSyntax nameExpression => nameExpression.Name.Identifier,
+                LuaMemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier,
+                LuaIndexExpressionSyntax { Index: LuaStringLiteralExpressionSyntax stringLiteral } => stringLiteral.Value,
+                _ => null
+            };
+        }
+
+        private static string? GetFunctionDebugName(LuaExpressionSyntax expression)
+        {
+            return expression switch
+            {
+                LuaStringLiteralExpressionSyntax stringLiteral => stringLiteral.Value,
+                _ => null
+            };
         }
 
         private void CompileFunctionCall(
@@ -1472,11 +1615,15 @@ public static class LuaCompiler
             };
         }
 
-        private bool HasActiveExplicitGlobalDeclarations => _visibleGlobalDeclarations.Count > 0;
+        private bool HasActiveExplicitGlobalDeclarations =>
+            _visibleGlobalDeclarations.Count > 0 ||
+            (_parent?.HasActiveExplicitGlobalDeclarations ?? false);
+
+        private ScopeInfo CurrentScope => _scopes[^1];
 
         private void EnterScope()
         {
-            _scopes.Add(new ScopeInfo(_visibleLocals.Count, _visibleGlobalDeclarations.Count));
+            _scopes.Add(new ScopeInfo(_visibleLocals.Count, _visibleGlobalDeclarations.Count, _persistentRegisterCount));
         }
 
         private void ExitScope(bool emitClose = true)
@@ -1484,7 +1631,7 @@ public static class LuaCompiler
             var scope = _scopes[^1];
             _scopes.RemoveAt(_scopes.Count - 1);
 
-            if (emitClose && scope.FirstClosableRegister is int closeRegister)
+            if (emitClose && scope.FirstCloseRegister is int closeRegister)
             {
                 EmitClose(closeRegister);
             }
@@ -1500,11 +1647,14 @@ public static class LuaCompiler
             {
                 _visibleGlobalDeclarations.RemoveRange(globalStart, _visibleGlobalDeclarations.Count - globalStart);
             }
+
+            _persistentRegisterCount = scope.PersistentRegisterStart;
+            _visibleLabels.RemoveAll(label => ReferenceEquals(label.Scope, scope));
         }
 
         private int? GetCurrentScopeCloseRegister()
         {
-            return _scopes.Count == 0 ? null : _scopes[^1].FirstClosableRegister;
+            return _scopes.Count == 0 ? null : _scopes[^1].FirstCloseRegister;
         }
 
         private void ResetTemps()
@@ -1594,31 +1744,25 @@ public static class LuaCompiler
             return upvalueIndex;
         }
 
-        private void TrackClosableLocal(int register, bool isToBeClosed)
+        private void TrackScopeClose(ScopeInfo scope, int register)
         {
-            if (!isToBeClosed)
-            {
-                return;
-            }
-
-            var scopeIndex = _scopes.Count - 1;
-            if (scopeIndex < 0)
-            {
-                throw new InvalidOperationException("Cannot mark a to-be-closed local without an active scope.");
-            }
-
-            var scope = _scopes[scopeIndex];
-            scope.FirstClosableRegister = scope.FirstClosableRegister is null
+            scope.FirstCloseRegister = scope.FirstCloseRegister is null
                 ? register
-                : Math.Min(scope.FirstClosableRegister.Value, register);
+                : Math.Min(scope.FirstCloseRegister.Value, register);
         }
 
         private void EmitBreakScopeClose(LoopContext loop)
         {
             int? closeRegister = null;
-            for (var index = loop.ScopeIndex; index < _scopes.Count; index++)
+            var loopScopeIndex = _scopes.FindIndex(scope => ReferenceEquals(scope, loop.Scope));
+            if (loopScopeIndex < 0)
             {
-                if (_scopes[index].FirstClosableRegister is not int candidate)
+                throw new InvalidOperationException("Active loop scope was not found in the current scope stack.");
+            }
+
+            for (var index = loopScopeIndex; index < _scopes.Count; index++)
+            {
+                if (_scopes[index].FirstCloseRegister is not int candidate)
                 {
                     continue;
                 }
@@ -1632,6 +1776,189 @@ public static class LuaCompiler
             {
                 EmitClose(register);
             }
+        }
+
+        private ScopeSnapshotEntry[] CaptureScopeStates()
+        {
+            var states = new ScopeSnapshotEntry[_scopes.Count];
+            for (var index = 0; index < _scopes.Count; index++)
+            {
+                states[index] = new ScopeSnapshotEntry(_scopes[index], _scopes[index].Declarations.Count);
+            }
+
+            return states;
+        }
+
+        private LoopContext[] CaptureLoopStates()
+        {
+            return [.. _loops];
+        }
+
+        private bool TryGetVisibleLabel(string name, out LabelInfo label)
+        {
+            for (var index = _visibleLabels.Count - 1; index >= 0; index--)
+            {
+                if (StringComparer.Ordinal.Equals(_visibleLabels[index].Name, name))
+                {
+                    label = _visibleLabels[index];
+                    return true;
+                }
+            }
+
+            label = null!;
+            return false;
+        }
+
+        private void ResolvePendingGotos(LabelInfo label)
+        {
+            for (var index = _pendingGotos.Count - 1; index >= 0; index--)
+            {
+                var pendingGoto = _pendingGotos[index];
+                if (!StringComparer.Ordinal.Equals(pendingGoto.Name, label.Name) ||
+                    !CanTargetLabel(pendingGoto.ScopeStates, label.ScopeStates))
+                {
+                    continue;
+                }
+
+                ResolveGoto(pendingGoto, label);
+                _pendingGotos.RemoveAt(index);
+            }
+        }
+
+        private void ResolveGoto(PendingGotoInfo pendingGoto, LabelInfo label)
+        {
+            EnsureGotoDoesNotEnterScope(pendingGoto, label);
+            PatchGotoClose(pendingGoto.OptionalCloseProgramCounter, GetGotoCloseRegister(pendingGoto, label));
+            PatchJump(pendingGoto.JumpProgramCounter, label.ProgramCounter);
+        }
+
+        private void PatchGotoClose(int programCounter, int? closeRegister)
+        {
+            if (closeRegister is null)
+            {
+                return;
+            }
+
+            _code[programCounter] = EncodeAbc(LuaOpcode.Close, closeRegister.Value, 0, 0);
+        }
+
+        private static bool CanTargetLabel(
+            IReadOnlyList<ScopeSnapshotEntry> sourceScopes,
+            IReadOnlyList<ScopeSnapshotEntry> targetScopes)
+        {
+            if (targetScopes.Count > sourceScopes.Count)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < targetScopes.Count; index++)
+            {
+                if (!ReferenceEquals(sourceScopes[index].Scope, targetScopes[index].Scope))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void EnsureGotoDoesNotEnterScope(PendingGotoInfo pendingGoto, LabelInfo label)
+        {
+            for (var index = 0; index < label.ScopeStates.Count; index++)
+            {
+                var sourceState = pendingGoto.ScopeStates[index];
+                var targetState = label.ScopeStates[index];
+                if (targetState.DeclarationCount <= sourceState.DeclarationCount)
+                {
+                    continue;
+                }
+
+                var declaration = targetState.Scope.Declarations[sourceState.DeclarationCount];
+                throw CreateError(
+                    pendingGoto.Position,
+                    $"goto '{pendingGoto.Name}' jumps into the scope of '{declaration.Name}'");
+            }
+        }
+
+        private int? GetGotoCloseRegister(PendingGotoInfo pendingGoto, LabelInfo label)
+        {
+            int? closeRegister = null;
+            for (var index = 0; index < label.ScopeStates.Count; index++)
+            {
+                var sourceCount = pendingGoto.ScopeStates[index].DeclarationCount;
+                var targetCount = label.ScopeStates[index].DeclarationCount;
+                closeRegister = MinRegister(
+                    closeRegister,
+                    GetDeclarationCloseRegister(
+                        pendingGoto.ScopeStates[index].Scope,
+                        targetCount,
+                        sourceCount));
+            }
+
+            for (var index = label.ScopeStates.Count; index < pendingGoto.ScopeStates.Count; index++)
+            {
+                var sourceState = pendingGoto.ScopeStates[index];
+                closeRegister = MinRegister(
+                    closeRegister,
+                    GetDeclarationCloseRegister(
+                        sourceState.Scope,
+                        0,
+                        sourceState.DeclarationCount));
+            }
+
+            var commonLoopCount = GetCommonPrefixCount(pendingGoto.Loops, label.Loops);
+            for (var index = commonLoopCount; index < pendingGoto.Loops.Count; index++)
+            {
+                closeRegister = MinRegister(closeRegister, pendingGoto.Loops[index].ExitCloseRegister);
+            }
+
+            return closeRegister;
+        }
+
+        private static int GetCommonPrefixCount(
+            IReadOnlyList<LoopContext> sourceLoops,
+            IReadOnlyList<LoopContext> targetLoops)
+        {
+            var commonCount = Math.Min(sourceLoops.Count, targetLoops.Count);
+            var index = 0;
+            while (index < commonCount && ReferenceEquals(sourceLoops[index], targetLoops[index]))
+            {
+                index++;
+            }
+
+            return index;
+        }
+
+        private static int? GetDeclarationCloseRegister(ScopeInfo scope, int startIndex, int endExclusive)
+        {
+            int? closeRegister = null;
+            for (var index = startIndex; index < endExclusive; index++)
+            {
+                closeRegister = MinRegister(closeRegister, scope.Declarations[index].GetCloseRegister());
+            }
+
+            return closeRegister;
+        }
+
+        private static int? MinRegister(int? current, int? candidate)
+        {
+            if (candidate is null)
+            {
+                return current;
+            }
+
+            return current is null ? candidate : Math.Min(current.Value, candidate.Value);
+        }
+
+        private void EnsureAllGotosResolved()
+        {
+            if (_pendingGotos.Count == 0)
+            {
+                return;
+            }
+
+            var pendingGoto = _pendingGotos[0];
+            throw CreateError(pendingGoto.Position, $"no visible label '{pendingGoto.Name}'");
         }
 
         private int AddConstant(LuaConstant constant)
@@ -1923,8 +2250,13 @@ public static class LuaCompiler
             _code.Add(EncodeAbc(LuaOpcode.Close, registerIndex, 0, 0));
         }
 
-        private void EmitToBeClosed(int registerIndex)
+        private void EmitToBeClosed(int registerIndex, string? variableName = null)
         {
+            if (!string.IsNullOrEmpty(variableName))
+            {
+                _toBeClosedNames[_code.Count] = variableName;
+            }
+
             _code.Add(EncodeAbc(LuaOpcode.Tbc, registerIndex, 0, 0));
         }
 
@@ -2050,12 +2382,35 @@ public static class LuaCompiler
             Upvalue
         }
 
-        private sealed record LocalInfo(
-            string Name,
-            int Register,
-            LuaSourcePosition Position,
-            bool IsReadOnly,
-            bool IsToBeClosed);
+        private sealed class LocalInfo(
+            string name,
+            int register,
+            LuaSourcePosition position,
+            bool isReadOnly,
+            bool isToBeClosed,
+            ScopeInfo scope)
+        {
+            public string Name { get; } = name;
+
+            public int Register { get; } = register;
+
+            public LuaSourcePosition Position { get; } = position;
+
+            public bool IsReadOnly { get; } = isReadOnly;
+
+            public bool IsToBeClosed { get; } = isToBeClosed;
+
+            public ScopeInfo Scope { get; } = scope;
+
+            public bool IsCaptured { get; private set; }
+
+            public bool NeedsClose => IsToBeClosed || IsCaptured;
+
+            public void MarkCaptured()
+            {
+                IsCaptured = true;
+            }
+        }
 
         private sealed record GlobalDeclarationInfo(string? Name, bool IsReadOnly, LuaSourcePosition Position);
 
@@ -2065,20 +2420,92 @@ public static class LuaCompiler
 
         private readonly record struct LocalAttributes(bool IsReadOnly, bool IsToBeClosed);
 
-        private sealed class ScopeInfo(int localStart, int globalStart)
+        private sealed class ScopeInfo(int localStart, int globalStart, int persistentRegisterStart)
         {
             public int LocalStart { get; } = localStart;
 
             public int GlobalStart { get; } = globalStart;
 
-            public int? FirstClosableRegister { get; set; }
+            public int PersistentRegisterStart { get; } = persistentRegisterStart;
+
+            public List<ScopeDeclarationInfo> Declarations { get; } = [];
+
+            public int? FirstCloseRegister { get; set; }
         }
 
-        private sealed class LoopContext(int scopeIndex)
+        private sealed class LoopContext(ScopeInfo scope, int? exitCloseRegister = null)
         {
-            public int ScopeIndex { get; } = scopeIndex;
+            public ScopeInfo Scope { get; } = scope;
+
+            public int? ExitCloseRegister { get; } = exitCloseRegister;
 
             public List<int> BreakJumps { get; } = [];
+        }
+
+        private sealed class ScopeDeclarationInfo(string name, LocalInfo? local)
+        {
+            public string Name { get; } = name;
+
+            public LocalInfo? Local { get; } = local;
+
+            public static ScopeDeclarationInfo ForLocal(LocalInfo local)
+            {
+                return new ScopeDeclarationInfo(local.Name, local);
+            }
+
+            public static ScopeDeclarationInfo ForGlobal(string name)
+            {
+                return new ScopeDeclarationInfo(name, local: null);
+            }
+
+            public int? GetCloseRegister()
+            {
+                return Local?.NeedsClose == true ? Local.Register : null;
+            }
+        }
+
+        private readonly record struct ScopeSnapshotEntry(ScopeInfo Scope, int DeclarationCount);
+
+        private sealed class LabelInfo(
+            string name,
+            LuaSourcePosition position,
+            int programCounter,
+            IReadOnlyList<ScopeSnapshotEntry> scopeStates,
+            IReadOnlyList<LoopContext> loops,
+            ScopeInfo scope)
+        {
+            public string Name { get; } = name;
+
+            public LuaSourcePosition Position { get; } = position;
+
+            public int ProgramCounter { get; } = programCounter;
+
+            public IReadOnlyList<ScopeSnapshotEntry> ScopeStates { get; } = scopeStates;
+
+            public IReadOnlyList<LoopContext> Loops { get; } = loops;
+
+            public ScopeInfo Scope { get; } = scope;
+        }
+
+        private sealed class PendingGotoInfo(
+            string name,
+            LuaSourcePosition position,
+            int optionalCloseProgramCounter,
+            int jumpProgramCounter,
+            IReadOnlyList<ScopeSnapshotEntry> scopeStates,
+            IReadOnlyList<LoopContext> loops)
+        {
+            public string Name { get; } = name;
+
+            public LuaSourcePosition Position { get; } = position;
+
+            public int OptionalCloseProgramCounter { get; } = optionalCloseProgramCounter;
+
+            public int JumpProgramCounter { get; } = jumpProgramCounter;
+
+            public IReadOnlyList<ScopeSnapshotEntry> ScopeStates { get; } = scopeStates;
+
+            public IReadOnlyList<LoopContext> Loops { get; } = loops;
         }
 
         private readonly record struct AssignmentTarget(

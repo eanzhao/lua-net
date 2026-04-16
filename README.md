@@ -57,7 +57,7 @@ dotnet sln lua-net.sln list
 | 第 15 步 | 字节码序列化与 REPL | 已完成 |
 | 第 16 步 | 兼容性收口 | 进行中 |
 
-当前 273 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
+当前 282 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
 
 ## 仓库结构
 
@@ -93,14 +93,14 @@ src/
 test/
 ├── Lua.Compatibility.Tests/  官方 Lua 5.5.0 脚本兼容性测试（3 个）
 ├── Lua.Cli.Tests/            CLI / REPL / 脚本入口测试（5 个）
-├── Lua.Runtime.Tests/        运行时单元测试（83 个）
+├── Lua.Runtime.Tests/        运行时单元测试（84 个）
 ├── Lua.Bytecode.Tests/       字节码解析测试（15 个）
 ├── Lua.Syntax.Tests/         词法分析与语法分析测试
-├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（28 个）
+├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（36 个）
 ├── Lua.VM.Tests/             VM 集成测试（105 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（48 份）
+docs/                         阶段规划和设计文档（49 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -233,6 +233,7 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 046 | [vararg-functions](docs/046-step-16-vararg-functions.md) | vararg 函数定义、`...` 多返回编译与 `{...}` 表构造展开 |
 | 047 | [for-loops-bitwise](docs/047-step-16-for-loops-bitwise.md) | 源码 `for` 编译、逻辑右移修正、`bitwise.lua` 转绿与下一缺口推进 |
 | 048 | [local-variable-attributes](docs/048-step-16-local-variable-attributes.md) | 局部变量 `<const>` / `<close>`、作用域 `CLOSE` 与 `locals.lua` 缺口推进 |
+| 049 | [locals-close-runtime](docs/049-step-16-locals-close-runtime.md) | `goto` / `label`、`__close` / `error` / `traceback` 语义修正与 `locals.lua` 当前 hook 缺口 |
 
 ## 开发方式
 

@@ -1352,8 +1352,13 @@ public class LuaVirtualMachineTests
 
         var exception = Should.Throw<LuaRuntimeException>(() => vm.Execute(chunk));
 
-        exception.ErrorObject.AsString().ShouldBe("close-b");
-        vm.State.GlobalEnvironment.GetValue(LuaValue.FromString("log")).AsString().ShouldBe("[b:boom][a:close-b]");
+        exception.ErrorObject.AsString().ShouldContain("close-b");
+        exception.ErrorObject.AsString().ShouldContain("in metamethod 'close'");
+        var log = vm.State.GlobalEnvironment.GetValue(LuaValue.FromString("log")).AsString();
+        log.ShouldContain("[b:");
+        log.ShouldContain("boom");
+        log.ShouldContain("[a:");
+        log.ShouldContain("close-b");
         vm.State.Frames.ShouldBeEmpty();
         vm.State.Stack.Count.ShouldBe(0);
     }
@@ -1685,7 +1690,7 @@ public class LuaVirtualMachineTests
         results[0].AsInteger().ShouldBe(42);
         results[1].AsInteger().ShouldBe(42);
         results[2].AsInteger().ShouldBe(0);
-        results[3].AsString().ShouldBe("boom");
+        results[3].AsString().ShouldContain("boom");
         results[4].AsInteger().ShouldBe(0);
         results[5].AsString().ShouldBe("assert-fail");
         vm.State.Frames.ShouldBeEmpty();
@@ -1990,9 +1995,9 @@ public class LuaVirtualMachineTests
         results[25].AsInteger().ShouldBe(7);
         results[26].AsInteger().ShouldBe(1);
         results[27].AsInteger().ShouldBe(0);
-        results[28].AsString().ShouldBe("co-boom");
+        results[28].AsString().ShouldContain("co-boom");
         results[29].AsInteger().ShouldBe(0);
-        results[30].AsString().ShouldBe("co-boom");
+        results[30].AsString().ShouldContain("co-boom");
         results[31].AsInteger().ShouldBe(1);
         results[32].AsString().ShouldBe("dead");
         vm.State.Frames.ShouldBeEmpty();

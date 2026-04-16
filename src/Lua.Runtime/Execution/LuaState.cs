@@ -77,6 +77,7 @@ public sealed partial class LuaState
         PackageLoaded = new LuaTable("package.loaded");
         PackagePreload = new LuaTable("package.preload");
         PackageSearchers = new LuaTable("package.searchers");
+        GlobalEnvironment.SetValue(LuaValue.FromString("_G"), LuaValue.FromTable(GlobalEnvironment));
         RegisterBaseFunctions();
         RegisterStringSupport();
         RegisterTableSupport();
@@ -87,6 +88,7 @@ public sealed partial class LuaState
         RegisterOsSupport();
         RegisterIoSupport();
         RegisterDebugSupport();
+        RegisterBuiltinPackagePreloads();
     }
 
     public LuaThread MainThread { get; }
@@ -258,6 +260,27 @@ public sealed partial class LuaState
         RegisterLibraryFunction(DebugLibrary, "upvaluejoin", DebugUpvalueJoin, "debug.upvaluejoin");
 
         GlobalEnvironment.SetValue(LuaValue.FromString("debug"), LuaValue.FromTable(DebugLibrary));
+    }
+
+    private void RegisterBuiltinPackagePreloads()
+    {
+        RegisterBuiltinPackagePreload("coroutine", CoroutineLibrary);
+        RegisterBuiltinPackagePreload("string", StringLibrary);
+        RegisterBuiltinPackagePreload("table", TableLibrary);
+        RegisterBuiltinPackagePreload("math", MathLibrary);
+        RegisterBuiltinPackagePreload("utf8", Utf8Library);
+        RegisterBuiltinPackagePreload("os", OsLibrary);
+        RegisterBuiltinPackagePreload("io", IoLibrary);
+        RegisterBuiltinPackagePreload("debug", DebugLibrary);
+    }
+
+    private void RegisterBuiltinPackagePreload(string moduleName, LuaTable library)
+    {
+        PackagePreload.SetValue(
+            LuaValue.FromString(moduleName),
+            LuaValue.FromFunction(new LuaClosure(
+                $"package.preload.{moduleName}",
+                body: new LuaNativeClosureBody((state, closure, arguments) => [LuaValue.FromTable(library)]))));
     }
 
     private void RegisterStringSupport()
@@ -1807,8 +1830,34 @@ public sealed partial class LuaState
 
     private static LuaValue[] Error(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
-
         var errorObject = arguments.Count == 0 ? LuaValue.Nil : arguments[0];
+        var level = 1;
+        if (arguments.Count >= 2 && !arguments[1].IsNil)
+        {
+            if (!TryGetInteger(arguments[1], out var levelInt))
+            {
+                throw CreateArgumentTypeError("error", 2, "integer", arguments[1]);
+            }
+
+            if (levelInt < int.MinValue || levelInt > int.MaxValue)
+            {
+                level = levelInt < 0 ? int.MinValue : int.MaxValue;
+            }
+            else
+            {
+                level = (int)levelInt;
+            }
+        }
+
+        if (level > 0 && errorObject.Kind == LuaValueKind.String)
+        {
+            var location = GetErrorLocation(state, level);
+            if (!string.IsNullOrEmpty(location))
+            {
+                errorObject = LuaValue.FromString($"{location}: {errorObject.AsString()}");
+            }
+        }
+
         throw new LuaRuntimeException(errorObject);
     }
 
@@ -2637,6 +2686,25 @@ public sealed partial class LuaState
             LuaRuntimeException runtimeException => runtimeException.ErrorObject,
             _ => LuaValue.FromString(exception.Message)
         };
+    }
+
+    private static string? GetErrorLocation(LuaState state, int level)
+    {
+        var frames = state.CurrentThread.Frames;
+        var frameIndex = frames.Count - 1 - level;
+        if (frameIndex < 0 || frameIndex >= frames.Count)
+        {
+            return null;
+        }
+
+        var frame = frames[frameIndex];
+        if (!string.IsNullOrEmpty(frame.Closure.SourceName))
+        {
+            var lineDefined = Math.Max(frame.Closure.LineDefined, 1);
+            return $"{frame.Closure.SourceName}:{lineDefined}";
+        }
+
+        return frame.Closure.DebugName;
     }
 
 }

@@ -590,6 +590,274 @@ return log
     }
 
     [Fact]
+    public void Compile_ShouldPassCloseErrorArgumentOnlyOnExceptionalUnwind()
+    {
+        const string source = """
+local trace = {}
+
+local function func2close(f, x, y)
+    local obj = setmetatable({}, { __close = f })
+    if x then
+        return x, obj, y
+    end
+
+    return obj
+end
+
+local function foo(howtoclose, obj, n)
+    do
+        local a <close> = func2close(function(...t)
+            trace[#trace + 1] = string.format("%s:%d:%s:%s", howtoclose, select("#", ...), tostring(t.n), tostring(t[2]))
+        end)
+
+        if howtoclose == "ret" then
+            return obj
+        end
+
+        if howtoclose == "err" then
+            error(obj)
+        end
+    end
+end
+
+foo("scope", nil, 1)
+local ret = foo("ret", 32, 1)
+local st, msg = pcall(foo, "err", 23, 2)
+
+return trace[1], ret, trace[2], tostring(st) .. ":" .. tostring(msg), trace[3]
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(5);
+        results[0].AsString().ShouldBe("scope:1:1:nil");
+        results[1].AsInteger().ShouldBe(32);
+        results[2].AsString().ShouldBe("ret:1:1:nil");
+        results[3].AsString().ShouldBe("false:23");
+        results[4].AsString().ShouldBe("err:2:2:23");
+    }
+
+    [Fact]
+    public void Compile_ShouldCloseGenericForFourthValueAtLoopExit()
+    {
+        const string source = """
+local flag = false
+local closeValue = setmetatable({}, {
+    __close = function()
+        flag = true
+    end
+})
+
+local function values()
+    return (function() return nil end), nil, nil, closeValue
+end
+
+for k in values() do
+end
+
+return flag
+""";
+
+        var results = Execute(source);
+
+        results.ShouldHaveSingleItem();
+        results[0].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldExposeCallerOutsideUnwoundFrameDuringClose()
+    {
+        const string source = """
+local debug = require("debug")
+local normal
+local unwound
+
+local function func2close(f)
+    return setmetatable({}, { __close = f })
+end
+
+local function ok()
+    local _ <close> = func2close(function()
+        normal = debug.getinfo(2).name
+    end)
+
+    return 1
+end
+
+local function bad()
+    local _ <close> = func2close(function(_, msg)
+        unwound = debug.getinfo(2).name .. ":" .. tostring(msg)
+    end)
+
+    error(4)
+end
+
+ok()
+local st, msg = pcall(bad)
+
+return normal, unwound, tostring(st) .. ":" .. tostring(msg)
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(3);
+        results[0].AsString().ShouldBe("ok");
+        results[1].AsString().ShouldBe("pcall:4");
+        results[2].AsString().ShouldBe("false:4");
+    }
+
+    [Fact]
+    public void Compile_ShouldPrefixStringErrorsAndSkipTracebackFrameByDefault()
+    {
+        const string source = """
+local debug = require("debug")
+
+local function func2close(f)
+    return setmetatable({}, { __close = f })
+end
+
+local function foo()
+    do
+        local x1 <close> = func2close(function(self, msg)
+            error("@Y")
+        end)
+
+        local x123 <close> = func2close(function(_, msg)
+            error("@X")
+        end)
+    end
+end
+
+local st, msg = xpcall(foo, debug.traceback)
+
+return tostring(st), string.match(msg, "^[^ ]* @Y") ~= nil, string.find(msg, "'debug.traceback'") == nil
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(3);
+        results[0].AsString().ShouldBe("false");
+        results[1].AsBoolean().ShouldBeTrue();
+        results[2].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldReportNonClosableValuesWithLuaCompatibleMessages()
+    {
+        const string source = """
+local function first()
+    local x <close> = {}
+end
+
+local function second()
+    local xyz <close> = setmetatable({}, { __close = print })
+    getmetatable(xyz).__close = nil
+end
+
+local function func2close(f, x, y)
+    local obj = setmetatable({}, { __close = f })
+    if x then
+        return x, obj, y
+    end
+
+    return obj
+end
+
+local function third()
+    local a1 <close> = func2close(function(_, msg)
+        error(msg)
+    end)
+    local a2 <close> = setmetatable({}, { __close = print })
+    local a3 <close> = func2close(function(_, msg)
+        error(123)
+    end)
+    getmetatable(a2).__close = 4
+end
+
+local st1, msg1 = pcall(first)
+local st2, msg2 = pcall(second)
+local st3, msg3 = pcall(third)
+
+return tostring(st1),
+       string.find(msg1, "variable 'x' got a non%-closable value") ~= nil,
+       tostring(st2),
+       string.find(msg2, "metamethod 'close'") ~= nil,
+       tostring(st3),
+       string.find(msg3, "number value") ~= nil
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(6);
+        results[0].AsString().ShouldBe("false");
+        results[1].AsBoolean().ShouldBeTrue();
+        results[2].AsString().ShouldBe("false");
+        results[3].AsBoolean().ShouldBeTrue();
+        results[4].AsString().ShouldBe("false");
+        results[5].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldAnnotateStringCloseErrorsAsMetamethodFailures()
+    {
+        const string source = """
+local debug = require("debug")
+
+local function func2close(f, x, y)
+    local obj = setmetatable({}, { __close = f })
+    if x then
+        return x, obj, y
+    end
+
+    return obj
+end
+
+local function foo(...)
+    local x123 <close> = func2close(function()
+        error("@x123")
+    end)
+end
+
+local st, msg = xpcall(foo, debug.traceback)
+
+return tostring(st),
+       string.match(msg, "^[^ ]* @x123") ~= nil,
+       string.find(msg, "in metamethod 'close'") ~= nil
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(3);
+        results[0].AsString().ShouldBe("false");
+        results[1].AsBoolean().ShouldBeTrue();
+        results[2].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldTurnDeepRecursionIntoLuaStackOverflow()
+    {
+        const string source = """
+local function overflow(n)
+    return overflow(n + 1)
+end
+
+local function errorh(m)
+    return string.find(m, "stack overflow") ~= nil
+end
+
+local st, handled = xpcall(overflow, errorh, 0)
+
+return tostring(st), handled
+""";
+
+        var results = Execute(source);
+
+        results.Length.ShouldBe(2);
+        results[0].AsString().ShouldBe("false");
+        results[1].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
     public void Compile_ShouldSupportGlobalFunctionDeclarations()
     {
         const string source = """
@@ -623,11 +891,59 @@ return fib(6)
         exception.ErrorObject.AsString().ShouldBe("global 'answer' already defined");
     }
 
+    [Fact]
+    public void Compile_ShouldPreserveDebugMetadataForNamedFunctions()
+    {
+        const string source = """
+local env = 10
+local foo = function ()
+    return env
+end
+
+return foo
+""";
+
+        var vm = new LuaVirtualMachine();
+        var chunk = LuaCompiler.Compile(source, "debug_names.lua");
+        var debugGetInfo = vm.State.DebugLibrary.GetValue(LuaValue.FromString("getinfo")).AsFunction();
+        var debugGetUpvalue = vm.State.DebugLibrary.GetValue(LuaValue.FromString("getupvalue")).AsFunction();
+        var debugSetUpvalue = vm.State.DebugLibrary.GetValue(LuaValue.FromString("setupvalue")).AsFunction();
+
+        var created = vm.Execute(chunk);
+        var functionValue = created.ShouldHaveSingleItem();
+
+        InvokeClosure(vm.State, debugGetInfo, functionValue, LuaValue.FromString("n"))
+            .ShouldHaveSingleItem()
+            .AsTable()
+            .GetValue(LuaValue.FromString("name"))
+            .AsString()
+            .ShouldBe("foo");
+
+        var getResult = InvokeClosure(vm.State, debugGetUpvalue, functionValue, LuaValue.FromInteger(1));
+        getResult[0].AsString().ShouldBe("env");
+        getResult[1].AsInteger().ShouldBe(10);
+
+        InvokeClosure(vm.State, debugSetUpvalue, functionValue, LuaValue.FromInteger(1), LuaValue.FromInteger(25))
+            .ShouldHaveSingleItem()
+            .AsString()
+            .ShouldBe("env");
+        vm.Call(functionValue.AsFunction()).ShouldHaveSingleItem().AsInteger().ShouldBe(25);
+    }
+
     private static LuaValue[] Execute(string source)
     {
         var vm = new LuaVirtualMachine();
         var chunk = LuaCompiler.Compile(source, "sample.lua");
         return vm.Execute(chunk);
+    }
+
+    private static LuaValue[] InvokeClosure(LuaState state, LuaClosure closure, params LuaValue[] arguments)
+    {
+        return closure.Body switch
+        {
+            LuaNativeClosureBody nativeBody => nativeBody.Function(state, closure, arguments),
+            _ => throw new InvalidOperationException("Expected a native closure.")
+        };
     }
 
     private static LuaClosure GetBaseFunction(LuaVirtualMachine vm, string name)

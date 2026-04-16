@@ -247,6 +247,11 @@ public sealed partial class LuaVirtualMachine
 
     private static string GetDebugName(LuaPrototype prototype)
     {
+        if (!string.IsNullOrEmpty(prototype.DebugName))
+        {
+            return prototype.DebugName;
+        }
+
         if (prototype.LineDefined == 0)
         {
             return "main";
@@ -272,7 +277,7 @@ public sealed partial class LuaVirtualMachine
             : LuaValue.Nil;
     }
 
-    private void RegisterToBeClosed(CallFrame frame, int registerIndex)
+    private void RegisterToBeClosed(CallFrame frame, int registerIndex, string? variableName = null)
     {
         var value = GetRegister(frame, registerIndex);
         if (value.IsNil || (value.Kind == LuaValueKind.Boolean && !value.AsBoolean()))
@@ -280,7 +285,7 @@ public sealed partial class LuaVirtualMachine
             return;
         }
 
-        EnsureCloseMethodExists(value);
+        EnsureCloseMethodExists(value, variableName);
         frame.RegisterToBeClosed(registerIndex);
     }
 
@@ -293,11 +298,11 @@ public sealed partial class LuaVirtualMachine
             {
                 try
                 {
-                    CloseToBeClosedValue(frame, trackedRegister, GetErrorObject(currentException));
+                    CloseToBeClosedValue(frame, trackedRegister, currentException);
                 }
                 catch (Exception ex)
                 {
-                    currentException = ex;
+                    currentException = AnnotateCloseError(ex);
                 }
             }
 
@@ -309,7 +314,7 @@ public sealed partial class LuaVirtualMachine
         }
     }
 
-    private void CloseToBeClosedValue(CallFrame frame, int registerIndex, LuaValue errorObject)
+    private void CloseToBeClosedValue(CallFrame frame, int registerIndex, Exception? pendingException)
     {
         var value = GetRegister(frame, registerIndex);
         if (value.IsNil || (value.Kind == LuaValueKind.Boolean && !value.AsBoolean()))
@@ -320,10 +325,16 @@ public sealed partial class LuaVirtualMachine
         var closeMethod = GetCloseMethod(value);
         if (closeMethod.Kind != LuaValueKind.Function)
         {
-            throw new InvalidOperationException("To-be-closed value must expose a '__close' function.");
+            throw CreateCloseMethodRuntimeException(closeMethod);
         }
 
-        Call(closeMethod.AsFunction(), [value, errorObject]);
+        if (pendingException is null)
+        {
+            Call(closeMethod.AsFunction(), [value]);
+            return;
+        }
+
+        Call(closeMethod.AsFunction(), [value, GetErrorObject(pendingException)]);
     }
 
     private static LuaValue GetErrorObject(Exception? exception)
@@ -346,13 +357,46 @@ public sealed partial class LuaVirtualMachine
         ExceptionDispatchInfo.Capture(exception).Throw();
     }
 
-    private void EnsureCloseMethodExists(LuaValue value)
+    private void EnsureCloseMethodExists(LuaValue value, string? variableName = null)
     {
         var closeMethod = GetCloseMethod(value);
         if (closeMethod.Kind != LuaValueKind.Function)
         {
-            throw new InvalidOperationException("To-be-closed value must expose a '__close' function.");
+            if (!string.IsNullOrEmpty(variableName))
+            {
+                throw new LuaRuntimeException(
+                    LuaValue.FromString($"variable '{variableName}' got a non-closable value"));
+            }
+
+            throw CreateCloseMethodRuntimeException(closeMethod);
         }
+    }
+
+    private static LuaRuntimeException CreateCloseMethodRuntimeException(LuaValue closeMethod)
+    {
+        return closeMethod.IsNil
+            ? new LuaRuntimeException(LuaValue.FromString("no metamethod 'close'"))
+            : new LuaRuntimeException(
+                LuaValue.FromString(
+                    $"attempt to call a {GetTypeName(closeMethod)} value (metamethod 'close')"));
+    }
+
+    private static Exception AnnotateCloseError(Exception exception)
+    {
+        if (exception is not LuaRuntimeException runtimeException || runtimeException.ErrorObject.Kind != LuaValueKind.String)
+        {
+            return exception;
+        }
+
+        var message = runtimeException.ErrorObject.AsString();
+        if (message.Contains("in metamethod 'close'", StringComparison.Ordinal))
+        {
+            return exception;
+        }
+
+        return new LuaRuntimeException(
+            LuaValue.FromString($"{message}\nin metamethod 'close'"),
+            runtimeException);
     }
 
     private static LuaRuntimeException CreateTypeError(LuaValue value, string operation)

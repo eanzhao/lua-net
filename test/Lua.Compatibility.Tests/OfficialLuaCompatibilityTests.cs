@@ -25,12 +25,14 @@ public class OfficialLuaCompatibilityTests
     }
 
     [Fact]
-    public void OfficialLocals_ShouldCurrentlyStopAtGotoLabelGap()
+    public void OfficialLocals_ShouldCurrentlyStopAtReturnHookGap()
     {
         var result = RunOfficialScript("locals.lua");
 
         result.ExitCode.ShouldBe(1);
-        result.Error.ShouldContain("goto and labels are not supported yet");
+        result.Output.ShouldContain("testing errors in __close");
+        result.Output.ShouldNotContain("to-be-closed variables in coroutines");
+        result.Error.ShouldContain("assertion failed!");
     }
 
     private static ScriptRunResult RunOfficialScript(string scriptPath)

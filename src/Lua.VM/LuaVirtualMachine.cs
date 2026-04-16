@@ -38,6 +38,7 @@ public sealed partial class LuaVirtualMachine
     private const int CallMetamethodEvent = 23;
     private const int MaxCallMetamethodDepth = 32;
     private const int MaxTableAccessMetamethodDepth = 2000;
+    private const int MaxCallFrameDepth = 1024;
     private int _nextHostCallId = 1;
     private static readonly string[] MetamethodNames =
     [
@@ -98,7 +99,10 @@ public sealed partial class LuaVirtualMachine
             debugName ?? GetDebugName(prototype),
             prototype.Upvalues.Length,
             new LuaBytecodeClosureBody(prototype),
-            BuildUpvalues(prototype, parentFrame: null, environment));
+            BuildUpvalues(prototype, parentFrame: null, environment),
+            prototype.Upvalues.Select(static upvalue => upvalue.Name).ToArray(),
+            prototype.Source,
+            prototype.LineDefined);
     }
 
     private LuaValue[] ExecuteClosure(LuaClosure closure, LuaPrototype prototype, IReadOnlyList<LuaValue> arguments)
@@ -140,7 +144,10 @@ public sealed partial class LuaVirtualMachine
             debugName ?? GetDebugName(prototype),
             prototype.Upvalues.Length,
             new LuaBytecodeClosureBody(prototype),
-            BuildUpvalues(prototype, parentFrame, rootEnvironment: null));
+            BuildUpvalues(prototype, parentFrame, rootEnvironment: null),
+            prototype.Upvalues.Select(static upvalue => upvalue.Name).ToArray(),
+            prototype.Source,
+            prototype.LineDefined);
     }
 
     private LuaClosure LoadBinaryChunk(ReadOnlyMemory<byte> chunkBytes, string? chunkName, bool hasEnvironment, LuaValue environment)
@@ -182,6 +189,13 @@ public sealed partial class LuaVirtualMachine
         var shouldTrackBoundary =
             !string.Equals(closure.DebugName, "coroutine.yield", StringComparison.Ordinal) &&
             !string.Equals(closure.DebugName, "coroutine.isyieldable", StringComparison.Ordinal);
+        EnsureCallFrameCapacity();
+        var nativeFrame = new CallFrame(
+            closure,
+            baseIndex: State.Stack.Count,
+            expectedResults: 0);
+        State.PushFrame(nativeFrame);
+
         try
         {
             if (shouldTrackBoundary)
@@ -212,6 +226,11 @@ public sealed partial class LuaVirtualMachine
             if (shouldTrackBoundary && State.CurrentThread.NonYieldableCallDepth > 0)
             {
                 State.CurrentThread.ExitNonYieldableCall();
+            }
+
+            if (ReferenceEquals(State.CurrentFrame, nativeFrame))
+            {
+                State.PopFrame();
             }
         }
     }
@@ -424,7 +443,7 @@ public sealed partial class LuaVirtualMachine
                     RethrowIfNeeded(CloseResourcesFrom(frame, instruction.A));
                     break;
                 case LuaOpcode.Tbc:
-                    ExecuteToBeClosed(frame, instruction);
+                    ExecuteToBeClosed(prototype, frame, instruction);
                     break;
                 case LuaOpcode.Call:
                     ExecuteCall(frame, instruction);
@@ -553,6 +572,7 @@ public sealed partial class LuaVirtualMachine
         LuaCallReturnTarget returnTarget)
     {
         ArgumentNullException.ThrowIfNull(arguments);
+        EnsureCallFrameCapacity();
 
         var baseIndex = State.Stack.Count;
         var fixedArgumentCount = Math.Min(arguments.Count, prototype.NumberOfParameters);
@@ -597,6 +617,14 @@ public sealed partial class LuaVirtualMachine
         WriteCallResults(frame, frame.PendingCall.RegisterIndex, frame.PendingCall.ResultCount, resumeValues);
         frame.ClearPendingCall();
         return true;
+    }
+
+    private void EnsureCallFrameCapacity()
+    {
+        if (State.Frames.Count >= MaxCallFrameDepth)
+        {
+            throw new LuaRuntimeException(LuaValue.FromString("stack overflow"));
+        }
     }
 
     private bool TryCompleteFrame(
@@ -665,8 +693,8 @@ public sealed partial class LuaVirtualMachine
         {
             var frame = State.CurrentFrame
                 ?? throw new InvalidOperationException("The interpreter has no active call frame.");
-            pendingException = CloseResourcesFrom(frame, 0, pendingException);
             State.PopFrame();
+            pendingException = CloseResourcesFrom(frame, 0, pendingException);
             State.Stack.SetTop(frame.BaseIndex);
         }
 
@@ -687,9 +715,17 @@ public sealed partial class LuaVirtualMachine
         SetRegister(frame, instruction.A, ConvertConstant(prototype.Constants[constantIndex]));
     }
 
-    private void ExecuteToBeClosed(CallFrame frame, LuaInstruction instruction)
+    private void ExecuteToBeClosed(LuaPrototype prototype, CallFrame frame, LuaInstruction instruction)
     {
-        RegisterToBeClosed(frame, instruction.A);
+        var instructionIndex = frame.ProgramCounter - 1;
+        var variableName =
+            prototype.ToBeClosedNames is not null &&
+            instructionIndex >= 0 &&
+            instructionIndex < prototype.ToBeClosedNames.Length
+                ? prototype.ToBeClosedNames[instructionIndex]
+                : null;
+
+        RegisterToBeClosed(frame, instruction.A, variableName);
     }
 
     private void ExecuteClosureInstruction(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)

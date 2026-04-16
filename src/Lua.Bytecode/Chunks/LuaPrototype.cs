@@ -2,6 +2,8 @@ namespace Lua.Bytecode.Chunks;
 
 public sealed class LuaPrototype
 {
+    public string? DebugName { get; init; }
+
     public required int LineDefined { get; init; }
 
     public required int LastLineDefined { get; init; }
@@ -27,4 +29,6 @@ public sealed class LuaPrototype
     public required LuaAbsoluteLineInfo[] AbsoluteLineInfo { get; init; }
 
     public required LuaLocalVariable[] LocalVariables { get; init; }
+
+    public string?[]? ToBeClosedNames { get; init; }
 }
