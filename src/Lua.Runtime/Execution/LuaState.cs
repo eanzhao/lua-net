@@ -745,14 +745,7 @@ public sealed partial class LuaState
 
     private void RunHostGarbageCollection(bool resetStepDebt = true)
     {
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        SweepWeakTables();
-        LuaTable.CleanupWeakEntries();
-        if (resetStepDebt)
-        {
-            _gcStepDebt = 0;
-        }
+        RunLuaGarbageCollection(resetStepDebt);
     }
 
     private void SweepWeakTables()
@@ -900,23 +893,7 @@ public sealed partial class LuaState
 
     private bool RunGarbageCollectorStep(int stepSize)
     {
-        RunHostGarbageCollection(resetStepDebt: false);
-
-        if (_gcStepSize == FullGcStepSize)
-        {
-            _gcStepDebt = 0;
-            return true;
-        }
-
-        var increment = stepSize <= 0 ? 1 : stepSize;
-        _gcStepDebt = checked(_gcStepDebt + increment);
-        if (_gcStepDebt >= _gcStepSize)
-        {
-            _gcStepDebt = 0;
-            return true;
-        }
-
-        return false;
+        return RunGarbageCollectorStepCore(stepSize);
     }
 
     private LuaValue SetGarbageCollectorMode(GarbageCollectorMode mode)

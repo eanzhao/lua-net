@@ -57,7 +57,8 @@ dotnet sln lua-net.sln list
 | 第 15 步 | 字节码序列化与 REPL | 已完成 |
 | 第 16 步 | 兼容性收口 | 进行中 |
 
-当前 294 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
+当前 297 个测试全部通过。Step 1–15 已全部完成，正在进行 Step 16（兼容性收口）。
+GC 兼容线已补到 `__gc` / 自动 GC / ephemeron，手工推进 `gc.lua` 的当前下一缺口是 `collectgarbage("count")` 对长字符串场景的内存统计口径。
 
 ## 仓库结构
 
@@ -97,10 +98,10 @@ test/
 ├── Lua.Bytecode.Tests/       字节码解析测试（15 个）
 ├── Lua.Syntax.Tests/         词法分析与语法分析测试
 ├── Lua.Compiler.Tests/       编译器与文本 chunk 集成测试（41 个）
-├── Lua.VM.Tests/             VM 集成测试（106 个，使用真实 Lua 5.5 chunk fixture）
+├── Lua.VM.Tests/             VM 集成测试（109 个，使用真实 Lua 5.5 chunk fixture）
 └── Lua.Core.Test/            Lua.Core 测试
 
-docs/                         阶段规划和设计文档（54 份）
+docs/                         阶段规划和设计文档（55 份）
 references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 ```
 
@@ -239,6 +240,7 @@ references/lua-5.5.0/         官方 Lua 5.5.0 源码参考
 | 052 | [yieldable-protected-calls](docs/052-step-16-yieldable-protected-calls.md) | yieldable `pcall` / `xpcall`、error-unwind `__close` continuation 与 `locals.lua` 转绿 |
 | 053 | [gc-api-modes](docs/053-step-16-gc-api-modes.md) | `collectgarbage` mode / param API、`gengc.lua` 缺口推进到 weak tables |
 | 054 | [weak-tables](docs/054-step-16-weak-tables.md) | 弱表 `__mode` 语义、live register 清理、`gengc.lua` 转绿与 `gc.lua` ephemeron 缺口 |
+| 055 | [gc-finalizers-ephemerons](docs/055-step-16-gc-finalizers-ephemerons.md) | `__gc` 终结器、自动 GC、ephemeron 固定点传播与 `gc.lua` 当前 count 缺口 |
 
 ## 开发方式
 

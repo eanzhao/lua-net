@@ -314,6 +314,7 @@ public sealed partial class LuaVirtualMachine
 
                 var prototype = GetCurrentPrototype(frame);
                 frame.SetLiveRegisterTop(GetLiveRegisterTop(frame, prototype));
+                State.MaybeRunAutomaticGarbageCollection();
 
                 if (frame.ProgramCounter >= prototype.Code.Length)
                 {

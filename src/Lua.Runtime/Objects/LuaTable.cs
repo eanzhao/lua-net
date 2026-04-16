@@ -7,9 +7,12 @@ public sealed class LuaTable : IMetatableOwner
 {
     private static readonly object RegistrySync = new();
     private static readonly List<WeakReference<LuaTable>> RegisteredTables = [];
+    private static readonly List<LuaTable> PendingFinalizationTables = [];
     private readonly Dictionary<LuaValue, TableEntry> _strongKeyEntries;
     private readonly List<TableEntry> _entriesInOrder;
     private WeakMode _weakMode;
+    private bool _isMarkedForFinalization;
+    private bool _hasFinalizerRun;
 
     public LuaTable(string? debugName = null, int arrayCapacity = 0, int hashCapacity = 0)
     {
@@ -27,6 +30,12 @@ public sealed class LuaTable : IMetatableOwner
 
     public LuaTable? Metatable { get; private set; }
 
+    internal bool IsMarkedForFinalization => _isMarkedForFinalization;
+
+    internal bool HasFinalizerRun => _hasFinalizerRun;
+
+    internal LuaValue AsValue() => LuaValue.FromTable(this);
+
     public static void CleanupWeakEntries()
     {
         lock (RegistrySync)
@@ -41,6 +50,28 @@ public sealed class LuaTable : IMetatableOwner
 
                 table.RefreshEntries();
             }
+        }
+    }
+
+    internal static List<LuaTable> GetRegisteredTablesSnapshot()
+    {
+        lock (RegistrySync)
+        {
+            var snapshot = new List<LuaTable>(RegisteredTables.Count);
+            for (var index = RegisteredTables.Count - 1; index >= 0; index--)
+            {
+                if (!RegisteredTables[index].TryGetTarget(out var table))
+                {
+                    RegisteredTables.RemoveAt(index);
+                    continue;
+                }
+
+                table.RefreshEntries();
+                snapshot.Add(table);
+            }
+
+            snapshot.Reverse();
+            return snapshot;
         }
     }
 
@@ -67,10 +98,74 @@ public sealed class LuaTable : IMetatableOwner
                 visitor(key);
             }
 
-            if (!entry.HasWeakValue)
+            if (!entry.HasWeakKey && !entry.HasWeakValue)
             {
                 visitor(value);
             }
+        }
+    }
+
+    internal bool PropagateEphemeronValues(HashSet<object> reachableObjects, Queue<object> pendingObjects)
+    {
+        ArgumentNullException.ThrowIfNull(reachableObjects);
+        ArgumentNullException.ThrowIfNull(pendingObjects);
+
+        RefreshEntries();
+        if (!_weakMode.HasFlag(WeakMode.Keys) || _weakMode.HasFlag(WeakMode.Values))
+        {
+            return false;
+        }
+
+        var changed = false;
+        foreach (var entry in _entriesInOrder)
+        {
+            if (!entry.HasWeakKey ||
+                !entry.IsWeakKeyReachable(reachableObjects) ||
+                !entry.TryGetValue(out var value))
+            {
+                continue;
+            }
+
+            changed |= EnqueueCollectableValue(value, reachableObjects, pendingObjects);
+        }
+
+        return changed;
+    }
+
+    internal void ClearWeakValues(HashSet<object> reachableObjects)
+    {
+        ArgumentNullException.ThrowIfNull(reachableObjects);
+        RefreshEntries();
+
+        for (var index = _entriesInOrder.Count - 1; index >= 0; index--)
+        {
+            var entry = _entriesInOrder[index];
+            if (!entry.HasWeakValue || entry.IsWeakValueReachable(reachableObjects))
+            {
+                continue;
+            }
+
+            RemoveEntryAt(index, entry);
+        }
+    }
+
+    internal void ClearWeakKeys(HashSet<object> reachableObjects, HashSet<object> preservedKeys)
+    {
+        ArgumentNullException.ThrowIfNull(reachableObjects);
+        ArgumentNullException.ThrowIfNull(preservedKeys);
+        RefreshEntries();
+
+        for (var index = _entriesInOrder.Count - 1; index >= 0; index--)
+        {
+            var entry = _entriesInOrder[index];
+            if (!entry.HasWeakKey ||
+                entry.IsWeakKeyReachable(reachableObjects) ||
+                entry.HasWeakKeyTarget(preservedKeys))
+            {
+                continue;
+            }
+
+            RemoveEntryAt(index, entry);
         }
     }
 
@@ -178,7 +273,22 @@ public sealed class LuaTable : IMetatableOwner
     public void SetMetatable(LuaTable? metatable)
     {
         Metatable = metatable;
+        TrackFinalizerRegistration();
         RefreshEntries();
+    }
+
+    internal void MarkFinalizerRun()
+    {
+        if (_hasFinalizerRun)
+        {
+            return;
+        }
+
+        _hasFinalizerRun = true;
+        lock (RegistrySync)
+        {
+            PendingFinalizationTables.Remove(this);
+        }
     }
 
     public long GetSequenceLength()
@@ -299,12 +409,7 @@ public sealed class LuaTable : IMetatableOwner
                 continue;
             }
 
-            if (!entry.HasWeakKey && entry.TryGetKey(out var strongKey))
-            {
-                _strongKeyEntries.Remove(strongKey);
-            }
-
-            _entriesInOrder.RemoveAt(index);
+            RemoveEntryAt(index, entry);
         }
     }
 
@@ -366,6 +471,16 @@ public sealed class LuaTable : IMetatableOwner
         }
     }
 
+    private void RemoveEntryAt(int index, TableEntry entry)
+    {
+        if (!entry.HasWeakKey && entry.TryGetKey(out var strongKey))
+        {
+            _strongKeyEntries.Remove(strongKey);
+        }
+
+        _entriesInOrder.RemoveAt(index);
+    }
+
     private List<KeyValuePair<LuaValue, LuaValue>> GetLiveEntries()
     {
         var liveEntries = new List<KeyValuePair<LuaValue, LuaValue>>(_entriesInOrder.Count);
@@ -403,6 +518,45 @@ public sealed class LuaTable : IMetatableOwner
             LuaValueKind.Function or
             LuaValueKind.Thread or
             LuaValueKind.UserData;
+    }
+
+    private void TrackFinalizerRegistration()
+    {
+        if (_isMarkedForFinalization ||
+            Metatable is null ||
+            !Metatable.TryGetValue(LuaValue.FromString("__gc"), out var finalizerValue) ||
+            finalizerValue.IsNil)
+        {
+            return;
+        }
+
+        _isMarkedForFinalization = true;
+        lock (RegistrySync)
+        {
+            PendingFinalizationTables.Add(this);
+        }
+    }
+
+    private static bool EnqueueCollectableValue(
+        LuaValue value,
+        HashSet<object> reachableObjects,
+        Queue<object> pendingObjects)
+    {
+        object? target = value.Kind switch
+        {
+            LuaValueKind.Table => value.AsTable(),
+            LuaValueKind.Function => value.AsFunction(),
+            LuaValueKind.Thread => value.AsThread(),
+            LuaValueKind.UserData => value.AsUserData(),
+            _ => null
+        };
+        if (target is null || !reachableObjects.Add(target))
+        {
+            return false;
+        }
+
+        pendingObjects.Enqueue(target);
+        return true;
     }
 
     private static LuaValue NormalizeKey(LuaValue key)
@@ -526,6 +680,11 @@ public sealed class LuaTable : IMetatableOwner
             return _weakKey is null || _weakKey.IsReachable(reachableObjects);
         }
 
+        public bool HasWeakKeyTarget(HashSet<object> targets)
+        {
+            return _weakKey is not null && _weakKey.Matches(targets);
+        }
+
         public bool IsWeakValueReachable(HashSet<object> reachableObjects)
         {
             return _weakValue is null || _weakValue.IsReachable(reachableObjects);
@@ -586,6 +745,11 @@ public sealed class LuaTable : IMetatableOwner
         public bool IsReachable(HashSet<object> reachableObjects)
         {
             return _reference.TryGetTarget(out var target) && reachableObjects.Contains(target);
+        }
+
+        public bool Matches(HashSet<object> targets)
+        {
+            return _reference.TryGetTarget(out var target) && targets.Contains(target);
         }
     }
 }

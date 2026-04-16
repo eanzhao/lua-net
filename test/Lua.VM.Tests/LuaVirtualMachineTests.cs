@@ -2209,6 +2209,116 @@ end
         vm.Call(target).ShouldBe([LuaValue.FromBoolean(true)]);
     }
 
+    [Fact]
+    public void AutomaticGarbageCollection_ShouldRunTableFinalizersDuringExecution()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function()
+    local finish = false
+    local u = setmetatable({}, { __gc = function() finish = true end })
+    local iterations = 0
+
+    while not finish and iterations < 2000 do
+        iterations = iterations + 1
+        u = {}
+    end
+
+    return finish, iterations
+end
+""");
+
+        var results = vm.Call(target);
+
+        results[0].AsBoolean().ShouldBeTrue();
+        results[1].AsInteger().ShouldBeLessThan(2000L);
+    }
+
+    [Fact]
+    public void CollectGarbage_ShouldClearWeakValuesBeforeRunningFinalizers()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function()
+    local valueCleared = false
+    local weakKeyVisible = false
+    local weakKeyCleared = false
+    local C = setmetatable({}, { __mode = "v" })
+    local C1 = setmetatable({}, { __mode = "k" })
+
+    do
+        local a = {}
+        local t = {}
+        C.key = t
+        C1[t] = 1
+        a.x = t
+        setmetatable(a, { __gc = function()
+            valueCleared = C.key == nil
+            weakKeyVisible = type(next(C1)) == "table"
+        end })
+        a = nil
+        t = nil
+    end
+
+    collectgarbage()
+    collectgarbage()
+    weakKeyCleared = next(C1) == nil
+    return valueCleared, weakKeyVisible, weakKeyCleared
+end
+""");
+
+        vm.Call(target).ShouldBe(
+        [
+            LuaValue.FromBoolean(true),
+            LuaValue.FromBoolean(true),
+            LuaValue.FromBoolean(true)
+        ]);
+    }
+
+    [Fact]
+    public void CollectGarbage_ShouldPreserveEphemeronChains()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function()
+    local mt = { __mode = "k" }
+    local a = {{10}, {20}, {30}, {40}}
+    setmetatable(a, mt)
+
+    local x = nil
+    for i = 1, 100 do
+        local n = {}
+        a[n] = { k = { x } }
+        x = n
+    end
+
+    collectgarbage()
+
+    local n = x
+    local count = 0
+    while n do
+        n = a[n].k[1]
+        count = count + 1
+    end
+
+    x = nil
+    collectgarbage()
+
+    for i = 1, 4 do
+        a[i] = nil
+    end
+
+    return count, next(a) == nil
+end
+""");
+
+        vm.Call(target).ShouldBe(
+        [
+            LuaValue.FromInteger(100),
+            LuaValue.FromBoolean(true)
+        ]);
+    }
+
     private static string GetFixturePath(string folder, string fileName)
     {
         return Path.Combine(AppContext.BaseDirectory, "fixtures", "lua55", folder, fileName);
