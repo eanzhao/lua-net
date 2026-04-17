@@ -615,13 +615,13 @@ public sealed class LuaLexer
         uint codePoint = 0;
         while (IsHexDigit(Current))
         {
-            var nextCodePoint = ((ulong)codePoint * 16UL) + (uint)HexValue(Current);
-            if (nextCodePoint > 0x10FFFFUL)
+            // Lua 5.5 allows up to 0x7FFFFFFF (31 bits)
+            if (codePoint > (0x7FFFFFFFu >> 4))
             {
                 throw CreateSyntaxException("UTF-8 value too large", CurrentPosition);
             }
 
-            codePoint = (uint)nextCodePoint;
+            codePoint = (codePoint << 4) + (uint)HexValue(Current);
             AdvanceSingle();
         }
 
@@ -632,12 +632,46 @@ public sealed class LuaLexer
 
         AdvanceSingle();
 
-        if (codePoint is >= 0xD800u and <= 0xDFFFu)
+        return EncodeExtendedUtf8(codePoint);
+    }
+
+    /// <summary>
+    /// Encode a Unicode code point (or any value up to 0x7FFFFFFF) as extended UTF-8.
+    /// Matches Lua 5.5 luaO_utf8esc behavior: produces up to 6 bytes for values above U+10FFFF.
+    /// For valid Unicode code points, returns a normal UTF-16 string. For extended values
+    /// or surrogate halves, returns one C# char per raw byte (Latin1 mapping).
+    /// </summary>
+    private static string EncodeExtendedUtf8(uint x)
+    {
+        // Standard Unicode range, no surrogate halves: use proper UTF-16 encoding.
+        if (x <= 0x10FFFFu && (x < 0xD800u || x > 0xDFFFu))
         {
-            throw CreateSyntaxException("UTF-8 value too large", CurrentPosition);
+            return char.ConvertFromUtf32((int)x);
         }
 
-        return char.ConvertFromUtf32((int)codePoint);
+        // Extended Lua 5.5 UTF-8 (5- or 6-byte sequence) or surrogate half:
+        // emit raw bytes as Latin1 chars so the lexer caller preserves them losslessly.
+        Span<byte> buffer = stackalloc byte[6];
+        var n = 0;
+        uint mfb = 0x3f;
+        do
+        {
+            buffer[5 - n] = (byte)(0x80 | (x & 0x3f));
+            x >>= 6;
+            mfb >>= 1;
+            n++;
+        } while (x > mfb);
+
+        buffer[5 - n] = (byte)((~mfb << 1) | x);
+        n++;
+
+        var chars = new char[n];
+        for (var i = 0; i < n; i++)
+        {
+            chars[i] = (char)buffer[6 - n + i];
+        }
+
+        return new string(chars);
     }
 
     private int ReadDecimalEscape()
@@ -815,14 +849,10 @@ public sealed class LuaLexer
         var index = 2;
         var digitsBeforeDot = ConsumeHexDigits(text, ref index);
         var digitsAfterDot = false;
-        var hasDot = false;
-        var fractionStart = -1;
 
         if (index < text.Length && text[index] == '.')
         {
-            hasDot = true;
             index++;
-            fractionStart = index;
             digitsAfterDot = ConsumeHexDigits(text, ref index);
         }
 
@@ -833,8 +863,8 @@ public sealed class LuaLexer
 
         if (index == text.Length)
         {
-            return !hasDot ||
-                (digitsAfterDot && IsAllHexZero(text[fractionStart..index]));
+            // Lua 5.5 accepts hex floats without exponent: 0x0.41 is valid.
+            return true;
         }
 
         if (text[index] != 'p' && text[index] != 'P')

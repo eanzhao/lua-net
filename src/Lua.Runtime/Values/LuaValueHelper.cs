@@ -561,8 +561,10 @@ public static class LuaValueHelper
                 return true;
             }
 
-            result = LuaValue.Nil;
-            return false;
+            // Lua 5.5 accepts hex floats without exponent: 0x0.41 = 65/256
+            var numberNoExp = integerPart + fractionPart;
+            result = LuaValue.FromFloat(negative ? -numberNoExp : numberNoExp);
+            return true;
         }
 
         var number = (integerPart + fractionPart) * Math.Pow(2d, exponent);

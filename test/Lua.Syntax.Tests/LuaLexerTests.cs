@@ -135,9 +135,20 @@ beta]=]
     }
 
     [Fact]
-    public void Tokenize_TooLargeUnicodeEscape_ShouldThrow()
+    public void Tokenize_HugeUnicodeEscape_ShouldEncodeAsExtendedUtf8()
     {
-        var exception = Should.Throw<LuaSyntaxException>(() => new LuaLexer("'\\u{110000}'").Tokenize());
+        // Lua 5.5 allows \u{} values up to 0x7FFFFFFF, encoding them as extended UTF-8 (5-6 bytes).
+        var token = new LuaLexer("'\\u{110000}'").Tokenize().Single(t => t.Kind == LuaTokenKind.String);
+        // U+110000 encodes to 4 bytes in extended UTF-8: F4 90 80 80
+        token.StringValue.ShouldNotBeNullOrEmpty();
+        token.StringValue!.Length.ShouldBe(4);
+    }
+
+    [Fact]
+    public void Tokenize_OverflowUnicodeEscape_ShouldThrow()
+    {
+        // Values > 0x7FFFFFFF must still be rejected.
+        var exception = Should.Throw<LuaSyntaxException>(() => new LuaLexer("'\\u{80000000}'").Tokenize());
 
         exception.Message.ShouldContain("UTF-8 value too large");
     }
@@ -167,10 +178,12 @@ beta]=]
     }
 
     [Fact]
-    public void Tokenize_HexFloatWithoutExponent_ShouldThrow()
+    public void Tokenize_HexFloatWithoutExponent_ShouldBeAccepted()
     {
-        Should.Throw<LuaSyntaxException>(() => new LuaLexer("0x1.8").Tokenize())
-            .Message.ShouldContain("malformed number");
+        // Lua 5.5 accepts hex floats without exponent: 0x1.8 = 1.5
+        var tokens = new LuaLexer("0x1.8").Tokenize();
+        tokens[0].Kind.ShouldBe(LuaTokenKind.Number);
+        tokens[0].Lexeme.ShouldBe("0x1.8");
     }
 
     [Fact]
