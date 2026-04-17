@@ -28,12 +28,6 @@ public sealed partial class LuaVirtualMachine
         var (success, result) = operation(left, right);
         if (!success)
         {
-            if (IsBitwiseMetamethodEvent(metamethodEvent) &&
-                (IsNumericWithoutIntegerRepresentation(left) || IsNumericWithoutIntegerRepresentation(right)))
-            {
-                throw CreateIntegerRepresentationError();
-            }
-
             if (HasFollowingMetamethodInstruction(frame, prototype))
             {
                 return;
@@ -57,11 +51,6 @@ public sealed partial class LuaVirtualMachine
         var (success, result) = operation(operand);
         if (!success)
         {
-            if (IsBitwiseMetamethodEvent(metamethodEvent) && IsNumericWithoutIntegerRepresentation(operand))
-            {
-                throw CreateIntegerRepresentationError();
-            }
-
             result = CallBinaryMetamethodResult(operand, operand, metamethodEvent);
         }
 

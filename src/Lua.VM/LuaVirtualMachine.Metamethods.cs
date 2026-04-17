@@ -72,6 +72,12 @@ public sealed partial class LuaVirtualMachine
             return metamethod;
         }
 
+        if (IsBitwiseMetamethodEvent(eventIndex) &&
+            (IsNumericWithoutIntegerRepresentation(left) || IsNumericWithoutIntegerRepresentation(right)))
+        {
+            throw CreateIntegerRepresentationError();
+        }
+
         if (IsArithmeticMetamethodEvent(eventIndex))
         {
             var operand = IsArithmeticOperandCompatible(left) ? right : left;
