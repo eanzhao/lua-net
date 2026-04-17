@@ -20,6 +20,7 @@ public sealed partial class LuaState
         var what = arguments.Count >= 2 && arguments[1].Kind == LuaValueKind.String
             ? arguments[1].AsString()
             : "flnStu";
+        ValidateGetInfoOptions(level, what);
 
         LuaClosure? target = null;
         int frameIndex = -1;
@@ -53,23 +54,30 @@ public sealed partial class LuaState
         {
             if (what.Contains('n'))
             {
-                info.SetValue(LuaValue.FromString("name"), target.DebugName is not null
+                var name = frameIndex >= 0 && target.DebugName is not null
                     ? LuaValue.FromString(target.DebugName)
-                    : LuaValue.Nil);
-                info.SetValue(LuaValue.FromString("namewhat"), LuaValue.FromString(""));
+                    : frameIndex < 0 && string.Equals(what, "n", StringComparison.Ordinal) && target.DebugName is not null
+                    ? LuaValue.FromString(target.DebugName)
+                    : LuaValue.Nil;
+                info.SetValue(LuaValue.FromString("name"), name);
+                info.SetValue(LuaValue.FromString("namewhat"), LuaValue.FromString(frameIndex >= 0 && target.DebugName is not null ? "global" : string.Empty));
             }
 
             if (what.Contains('S'))
             {
-                var isMain = target.DebugName == "main";
+                var isMain = target.LineDefined == 0;
+                var source = GetClosureSource(target);
                 info.SetValue(LuaValue.FromString("source"), LuaValue.FromString("=?"));
-                info.SetValue(LuaValue.FromString("short_src"), LuaValue.FromString("?"));
+                info.SetValue(LuaValue.FromString("source"), LuaValue.FromString(source));
+                info.SetValue(LuaValue.FromString("short_src"), LuaValue.FromString(GetShortSource(source)));
                 info.SetValue(LuaValue.FromString("what"),
                     target.Body is LuaNativeClosureBody
                         ? LuaValue.FromString("C")
                         : isMain
                             ? LuaValue.FromString("main")
                             : LuaValue.FromString("Lua"));
+                info.SetValue(LuaValue.FromString("linedefined"), LuaValue.FromInteger(target.Body is LuaNativeClosureBody ? -1 : target.LineDefined));
+                info.SetValue(LuaValue.FromString("lastlinedefined"), LuaValue.FromInteger(target.Body is LuaNativeClosureBody ? -1 : target.LastLineDefined));
             }
 
             if (what.Contains('l') && frameIndex >= 0)
@@ -78,9 +86,21 @@ public sealed partial class LuaState
                 info.SetValue(LuaValue.FromString("currentline"), LuaValue.FromInteger(currentLine));
             }
 
+            if (what.Contains('f'))
+            {
+                info.SetValue(LuaValue.FromString("func"), LuaValue.FromFunction(target));
+            }
+
+            if (what.Contains('L') && target.Body is not LuaNativeClosureBody)
+            {
+                info.SetValue(LuaValue.FromString("activelines"), LuaValue.FromTable(CreateActiveLinesTable(target)));
+            }
+
             if (what.Contains('u'))
             {
                 info.SetValue(LuaValue.FromString("nups"), LuaValue.FromInteger(target.UpvalueCount));
+                info.SetValue(LuaValue.FromString("nparams"), LuaValue.FromInteger(target.ParameterCount));
+                info.SetValue(LuaValue.FromString("isvararg"), LuaValue.FromBoolean(target.IsVarArg));
             }
         }
 
@@ -93,6 +113,110 @@ public sealed partial class LuaState
 
         var programCounter = Math.Max(0, frame.ProgramCounter - 1);
         return frame.Closure.ResolveLine(programCounter);
+    }
+
+    private static void ValidateGetInfoOptions(LuaValue level, string what)
+    {
+        foreach (var option in what)
+        {
+            if (option is not ('>' or 'S' or 'l' or 'u' or 'f' or 'L' or 'n' or 'r' or 't'))
+            {
+                throw CreateArgumentError("debug.getinfo", 2, "invalid option");
+            }
+        }
+
+        if (what.Contains('>') && level.Kind != LuaValueKind.Function)
+        {
+            throw CreateArgumentError("debug.getinfo", 2, "invalid option");
+        }
+    }
+
+    private static string GetClosureSource(LuaClosure closure)
+    {
+        if (closure.Body is LuaNativeClosureBody)
+        {
+            return "=[C]";
+        }
+
+        return closure.SourceName is null ? "=?" : closure.SourceName;
+    }
+
+    private static string GetShortSource(string source)
+    {
+        if (source.Length == 0)
+        {
+            return "[string \"\"]";
+        }
+
+        if (source == "?")
+        {
+            return "?";
+        }
+
+        if (source == "=[C]")
+        {
+            return "[C]";
+        }
+
+        if (source[0] == '=')
+        {
+            return source[1..];
+        }
+
+        if (source[0] == '@')
+        {
+            const int maxLength = 60;
+            var fileName = source[1..];
+            return fileName.Length <= maxLength
+                ? fileName
+                : "..." + fileName[(fileName.Length - (maxLength - 3))..];
+        }
+
+        const int maxStringLength = 60;
+        var newlineIndex = source.IndexOf('\n');
+        var visible = newlineIndex >= 0 ? source[..newlineIndex] : source;
+        if (visible.Length > maxStringLength)
+        {
+            visible = visible[..maxStringLength];
+        }
+
+        var truncated = newlineIndex >= 0 || visible.Length < source.Length;
+        if (string.IsNullOrEmpty(visible))
+        {
+            visible = "...";
+            truncated = false;
+        }
+        else if (truncated)
+        {
+            visible += "...";
+        }
+
+        return $"[string \"{visible}\"]";
+    }
+
+    private static LuaTable CreateActiveLinesTable(LuaClosure closure)
+    {
+        var activeLines = new LuaTable("debug.getinfo.activelines");
+        for (var programCounter = 0; programCounter < closure.InstructionCount; programCounter++)
+        {
+            var line = closure.ResolveLine(programCounter);
+            if (line > 0)
+            {
+                activeLines.SetValue(LuaValue.FromInteger(line), LuaValue.FromBoolean(true));
+            }
+        }
+
+        if (closure.LineDefined > 0)
+        {
+            activeLines.SetValue(LuaValue.FromInteger(closure.LineDefined), LuaValue.Nil);
+        }
+
+        if (closure.LastLineDefined > closure.LineDefined)
+        {
+            activeLines.SetValue(LuaValue.FromInteger(closure.LastLineDefined), LuaValue.FromBoolean(true));
+        }
+
+        return activeLines;
     }
 
     private static LuaValue[] DebugTraceback(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

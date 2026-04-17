@@ -16,10 +16,17 @@ public sealed class LuaClosure
         string?[]? upvalueNames = null,
         string? sourceName = null,
         int lineDefined = 0,
-        Func<int, int>? lineResolver = null)
+        Func<int, int>? lineResolver = null,
+        int lastLineDefined = 0,
+        int parameterCount = 0,
+        bool isVarArg = true,
+        int instructionCount = 0)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(upvalueCount);
         ArgumentOutOfRangeException.ThrowIfNegative(lineDefined);
+        ArgumentOutOfRangeException.ThrowIfNegative(lastLineDefined);
+        ArgumentOutOfRangeException.ThrowIfNegative(parameterCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(instructionCount);
 
         if (upvalues is not null && upvalues.Length != upvalueCount)
         {
@@ -39,6 +46,10 @@ public sealed class LuaClosure
         SourceName = sourceName;
         LineDefined = lineDefined;
         LineResolver = lineResolver;
+        LastLineDefined = lastLineDefined;
+        ParameterCount = parameterCount;
+        IsVarArg = isVarArg;
+        InstructionCount = instructionCount;
 
         lock (RegistrySync)
         {
@@ -59,6 +70,14 @@ public sealed class LuaClosure
     public string? SourceName { get; }
 
     public int LineDefined { get; }
+
+    public int LastLineDefined { get; }
+
+    public int ParameterCount { get; }
+
+    public bool IsVarArg { get; }
+
+    public int InstructionCount { get; }
 
     public Func<int, int>? LineResolver { get; }
 

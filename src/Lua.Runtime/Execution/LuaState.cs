@@ -1153,7 +1153,8 @@ public sealed partial class LuaState
             return [LuaValue.Nil, LuaValue.FromString(errorMessage)];
         }
 
-        return state.LoadChunk(bytes, fileName, mode, hasEnvironment, environment);
+        var chunkName = IsBinaryChunk(bytes.Span) ? fileName : "@" + fileName;
+        return state.LoadChunk(bytes, chunkName, mode, hasEnvironment, environment);
     }
 
     private static LuaValue[] DoFile(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

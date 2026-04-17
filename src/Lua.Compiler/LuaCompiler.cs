@@ -14,7 +14,7 @@ public static class LuaCompiler
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        var actualSourceName = string.IsNullOrWhiteSpace(sourceName) ? "<input>" : sourceName;
+        var actualSourceName = sourceName ?? "<input>";
         var syntax = LuaParser.Parse(source, actualSourceName);
         return new ChunkCompiler(actualSourceName).Compile(syntax);
     }

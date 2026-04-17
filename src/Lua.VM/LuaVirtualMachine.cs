@@ -104,7 +104,11 @@ public sealed partial class LuaVirtualMachine
             prototype.Upvalues.Select(static upvalue => upvalue.Name).ToArray(),
             prototype.Source,
             prototype.LineDefined,
-            programCounter => LuaLineInfoResolver.GetLine(prototype, programCounter));
+            programCounter => LuaLineInfoResolver.GetLine(prototype, programCounter),
+            prototype.LastLineDefined,
+            prototype.NumberOfParameters,
+            IsVarArgFunction(prototype),
+            prototype.Code.Length);
     }
 
     private LuaValue[] ExecuteClosure(LuaClosure closure, LuaPrototype prototype, IReadOnlyList<LuaValue> arguments)
@@ -155,7 +159,11 @@ public sealed partial class LuaVirtualMachine
             prototype.Upvalues.Select(static upvalue => upvalue.Name).ToArray(),
             prototype.Source,
             prototype.LineDefined,
-            programCounter => LuaLineInfoResolver.GetLine(prototype, programCounter));
+            programCounter => LuaLineInfoResolver.GetLine(prototype, programCounter),
+            prototype.LastLineDefined,
+            prototype.NumberOfParameters,
+            IsVarArgFunction(prototype),
+            prototype.Code.Length);
     }
 
     private LuaClosure LoadBinaryChunk(ReadOnlyMemory<byte> chunkBytes, string? chunkName, bool hasEnvironment, LuaValue environment)
