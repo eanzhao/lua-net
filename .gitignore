@@ -319,3 +319,4 @@ tools
 .idea/.idea.AElf/.idea/workspace.xml
 .idea/.idea.AElf/riderModule.iml
 .alma-snapshots
+.context/
