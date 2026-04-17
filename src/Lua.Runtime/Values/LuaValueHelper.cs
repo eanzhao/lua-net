@@ -581,16 +581,41 @@ public static class LuaValueHelper
     {
         var prefixStart = text[0] is '+' or '-' ? 3 : 2;
         var digits = text[prefixStart..];
-        if (!ulong.TryParse(digits, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var number))
+        if (digits.Length == 0)
         {
             result = LuaValue.Nil;
             return false;
+        }
+
+        // Validate all digits are hex first
+        foreach (var c in digits)
+        {
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            {
+                result = LuaValue.Nil;
+                return false;
+            }
+        }
+
+        // Lua 5.5 semantics: hex integers wrap to 64 bits (take low 64 bits of arbitrary-width input).
+        ulong number = 0;
+        foreach (var c in digits)
+        {
+            var digitValue = (ulong)HexDigitValue(c);
+            number = unchecked((number << 4) | digitValue);
         }
 
         result = negative
             ? LuaValue.FromInteger(unchecked((long)(0UL - number)))
             : LuaValue.FromInteger(unchecked((long)number));
         return true;
+    }
+
+    private static int HexDigitValue(char c)
+    {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+        return 10 + (c - 'A');
     }
 
     private static bool TryParseLuaHexIntegerExact(ReadOnlySpan<char> text, bool negative, out long result)
