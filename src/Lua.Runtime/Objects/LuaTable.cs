@@ -10,6 +10,7 @@ public sealed class LuaTable : IMetatableOwner
     private static readonly List<LuaTable> PendingFinalizationTables = [];
     private readonly Dictionary<LuaValue, TableEntry> _strongKeyEntries;
     private readonly List<TableEntry> _entriesInOrder;
+    private readonly Dictionary<LuaValue, LuaValue> _removedNextHints;
     private WeakMode _weakMode;
     private bool _isMarkedForFinalization;
     private bool _hasFinalizerRun;
@@ -19,6 +20,7 @@ public sealed class LuaTable : IMetatableOwner
         DebugName = debugName;
         _strongKeyEntries = new Dictionary<LuaValue, TableEntry>(Math.Max(arrayCapacity, 0) + Math.Max(hashCapacity, 0));
         _entriesInOrder = [];
+        _removedNextHints = [];
 
         lock (RegistrySync)
         {
@@ -297,6 +299,8 @@ public sealed class LuaTable : IMetatableOwner
             return;
         }
 
+        _removedNextHints.Remove(normalizedKey);
+
         if (TryFindEntry(normalizedKey, out var existingEntry))
         {
             existingEntry.SetValue(value, ShouldUseWeakValueStorage(value));
@@ -358,39 +362,29 @@ public sealed class LuaTable : IMetatableOwner
     public bool TryGetNextEntry(LuaValue currentKey, out LuaValue nextKey, out LuaValue nextValue)
     {
         RefreshEntries();
-        var liveEntries = GetLiveEntries();
         if (currentKey.IsNil)
         {
-            if (liveEntries.Count == 0)
-            {
-                nextKey = LuaValue.Nil;
-                nextValue = LuaValue.Nil;
-                return false;
-            }
-
-            nextKey = liveEntries[0].Key;
-            nextValue = liveEntries[0].Value;
-            return true;
+            return TryGetNextLiveEntry(0, out nextKey, out nextValue);
         }
 
         var normalizedKey = NormalizeNextKey(currentKey);
-        var currentIndex = liveEntries.FindIndex(entry => entry.Key == normalizedKey);
-        if (currentIndex < 0)
+        for (var index = _entriesInOrder.Count - 1; index >= 0; index--)
         {
-            throw new LuaRuntimeException(LuaValue.FromString("invalid key to 'next'"));
+            var entry = _entriesInOrder[index];
+            if (!entry.TryGetKey(out var entryKey) || entryKey != normalizedKey)
+            {
+                continue;
+            }
+
+            return TryGetNextLiveEntry(index + 1, out nextKey, out nextValue);
         }
 
-        var nextIndex = currentIndex + 1;
-        if (nextIndex >= liveEntries.Count)
+        if (_removedNextHints.TryGetValue(normalizedKey, out var hintedKey))
         {
-            nextKey = LuaValue.Nil;
-            nextValue = LuaValue.Nil;
-            return false;
+            return ResolveRemovedNextHint(hintedKey, out nextKey, out nextValue);
         }
 
-        nextKey = liveEntries[nextIndex].Key;
-        nextValue = liveEntries[nextIndex].Value;
-        return true;
+        throw new LuaRuntimeException(LuaValue.FromString("invalid key to 'next'"));
     }
 
     private void RefreshEntries()
@@ -460,6 +454,7 @@ public sealed class LuaTable : IMetatableOwner
         var liveEntries = GetLiveEntries();
         _strongKeyEntries.Clear();
         _entriesInOrder.Clear();
+        _removedNextHints.Clear();
         foreach (var liveEntry in liveEntries)
         {
             var entry = TableEntry.Create(
@@ -524,7 +519,12 @@ public sealed class LuaTable : IMetatableOwner
     {
         if (_strongKeyEntries.Remove(normalizedKey, out var strongEntry))
         {
-            _entriesInOrder.Remove(strongEntry);
+            var removedIndex = _entriesInOrder.IndexOf(strongEntry);
+            if (removedIndex >= 0)
+            {
+                _removedNextHints[normalizedKey] = FindNextLiveKey(removedIndex + 1);
+                _entriesInOrder.RemoveAt(removedIndex);
+            }
             return;
         }
 
@@ -543,6 +543,7 @@ public sealed class LuaTable : IMetatableOwner
                 continue;
             }
 
+            _removedNextHints[normalizedKey] = FindNextLiveKey(index + 1);
             _entriesInOrder.RemoveAt(index);
             return;
         }
@@ -573,6 +574,63 @@ public sealed class LuaTable : IMetatableOwner
         }
 
         return liveEntries;
+    }
+
+    private bool TryGetNextLiveEntry(int startIndex, out LuaValue nextKey, out LuaValue nextValue)
+    {
+        for (var index = startIndex; index < _entriesInOrder.Count; index++)
+        {
+            var entry = _entriesInOrder[index];
+            if (!entry.TryGetKey(out nextKey) ||
+                !entry.TryGetValue(out nextValue))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        nextKey = LuaValue.Nil;
+        nextValue = LuaValue.Nil;
+        return false;
+    }
+
+    private LuaValue FindNextLiveKey(int startIndex)
+    {
+        for (var index = startIndex; index < _entriesInOrder.Count; index++)
+        {
+            var entry = _entriesInOrder[index];
+            if (entry.TryGetKey(out var key) && entry.TryGetValue(out _))
+            {
+                return key;
+            }
+        }
+
+        return LuaValue.Nil;
+    }
+
+    private bool ResolveRemovedNextHint(LuaValue hintedKey, out LuaValue nextKey, out LuaValue nextValue)
+    {
+        var visited = new HashSet<LuaValue>();
+        var currentHint = hintedKey;
+
+        while (!currentHint.IsNil && visited.Add(currentHint))
+        {
+            if (TryGetValue(currentHint, out nextValue))
+            {
+                nextKey = currentHint;
+                return true;
+            }
+
+            if (!_removedNextHints.TryGetValue(currentHint, out currentHint))
+            {
+                break;
+            }
+        }
+
+        nextKey = LuaValue.Nil;
+        nextValue = LuaValue.Nil;
+        return false;
     }
 
     private bool ShouldUseWeakKeyStorage(LuaValue key) => ShouldUseWeakKeyStorage(key, _weakMode);

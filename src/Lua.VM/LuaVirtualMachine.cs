@@ -61,6 +61,7 @@ public sealed partial class LuaVirtualMachine
         State.SetBytecodeChunkDumper(DumpBytecodeClosure);
         State.SetCoroutineResumer(ResumeCoroutine);
         State.SetCoroutineCloser(CloseCoroutine);
+        RegisterYieldableBaseHelpers();
     }
 
     public LuaState State { get; }
@@ -96,6 +97,27 @@ public sealed partial class LuaVirtualMachine
         ArgumentNullException.ThrowIfNull(prototype);
 
         return CreateRootClosure(prototype, debugName, environment: null);
+    }
+
+    private void RegisterYieldableBaseHelpers()
+    {
+        const string pairsSource = """
+return function (t)
+  local mt = getmetatable(t)
+  local mm = mt and mt.__pairs
+  if mm ~= nil then
+    return mm(t)
+  end
+  next(t)
+  return next, t, nil
+end
+""";
+
+        var result = Execute(LuaCompiler.Compile(pairsSource, "=(pairs helper)"));
+        if (result.Length != 0 && result[0].Kind == LuaValueKind.Function)
+        {
+            State.GlobalEnvironment.SetValue(LuaValue.FromString("pairs"), result[0]);
+        }
     }
 
     private LuaClosure CreateRootClosure(LuaPrototype prototype, string? debugName, LuaValue? environment)
@@ -219,6 +241,7 @@ public sealed partial class LuaVirtualMachine
         var shouldTrackBoundary =
             !string.Equals(closure.DebugName, "coroutine.yield", StringComparison.Ordinal) &&
             !string.Equals(closure.DebugName, "coroutine.isyieldable", StringComparison.Ordinal) &&
+            !string.Equals(closure.DebugName, "pairs", StringComparison.Ordinal) &&
             !string.Equals(closure.DebugName, "pcall", StringComparison.Ordinal) &&
             !string.Equals(closure.DebugName, "xpcall", StringComparison.Ordinal);
         EnsureCallFrameCapacity();

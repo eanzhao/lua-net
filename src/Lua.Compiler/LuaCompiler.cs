@@ -557,7 +557,7 @@ public static class LuaCompiler
                     statement.Names[index].Identifier,
                     firstLoopVariableRegister + index,
                     statement.Names[index].Range.Start,
-                    isReadOnly: false);
+                    isReadOnly: true);
             }
 
             _loops.Add(new LoopContext(CurrentScope, iteratorRegister));

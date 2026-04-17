@@ -10,6 +10,21 @@ public sealed partial class LuaState
     private static readonly UTF8Encoding Utf8FileEncoding = new(encoderShouldEmitUTF8Identifier: false);
     private LuaTable? _ioDefaultInput;
     private LuaTable? _ioDefaultOutput;
+    private LuaTable? _ioDefaultError;
+
+    private void EnsureStandardIoHandlesInitialized()
+    {
+        _ioDefaultInput ??= CreateFileHandle(
+            new StreamReader(Console.OpenStandardInput(), Utf8FileEncoding), null, "stdin");
+        _ioDefaultOutput ??= CreateFileHandle(
+            null, new StreamWriter(Console.OpenStandardOutput(), Utf8FileEncoding) { AutoFlush = true }, "stdout");
+        _ioDefaultError ??= CreateFileHandle(
+            null, new StreamWriter(Console.OpenStandardError(), Utf8FileEncoding) { AutoFlush = true }, "stderr");
+
+        IoLibrary.SetValue(LuaValue.FromString("stdin"), LuaValue.FromTable(_ioDefaultInput));
+        IoLibrary.SetValue(LuaValue.FromString("stdout"), LuaValue.FromTable(_ioDefaultOutput));
+        IoLibrary.SetValue(LuaValue.FromString("stderr"), LuaValue.FromTable(_ioDefaultError));
+    }
 
     private LuaTable CreateFileHandle(StreamReader? reader, StreamWriter? writer, string name)
     {
@@ -133,6 +148,8 @@ public sealed partial class LuaState
 
     private LuaValue[] IoInput(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
+        EnsureStandardIoHandlesInitialized();
+
         if (arguments.Count >= 1 && !arguments[0].IsNil)
         {
             if (arguments[0].Kind == LuaValueKind.String)
@@ -144,21 +161,22 @@ public sealed partial class LuaState
                 }
 
                 _ioDefaultInput = result[0].AsTable();
+                IoLibrary.SetValue(LuaValue.FromString("stdin"), result[0]);
             }
             else if (arguments[0].Kind == LuaValueKind.Table)
             {
                 _ioDefaultInput = arguments[0].AsTable();
+                IoLibrary.SetValue(LuaValue.FromString("stdin"), arguments[0]);
             }
         }
 
-        _ioDefaultInput ??= CreateFileHandle(
-            new StreamReader(Console.OpenStandardInput(), Utf8FileEncoding), null, "stdin");
-
-        return [LuaValue.FromTable(_ioDefaultInput)];
+        return [LuaValue.FromTable(_ioDefaultInput!)];
     }
 
     private LuaValue[] IoOutput(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
+        EnsureStandardIoHandlesInitialized();
+
         if (arguments.Count >= 1 && !arguments[0].IsNil)
         {
             if (arguments[0].Kind == LuaValueKind.String)
@@ -171,17 +189,16 @@ public sealed partial class LuaState
                 }
 
                 _ioDefaultOutput = result[0].AsTable();
+                IoLibrary.SetValue(LuaValue.FromString("stdout"), result[0]);
             }
             else if (arguments[0].Kind == LuaValueKind.Table)
             {
                 _ioDefaultOutput = arguments[0].AsTable();
+                IoLibrary.SetValue(LuaValue.FromString("stdout"), arguments[0]);
             }
         }
 
-        _ioDefaultOutput ??= CreateFileHandle(
-            null, new StreamWriter(Console.OpenStandardOutput(), Utf8FileEncoding) { AutoFlush = true }, "stdout");
-
-        return [LuaValue.FromTable(_ioDefaultOutput)];
+        return [LuaValue.FromTable(_ioDefaultOutput!)];
     }
 
     private LuaValue[] IoRead(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

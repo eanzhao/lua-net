@@ -84,9 +84,23 @@ public class OfficialLuaCompatibilityTests
         result.Error.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void OfficialNextVar_ShouldRunSuccessfully()
+    {
+        var result = RunOfficialScript("nextvar.lua");
+
+        result.ExitCode.ShouldBe(0);
+        result.Output.ShouldContain("testing tables, next, and for");
+        result.Output.ShouldContain("testing next x GC of deleted keys");
+        result.Output.ShouldContain("testing floats in numeric for");
+        result.Output.ShouldContain("OK");
+        result.Error.ShouldBeEmpty();
+    }
+
     private static ScriptRunResult RunOfficialScript(string scriptPath)
     {
-        return string.Equals(scriptPath, "attrib.lua", StringComparison.Ordinal)
+        return string.Equals(scriptPath, "attrib.lua", StringComparison.Ordinal) ||
+               string.Equals(scriptPath, "gc.lua", StringComparison.Ordinal)
             ? RunOfficialScriptViaCliProcess(scriptPath)
             : RunOfficialScriptInProcess(scriptPath);
     }

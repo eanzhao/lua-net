@@ -40,6 +40,7 @@ public sealed partial class LuaState
 
     private readonly Dictionary<LuaValueKind, LuaTable> _typeMetatables = [];
     private readonly StringBuilder _warningBuffer = new();
+    private readonly LuaTable _builtinLoadedModules = new("package.loaded.builtins");
     private BinaryChunkLoader? _binaryChunkLoader;
     private TextChunkLoader? _textChunkLoader;
     private BytecodeChunkDumper? _bytecodeChunkDumper;
@@ -52,6 +53,8 @@ public sealed partial class LuaState
     private int _gcStepMultiplier = 100;
     private int _gcStepSize = 13;
     private int _gcStepDebt;
+    private ulong _randomState0 = 0x0123456789ABCDEFUL;
+    private ulong _randomState1 = 0xFEDCBA9876543210UL;
     private WarningMode _warningMode = WarningMode.Off;
     private static readonly LuaValue IPairsAuxFunction = LuaValue.FromFunction(
         new LuaClosure(
@@ -201,6 +204,9 @@ public sealed partial class LuaState
 
         PackageLoaded.SetValue(LuaValue.FromString("package"), LuaValue.FromTable(PackageLibrary));
         PackageLoaded.SetValue(LuaValue.FromString("_G"), LuaValue.FromTable(GlobalEnvironment));
+        var packageLoadedMetatable = new LuaTable("package.loaded.metatable");
+        packageLoadedMetatable.SetValue(LuaValue.FromString("__index"), LuaValue.FromTable(_builtinLoadedModules));
+        PackageLoaded.SetMetatable(packageLoadedMetatable);
 
         PackageSearchers.SetValue(
             LuaValue.FromInteger(1),
@@ -254,6 +260,7 @@ public sealed partial class LuaState
         RegisterLibraryFunction(IoLibrary, "output", IoOutput, "io.output");
         RegisterLibraryFunction(IoLibrary, "flush", IoFlush, "io.flush");
         RegisterLibraryFunction(IoLibrary, "type", IoType, "io.type");
+        EnsureStandardIoHandlesInitialized();
 
         GlobalEnvironment.SetValue(LuaValue.FromString("io"), LuaValue.FromTable(IoLibrary));
     }
@@ -292,6 +299,7 @@ public sealed partial class LuaState
 
     private void RegisterBuiltinPackagePreload(string moduleName, LuaTable library)
     {
+        _builtinLoadedModules.SetValue(LuaValue.FromString(moduleName), LuaValue.FromTable(library));
         PackagePreload.SetValue(
             LuaValue.FromString(moduleName),
             LuaValue.FromFunction(new LuaClosure(
@@ -398,6 +406,8 @@ public sealed partial class LuaState
         RegisterLibraryFunction(MathLibrary, "rad", MathRad, "math.rad");
         RegisterLibraryFunction(MathLibrary, "fmod", MathFMod, "math.fmod");
         RegisterLibraryFunction(MathLibrary, "modf", MathModF, "math.modf");
+        RegisterLibraryFunction(MathLibrary, "random", MathRandom, "math.random");
+        RegisterLibraryFunction(MathLibrary, "randomseed", MathRandomSeed, "math.randomseed");
         RegisterLibraryFunction(MathLibrary, "tointeger", MathToInteger, "math.tointeger");
         RegisterLibraryFunction(MathLibrary, "type", MathType, "math.type");
         RegisterLibraryFunction(MathLibrary, "ult", MathUnsignedLessThan, "math.ult");
@@ -664,10 +674,18 @@ public sealed partial class LuaState
         var value = RequireArgument(arguments, 0, "rawlen");
         return value.Kind switch
         {
+            LuaValueKind.Table when IsIoFileHandle(value.AsTable()) => throw CreateArgumentTypeError("rawlen", 1, "table or string", value),
             LuaValueKind.Table => [LuaValue.FromInteger(value.AsTable().GetSequenceLength())],
             LuaValueKind.String => [LuaValue.FromInteger(GetLuaStringBytes(value.AsString()).Length)],
             _ => throw CreateArgumentTypeError("rawlen", 1, "table or string", value)
         };
+    }
+
+    private static bool IsIoFileHandle(LuaTable table)
+    {
+        return table.TryGetValue(LuaValue.FromString("__closed"), out _) &&
+               (table.TryGetValue(LuaValue.FromString("__reader"), out _) ||
+                table.TryGetValue(LuaValue.FromString("__writer"), out _));
     }
 
     private static LuaValue[] RawGet(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
@@ -760,7 +778,7 @@ public sealed partial class LuaState
         }
 
         var nextIndex = unchecked(index + 1);
-        var nextValue = tableValue.AsTable().GetValue(LuaValue.FromInteger(nextIndex));
+        var nextValue = GetTableLibraryValue(state, tableValue.AsTable(), LuaValue.FromInteger(nextIndex));
         return nextValue.IsNil
             ? [LuaValue.Nil]
             : [LuaValue.FromInteger(nextIndex), nextValue];
@@ -1315,7 +1333,7 @@ public sealed partial class LuaState
         var table = RequireTableArgument(arguments, 0, "table.concat");
         var separator = GetOptionalStringArgument(arguments, 1, string.Empty, "table.concat");
         var start = GetOptionalIntegerArgument(arguments, 2, 1, "table.concat");
-        var end = GetOptionalIntegerArgument(arguments, 3, table.GetSequenceLength(), "table.concat");
+        var end = GetOptionalIntegerArgument(arguments, 3, GetTableLibraryLength(state, table), "table.concat");
         if (start > end)
         {
             return [LuaValue.FromString(string.Empty)];
@@ -1325,7 +1343,7 @@ public sealed partial class LuaState
         var separatorBytes = GetLuaStringBytes(separator);
         for (var index = start; index <= end; index++)
         {
-            var field = table.GetValue(LuaValue.FromInteger(index));
+            var field = GetTableLibraryValue(state, table, LuaValue.FromInteger(index));
             if (!TryConvertToStringArgument(field, out var text))
             {
                 throw CreateRuntimeError(
@@ -1346,7 +1364,7 @@ public sealed partial class LuaState
     private static LuaValue[] TableInsert(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         var table = RequireTableArgument(arguments, 0, "table.insert");
-        var firstEmptyIndex = checked(table.GetSequenceLength() + 1);
+        var firstEmptyIndex = unchecked(GetTableLibraryLength(state, table) + 1);
 
         long position;
         LuaValue value;
@@ -1366,9 +1384,11 @@ public sealed partial class LuaState
                 value = arguments[2];
                 for (var index = firstEmptyIndex; index > position; index--)
                 {
-                    table.SetValue(
+                    SetTableLibraryValue(
+                        state,
+                        table,
                         LuaValue.FromInteger(index),
-                        table.GetValue(LuaValue.FromInteger(index - 1)));
+                        GetTableLibraryValue(state, table, LuaValue.FromInteger(index - 1)));
                 }
 
                 break;
@@ -1376,14 +1396,14 @@ public sealed partial class LuaState
                 throw CreateRuntimeError("wrong number of arguments to 'insert'");
         }
 
-        table.SetValue(LuaValue.FromInteger(position), value);
+        SetTableLibraryValue(state, table, LuaValue.FromInteger(position), value);
         return [];
     }
 
     private static LuaValue[] TableRemove(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         var table = RequireTableArgument(arguments, 0, "table.remove");
-        var size = table.GetSequenceLength();
+        var size = GetTableLibraryLength(state, table);
         var position = arguments.Count > 1 && !arguments[1].IsNil
             ? RequireIntegerArgument(arguments, 1, "table.remove")
             : size;
@@ -1393,16 +1413,18 @@ public sealed partial class LuaState
             throw CreateArgumentError("table.remove", 2, "position out of bounds");
         }
 
-        var result = table.GetValue(LuaValue.FromInteger(position));
+        var result = GetTableLibraryValue(state, table, LuaValue.FromInteger(position));
         var index = position;
         for (; index < size; index++)
         {
-            table.SetValue(
+            SetTableLibraryValue(
+                state,
+                table,
                 LuaValue.FromInteger(index),
-                table.GetValue(LuaValue.FromInteger(index + 1)));
+                GetTableLibraryValue(state, table, LuaValue.FromInteger(index + 1)));
         }
 
-        table.SetValue(LuaValue.FromInteger(index), LuaValue.Nil);
+        SetTableLibraryValue(state, table, LuaValue.FromInteger(index), LuaValue.Nil);
         return [result];
     }
 
@@ -1441,18 +1463,22 @@ public sealed partial class LuaState
             {
                 for (var offset = 0L; offset < count; offset++)
                 {
-                    destination.SetValue(
+                    SetTableLibraryValue(
+                        state,
+                        destination,
                         LuaValue.FromInteger(target + offset),
-                        source.GetValue(LuaValue.FromInteger(from + offset)));
+                        GetTableLibraryValue(state, source, LuaValue.FromInteger(from + offset)));
                 }
             }
             else
             {
                 for (var offset = count - 1; offset >= 0; offset--)
                 {
-                    destination.SetValue(
+                    SetTableLibraryValue(
+                        state,
+                        destination,
                         LuaValue.FromInteger(target + offset),
-                        source.GetValue(LuaValue.FromInteger(from + offset)));
+                        GetTableLibraryValue(state, source, LuaValue.FromInteger(from + offset)));
                 }
             }
         }
@@ -1474,7 +1500,7 @@ public sealed partial class LuaState
             comparator = arguments[1];
         }
 
-        var length = table.GetSequenceLength();
+        var length = GetTableLibraryLength(state, table);
         if (length <= 1)
         {
             return [];
@@ -1488,7 +1514,7 @@ public sealed partial class LuaState
         var values = new LuaValue[(int)length];
         for (var index = 0; index < length; index++)
         {
-            values[index] = table.GetValue(LuaValue.FromInteger(index + 1));
+            values[index] = GetTableLibraryValue(state, table, LuaValue.FromInteger(index + 1));
         }
 
         Array.Sort(values, (left, right) => CompareTableSortValues(state, left, right, comparator));
@@ -1503,7 +1529,7 @@ public sealed partial class LuaState
 
         for (var index = 0; index < values.Length; index++)
         {
-            table.SetValue(LuaValue.FromInteger(index + 1), values[index]);
+            SetTableLibraryValue(state, table, LuaValue.FromInteger(index + 1), values[index]);
         }
 
         return [];
@@ -1525,7 +1551,7 @@ public sealed partial class LuaState
     {
         var table = RequireTableArgument(arguments, 0, "table.unpack");
         var start = GetOptionalIntegerArgument(arguments, 1, 1, "table.unpack");
-        var end = GetOptionalIntegerArgument(arguments, 2, table.GetSequenceLength(), "table.unpack");
+        var end = GetOptionalIntegerArgument(arguments, 2, GetTableLibraryLength(state, table), "table.unpack");
         if (start > end)
         {
             return [];
@@ -1549,7 +1575,7 @@ public sealed partial class LuaState
         var results = new LuaValue[(int)resultCount];
         for (var index = 0; index < results.Length; index++)
         {
-            results[index] = table.GetValue(LuaValue.FromInteger(start + index));
+            results[index] = GetTableLibraryValue(state, table, LuaValue.FromInteger(start + index));
         }
 
         return results;

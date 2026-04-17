@@ -208,8 +208,8 @@ public sealed partial class LuaVirtualMachine
             throw CreateRuntimeException("'for' step is zero");
         }
 
-        var limit = GetIntegerForLimit(limitValue, initialValue, stepValue);
-        if (ShouldSkipIntegerForLoop(initialValue, limit, stepValue))
+        var (limit, shouldSkip) = ResolveIntegerForLimit(limitValue, initialValue, stepValue);
+        if (shouldSkip)
         {
             frame.Advance(instruction.Bx + 1);
             return;
@@ -227,17 +227,17 @@ public sealed partial class LuaVirtualMachine
         LuaValue limitValue,
         LuaValue stepValue)
     {
-        if (!TryGetNumber(limitValue, out var numericLimit))
+        if (!TryConvertForNumber(limitValue, out var numericLimit))
         {
             throw CreateRuntimeException("'for' limit must be a number");
         }
 
-        if (!TryGetNumber(stepValue, out var numericStep))
+        if (!TryConvertForNumber(stepValue, out var numericStep))
         {
             throw CreateRuntimeException("'for' step must be a number");
         }
 
-        if (!TryGetNumber(initialValue, out var numericInitial))
+        if (!TryConvertForNumber(initialValue, out var numericInitial))
         {
             throw CreateRuntimeException("'for' initial value must be a number");
         }
@@ -389,49 +389,54 @@ public sealed partial class LuaVirtualMachine
         JumpRelative(frame, instruction.SJ);
     }
 
-    private static long GetIntegerForLimit(LuaValue value, long initialValue, long stepValue)
+    private static (long Limit, bool ShouldSkip) ResolveIntegerForLimit(LuaValue value, long initialValue, long stepValue)
     {
         if (value.Kind == LuaValueKind.Integer)
         {
-            return value.AsInteger();
+            var limit = value.AsInteger();
+            return (limit, ShouldSkipIntegerForLoop(initialValue, limit, stepValue));
         }
 
-        if (!TryGetNumber(value, out var numericLimit))
+        if (!TryConvertForNumber(value, out var numericLimit))
         {
             throw CreateRuntimeException("'for' limit must be a number");
         }
 
         if (!double.IsFinite(numericLimit))
         {
-            return stepValue > 0 ? long.MaxValue : long.MinValue;
+            return stepValue > 0
+                ? (long.MaxValue, double.IsNegativeInfinity(numericLimit))
+                : (long.MinValue, double.IsPositiveInfinity(numericLimit));
         }
 
         if (stepValue > 0)
         {
             if (numericLimit < initialValue)
             {
-                return long.MinValue;
+                return (long.MinValue, true);
             }
 
             if (numericLimit >= long.MaxValue)
             {
-                return long.MaxValue;
+                return (long.MaxValue, false);
             }
 
-            return (long)Math.Floor(numericLimit);
+            var limit = (long)Math.Floor(numericLimit);
+            return (limit, ShouldSkipIntegerForLoop(initialValue, limit, stepValue));
         }
 
         if (numericLimit > initialValue)
         {
-            return long.MaxValue;
+            return (long.MaxValue, true);
         }
 
         if (numericLimit <= long.MinValue)
         {
-            return long.MinValue;
+            return (long.MinValue, false);
         }
 
-        return (long)Math.Ceiling(numericLimit);
+        var negativeLimit = (long)Math.Ceiling(numericLimit);
+        return (negativeLimit, ShouldSkipIntegerForLoop(initialValue, negativeLimit, stepValue));
     }
 
     private static bool ShouldSkipIntegerForLoop(long initialValue, long limit, long stepValue)
@@ -474,5 +479,23 @@ public sealed partial class LuaVirtualMachine
     private static bool ShouldContinueFloatForLoop(double value, double limit, double stepValue)
     {
         return stepValue > 0d ? value <= limit : limit <= value;
+    }
+
+    private static bool TryConvertForNumber(LuaValue value, out double result)
+    {
+        if (TryGetNumber(value, out result))
+        {
+            return true;
+        }
+
+        if (value.Kind == LuaValueKind.String &&
+            LuaValueHelper.TryParseLuaStringNumber(value.AsString(), out var parsed) &&
+            TryGetNumber(parsed, out result))
+        {
+            return true;
+        }
+
+        result = default;
+        return false;
     }
 }
