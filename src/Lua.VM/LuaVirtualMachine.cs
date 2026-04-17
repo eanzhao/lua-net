@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using Lua.Bytecode.Chunks;
+using Lua.Bytecode.Disassembly;
 using Lua.Bytecode.Instructions;
 using Lua.Compiler;
 using Lua.Runtime.Execution;
@@ -102,7 +103,8 @@ public sealed partial class LuaVirtualMachine
             BuildUpvalues(prototype, parentFrame: null, environment),
             prototype.Upvalues.Select(static upvalue => upvalue.Name).ToArray(),
             prototype.Source,
-            prototype.LineDefined);
+            prototype.LineDefined,
+            programCounter => LuaLineInfoResolver.GetLine(prototype, programCounter));
     }
 
     private LuaValue[] ExecuteClosure(LuaClosure closure, LuaPrototype prototype, IReadOnlyList<LuaValue> arguments)
@@ -152,7 +154,8 @@ public sealed partial class LuaVirtualMachine
             BuildUpvalues(prototype, parentFrame, rootEnvironment: null),
             prototype.Upvalues.Select(static upvalue => upvalue.Name).ToArray(),
             prototype.Source,
-            prototype.LineDefined);
+            prototype.LineDefined,
+            programCounter => LuaLineInfoResolver.GetLine(prototype, programCounter));
     }
 
     private LuaClosure LoadBinaryChunk(ReadOnlyMemory<byte> chunkBytes, string? chunkName, bool hasEnvironment, LuaValue environment)

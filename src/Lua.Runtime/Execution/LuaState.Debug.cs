@@ -66,7 +66,8 @@ public sealed partial class LuaState
 
             if (what.Contains('l') && frameIndex >= 0)
             {
-                info.SetValue(LuaValue.FromString("currentline"), LuaValue.FromInteger(-1));
+                var currentLine = ResolveCurrentLine(state.CurrentThread.Frames[frameIndex]);
+                info.SetValue(LuaValue.FromString("currentline"), LuaValue.FromInteger(currentLine));
             }
 
             if (what.Contains('u'))
@@ -76,6 +77,14 @@ public sealed partial class LuaState
         }
 
         return [LuaValue.FromTable(info)];
+    }
+
+    private static int ResolveCurrentLine(CallFrame frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+
+        var programCounter = Math.Max(0, frame.ProgramCounter - 1);
+        return frame.Closure.ResolveLine(programCounter);
     }
 
     private static LuaValue[] DebugTraceback(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

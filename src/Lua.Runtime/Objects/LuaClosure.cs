@@ -15,7 +15,8 @@ public sealed class LuaClosure
         LuaUpvalue[]? upvalues = null,
         string?[]? upvalueNames = null,
         string? sourceName = null,
-        int lineDefined = 0)
+        int lineDefined = 0,
+        Func<int, int>? lineResolver = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(upvalueCount);
         ArgumentOutOfRangeException.ThrowIfNegative(lineDefined);
@@ -37,6 +38,7 @@ public sealed class LuaClosure
         UpvalueNames = upvalueNames;
         SourceName = sourceName;
         LineDefined = lineDefined;
+        LineResolver = lineResolver;
 
         lock (RegistrySync)
         {
@@ -57,6 +59,13 @@ public sealed class LuaClosure
     public string? SourceName { get; }
 
     public int LineDefined { get; }
+
+    public Func<int, int>? LineResolver { get; }
+
+    public int ResolveLine(int programCounter)
+    {
+        return LineResolver?.Invoke(programCounter) ?? -1;
+    }
 
     internal static List<LuaClosure> GetRegisteredClosuresSnapshot()
     {

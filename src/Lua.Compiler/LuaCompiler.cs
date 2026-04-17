@@ -58,10 +58,13 @@ public static class LuaCompiler
         private const string EnvironmentName = "_ENV";
         private const byte VarArgFunctionFlag = 0b00000001;
         private const byte VarArgTableFlag = 0b00000010;
+        private const sbyte AbsoluteLineInfoMarker = -128;
+        private const int MaxInstructionsWithoutAbsoluteInfo = 128;
         private readonly string _sourceName = sourceName;
         private readonly FunctionCompiler? _parent = parent;
         private readonly string? _debugName = debugName;
         private readonly List<uint> _code = [];
+        private readonly List<int> _instructionLines = [];
         private readonly List<byte> _registerTopHints = [];
         private readonly List<LuaConstant> _constants = [];
         private readonly Dictionary<string, int> _constantIndices = new(StringComparer.Ordinal);
@@ -78,11 +81,13 @@ public static class LuaCompiler
         private int _persistentRegisterCount;
         private int _tempRegisterTop;
         private int _maxRegisterCount;
+        private int _currentSourceLine = 1;
         private LuaSourcePosition _fallbackPosition = new(0, 1, 1);
 
         public LuaPrototype CompileChunk(LuaChunkSyntax syntax)
         {
             _fallbackPosition = syntax.Range.Start;
+            _currentSourceLine = Math.Max(1, syntax.Range.Start.Line);
             EnterScope();
             CompileBlockStatements(syntax.Block.Statements);
             EnsureAllGotosResolved();
@@ -104,6 +109,7 @@ public static class LuaCompiler
         public LuaPrototype CompileFunction(LuaFunctionBodySyntax body, bool injectSelf)
         {
             _fallbackPosition = body.Range.Start;
+            _currentSourceLine = Math.Max(1, body.Range.Start.Line);
             var parameterCount = body.Parameters.Count + (injectSelf ? 1 : 0);
             var flags = GetFunctionFlags(body);
 
@@ -172,6 +178,8 @@ public static class LuaCompiler
                 throw CreateError(range, "function requires more than 255 registers");
             }
 
+            var (lineInfo, absoluteLineInfo) = BuildLineInfo();
+
             return new LuaPrototype
             {
                 DebugName = _debugName,
@@ -185,12 +193,51 @@ public static class LuaCompiler
                 Upvalues = BuildUpvalues(),
                 NestedPrototypes = _nestedPrototypes.ToArray(),
                 Source = _sourceName,
-                LineInfo = Enumerable.Repeat((sbyte)0, _code.Count).ToArray(),
-                AbsoluteLineInfo = [],
+                LineInfo = lineInfo,
+                AbsoluteLineInfo = absoluteLineInfo,
                 LocalVariables = [],
                 ToBeClosedNames = BuildToBeClosedNames(),
                 RegisterTopHints = _registerTopHints.ToArray()
             };
+        }
+
+        private (sbyte[] LineInfo, LuaAbsoluteLineInfo[] AbsoluteLineInfo) BuildLineInfo()
+        {
+            if (_instructionLines.Count == 0)
+            {
+                return ([], []);
+            }
+
+            var lineInfo = new sbyte[_instructionLines.Count];
+            var absoluteLineInfo = new List<LuaAbsoluteLineInfo>();
+            var previousLine = _instructionLines[0];
+            var lastAbsoluteProgramCounter = -MaxInstructionsWithoutAbsoluteInfo;
+
+            for (var programCounter = 0; programCounter < _instructionLines.Count; programCounter++)
+            {
+                var line = _instructionLines[programCounter];
+                var delta = line - previousLine;
+                var needsAbsoluteInfo =
+                    programCounter == 0 ||
+                    programCounter - lastAbsoluteProgramCounter >= MaxInstructionsWithoutAbsoluteInfo ||
+                    delta <= AbsoluteLineInfoMarker ||
+                    delta > sbyte.MaxValue;
+
+                if (needsAbsoluteInfo)
+                {
+                    absoluteLineInfo.Add(new LuaAbsoluteLineInfo(programCounter, line));
+                    lineInfo[programCounter] = AbsoluteLineInfoMarker;
+                    lastAbsoluteProgramCounter = programCounter;
+                }
+                else
+                {
+                    lineInfo[programCounter] = checked((sbyte)delta);
+                }
+
+                previousLine = line;
+            }
+
+            return (lineInfo, absoluteLineInfo.ToArray());
         }
 
         private string?[]? BuildToBeClosedNames()
@@ -226,8 +273,11 @@ public static class LuaCompiler
         {
             foreach (var statement in statements)
             {
-                ResetTemps();
-                CompileStatement(statement);
+                WithSourceLine(statement.Range.Start.Line, () =>
+                {
+                    ResetTemps();
+                    CompileStatement(statement);
+                });
             }
         }
 
@@ -891,111 +941,120 @@ public static class LuaCompiler
 
         private void CompileExpressionWithFixedResults(LuaExpressionSyntax expression, int targetRegister, int resultCount)
         {
-            ReserveRegisterRange(targetRegister, Math.Max(1, resultCount));
-
-            if (resultCount <= 0)
+            WithSourceLine(expression.Range.Start.Line, () =>
             {
-                if (expression is LuaFunctionCallExpressionSyntax call)
+                ReserveRegisterRange(targetRegister, Math.Max(1, resultCount));
+
+                if (resultCount <= 0)
                 {
-                    CompileFunctionCall(call, targetRegister, fixedResultCount: 0, openResults: false);
+                    if (expression is LuaFunctionCallExpressionSyntax call)
+                    {
+                        CompileFunctionCall(call, targetRegister, fixedResultCount: 0, openResults: false);
+                        return;
+                    }
+
+                    CompileExpressionInto(expression, targetRegister);
+                    return;
+                }
+
+                if (expression is LuaFunctionCallExpressionSyntax functionCall)
+                {
+                    CompileFunctionCall(functionCall, targetRegister, resultCount, openResults: false);
+                    return;
+                }
+
+                if (expression is LuaVarargExpressionSyntax)
+                {
+                    EmitVarArg(targetRegister, resultCount);
                     return;
                 }
 
                 CompileExpressionInto(expression, targetRegister);
-                return;
-            }
-
-            if (expression is LuaFunctionCallExpressionSyntax functionCall)
-            {
-                CompileFunctionCall(functionCall, targetRegister, resultCount, openResults: false);
-                return;
-            }
-
-            if (expression is LuaVarargExpressionSyntax)
-            {
-                EmitVarArg(targetRegister, resultCount);
-                return;
-            }
-
-            CompileExpressionInto(expression, targetRegister);
-            if (resultCount > 1)
-            {
-                EmitLoadNilRange(targetRegister + 1, resultCount - 1);
-            }
+                if (resultCount > 1)
+                {
+                    EmitLoadNilRange(targetRegister + 1, resultCount - 1);
+                }
+            });
         }
 
         private void CompileExpressionWithOpenResults(LuaExpressionSyntax expression, int targetRegister)
         {
-            ReserveRegisterRange(targetRegister, 1);
-
-            switch (expression)
+            WithSourceLine(expression.Range.Start.Line, () =>
             {
-                case LuaFunctionCallExpressionSyntax functionCall:
-                    CompileFunctionCall(functionCall, targetRegister, fixedResultCount: null, openResults: true);
-                    return;
-                case LuaVarargExpressionSyntax:
-                    EmitVarArg(targetRegister, resultCount: null);
-                    return;
-                default:
-                    throw new InvalidOperationException($"Expression '{expression.GetType().Name}' does not support open results.");
-            }
+                ReserveRegisterRange(targetRegister, 1);
+
+                switch (expression)
+                {
+                    case LuaFunctionCallExpressionSyntax functionCall:
+                        CompileFunctionCall(functionCall, targetRegister, fixedResultCount: null, openResults: true);
+                        return;
+                    case LuaVarargExpressionSyntax:
+                        EmitVarArg(targetRegister, resultCount: null);
+                        return;
+                    default:
+                        throw new InvalidOperationException($"Expression '{expression.GetType().Name}' does not support open results.");
+                }
+            });
         }
 
         private void CompileExpressionInto(LuaExpressionSyntax expression, int targetRegister, string? functionDebugName = null)
         {
-            ReserveRegisterRange(targetRegister, 1);
-
-            switch (expression)
+            WithSourceLine(expression.Range.Start.Line, () =>
             {
-                case LuaNilLiteralExpressionSyntax:
-                    EmitLoadNilRange(targetRegister, 1);
-                    return;
-                case LuaBooleanLiteralExpressionSyntax booleanLiteral:
-                    EmitBoolean(targetRegister, booleanLiteral.Value);
-                    return;
-                case LuaNumberLiteralExpressionSyntax numberLiteral:
-                    EmitLoadConstant(targetRegister, ParseNumberConstant(numberLiteral));
-                    return;
-                case LuaStringLiteralExpressionSyntax stringLiteral:
-                    EmitLoadConstant(targetRegister, LuaConstant.FromString(stringLiteral.Value));
-                    return;
-                case LuaNameExpressionSyntax nameExpression:
-                    CompileNameRead(nameExpression.Name.Identifier, nameExpression.Range, targetRegister);
-                    return;
-                case LuaParenthesizedExpressionSyntax parenthesizedExpression:
-                    CompileExpressionInto(parenthesizedExpression.Expression, targetRegister, functionDebugName);
-                    return;
-                case LuaUnaryExpressionSyntax unaryExpression:
-                    CompileUnary(unaryExpression, targetRegister);
-                    return;
-                case LuaBinaryExpressionSyntax binaryExpression:
-                    CompileBinary(binaryExpression, targetRegister);
-                    return;
-                case LuaFunctionExpressionSyntax functionExpression:
-                    CompileNestedFunction(functionExpression.Body, injectSelf: false, targetRegister, functionDebugName);
-                    return;
-                case LuaFunctionCallExpressionSyntax functionCall:
-                    CompileFunctionCall(functionCall, targetRegister, fixedResultCount: 1, openResults: false);
-                    return;
-                case LuaTableConstructorExpressionSyntax tableConstructor:
-                    CompileTableConstructor(tableConstructor, targetRegister);
-                    return;
-                case LuaMemberAccessExpressionSyntax memberAccess:
-                    CompileExpressionInto(memberAccess.Prefix, targetRegister);
-                    EmitTableReadByName(targetRegister, targetRegister, memberAccess.Name.Identifier, memberAccess.Range);
-                    return;
-                case LuaIndexExpressionSyntax indexExpression:
-                    CompileExpressionInto(indexExpression.Prefix, targetRegister);
-                    var keyRegister = AllocateTemp();
-                    CompileExpressionInto(indexExpression.Index, keyRegister);
-                    EmitGetTable(targetRegister, targetRegister, keyRegister);
-                    return;
-                case LuaVarargExpressionSyntax:
-                    EmitVarArg(targetRegister, resultCount: 1);
-                    return;
-                default:
-                    throw CreateUnsupported(expression, $"unsupported expression '{expression.GetType().Name}'");
-            }
+                ReserveRegisterRange(targetRegister, 1);
+
+                switch (expression)
+                {
+                    case LuaNilLiteralExpressionSyntax:
+                        EmitLoadNilRange(targetRegister, 1);
+                        return;
+                    case LuaBooleanLiteralExpressionSyntax booleanLiteral:
+                        EmitBoolean(targetRegister, booleanLiteral.Value);
+                        return;
+                    case LuaNumberLiteralExpressionSyntax numberLiteral:
+                        EmitLoadConstant(targetRegister, ParseNumberConstant(numberLiteral));
+                        return;
+                    case LuaStringLiteralExpressionSyntax stringLiteral:
+                        EmitLoadConstant(targetRegister, LuaConstant.FromString(stringLiteral.Value));
+                        return;
+                    case LuaNameExpressionSyntax nameExpression:
+                        CompileNameRead(nameExpression.Name.Identifier, nameExpression.Range, targetRegister);
+                        return;
+                    case LuaParenthesizedExpressionSyntax parenthesizedExpression:
+                        CompileExpressionInto(parenthesizedExpression.Expression, targetRegister, functionDebugName);
+                        return;
+                    case LuaUnaryExpressionSyntax unaryExpression:
+                        CompileUnary(unaryExpression, targetRegister);
+                        return;
+                    case LuaBinaryExpressionSyntax binaryExpression:
+                        CompileBinary(binaryExpression, targetRegister);
+                        return;
+                    case LuaFunctionExpressionSyntax functionExpression:
+                        CompileNestedFunction(functionExpression.Body, injectSelf: false, targetRegister, functionDebugName);
+                        return;
+                    case LuaFunctionCallExpressionSyntax functionCall:
+                        CompileFunctionCall(functionCall, targetRegister, fixedResultCount: 1, openResults: false);
+                        return;
+                    case LuaTableConstructorExpressionSyntax tableConstructor:
+                        CompileTableConstructor(tableConstructor, targetRegister);
+                        return;
+                    case LuaMemberAccessExpressionSyntax memberAccess:
+                        CompileExpressionInto(memberAccess.Prefix, targetRegister);
+                        EmitTableReadByName(targetRegister, targetRegister, memberAccess.Name.Identifier, memberAccess.Range);
+                        return;
+                    case LuaIndexExpressionSyntax indexExpression:
+                        CompileExpressionInto(indexExpression.Prefix, targetRegister);
+                        var keyRegister = AllocateTemp();
+                        CompileExpressionInto(indexExpression.Index, keyRegister);
+                        EmitGetTable(targetRegister, targetRegister, keyRegister);
+                        return;
+                    case LuaVarargExpressionSyntax:
+                        EmitVarArg(targetRegister, resultCount: 1);
+                        return;
+                    default:
+                        throw CreateUnsupported(expression, $"unsupported expression '{expression.GetType().Name}'");
+                }
+            });
         }
 
         private void CompileUnary(LuaUnaryExpressionSyntax expression, int targetRegister)
@@ -1538,40 +1597,43 @@ public static class LuaCompiler
                 throw new InvalidOperationException("A call cannot request fixed and open results at the same time.");
             }
 
-            var functionRegister = targetRegister;
-            var argumentStart = targetRegister + 1;
-
-            if (expression.MethodName is not null)
+            WithSourceLine(expression.Range.Start.Line, () =>
             {
-                CompileExpressionInto(expression.Prefix, functionRegister);
-                if (TryGetByteConstantIndex(LuaConstant.FromString(expression.MethodName.Identifier), out var methodConstantIndex))
+                var functionRegister = targetRegister;
+                var argumentStart = targetRegister + 1;
+
+                if (expression.MethodName is not null)
                 {
-                    EmitSelf(functionRegister, functionRegister, methodConstantIndex);
+                    CompileExpressionInto(expression.Prefix, functionRegister);
+                    if (TryGetByteConstantIndex(LuaConstant.FromString(expression.MethodName.Identifier), out var methodConstantIndex))
+                    {
+                        EmitSelf(functionRegister, functionRegister, methodConstantIndex);
+                    }
+                    else
+                    {
+                        var receiverRegister = argumentStart;
+                        EmitMove(receiverRegister, functionRegister);
+                        var keyRegister = AllocateTemp();
+                        EmitLoadConstant(keyRegister, LuaConstant.FromString(expression.MethodName.Identifier));
+                        EmitGetTable(functionRegister, receiverRegister, keyRegister);
+                    }
+
+                    argumentStart = targetRegister + 2;
                 }
                 else
                 {
-                    var receiverRegister = argumentStart;
-                    EmitMove(receiverRegister, functionRegister);
-                    var keyRegister = AllocateTemp();
-                    EmitLoadConstant(keyRegister, LuaConstant.FromString(expression.MethodName.Identifier));
-                    EmitGetTable(functionRegister, receiverRegister, keyRegister);
+                    CompileExpressionInto(expression.Prefix, functionRegister);
                 }
 
-                argumentStart = targetRegister + 2;
-            }
-            else
-            {
-                CompileExpressionInto(expression.Prefix, functionRegister);
-            }
+                var functionAndArgumentCount = CompileCallArguments(expression.Arguments, argumentStart, allowOpenLast: true);
+                if (expression.MethodName is not null && functionAndArgumentCount != 0)
+                {
+                    functionAndArgumentCount += 1;
+                }
 
-            var functionAndArgumentCount = CompileCallArguments(expression.Arguments, argumentStart, allowOpenLast: true);
-            if (expression.MethodName is not null && functionAndArgumentCount != 0)
-            {
-                functionAndArgumentCount += 1;
-            }
-
-            var resultOperand = openResults ? 0 : (fixedResultCount ?? 1) + 1;
-            EmitCall(functionRegister, functionAndArgumentCount, resultOperand);
+                var resultOperand = openResults ? 0 : (fixedResultCount ?? 1) + 1;
+                EmitCall(functionRegister, functionAndArgumentCount, resultOperand);
+            });
         }
 
         private int CompileCallArguments(LuaCallArgumentsSyntax arguments, int startRegister, bool allowOpenLast)
@@ -2013,7 +2075,28 @@ public static class LuaCompiler
         private void AddInstruction(uint instruction)
         {
             _code.Add(instruction);
+            _instructionLines.Add(Math.Max(1, _currentSourceLine));
             _registerTopHints.Add(checked((byte)_tempRegisterTop));
+        }
+
+        private void WithSourceLine(int line, Action action)
+        {
+            ArgumentNullException.ThrowIfNull(action);
+
+            var previousLine = _currentSourceLine;
+            if (line > 0)
+            {
+                _currentSourceLine = line;
+            }
+
+            try
+            {
+                action();
+            }
+            finally
+            {
+                _currentSourceLine = previousLine;
+            }
         }
 
         private int EmitJumpPlaceholder()
