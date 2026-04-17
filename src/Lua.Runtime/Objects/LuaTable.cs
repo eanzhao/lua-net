@@ -408,8 +408,10 @@ public sealed class LuaTable : IMetatableOwner
 
     private WeakMode GetWeakMode()
     {
+        // Use a direct lookup that does NOT call RefreshEntries to avoid infinite recursion
+        // when a metatable chain refers back to this table (or forms a cycle).
         if (Metatable is null ||
-            !Metatable.TryGetValue(LuaValue.FromString("__mode"), out var modeValue) ||
+            !Metatable.TryGetValueRaw(LuaValue.FromString("__mode"), out var modeValue) ||
             modeValue.Kind != LuaValueKind.String)
         {
             return WeakMode.None;
@@ -428,6 +430,29 @@ public sealed class LuaTable : IMetatableOwner
         }
 
         return mode;
+    }
+
+    /// <summary>
+    /// Raw dictionary lookup without triggering RefreshEntries. Used by GetWeakMode and
+    /// other internal paths that must avoid recursion through the weak-mode refresh.
+    /// </summary>
+    private bool TryGetValueRaw(LuaValue key, out LuaValue value)
+    {
+        if (key.IsNil)
+        {
+            value = LuaValue.Nil;
+            return false;
+        }
+
+        var normalizedKey = NormalizeKey(key);
+        if (_strongKeyEntries.TryGetValue(normalizedKey, out var strongEntry) &&
+            strongEntry.TryGetValue(out value))
+        {
+            return true;
+        }
+
+        value = LuaValue.Nil;
+        return false;
     }
 
     private void RebuildEntries(WeakMode newWeakMode)
