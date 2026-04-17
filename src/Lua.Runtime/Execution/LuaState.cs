@@ -341,8 +341,39 @@ public sealed partial class LuaState
         RegisterLibraryFunction(TableLibrary, "sort", TableSort, "table.sort");
         RegisterLibraryFunction(TableLibrary, "pack", TablePack, "table.pack");
         RegisterLibraryFunction(TableLibrary, "unpack", TableUnpack, "table.unpack");
+        RegisterLibraryFunction(TableLibrary, "create", TableCreate, "table.create");
 
         GlobalEnvironment.SetValue(LuaValue.FromString("table"), LuaValue.FromTable(TableLibrary));
+    }
+
+    private static LuaValue[] TableCreate(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var arrayCapacityValue = arguments.Count >= 1 ? arguments[0] : LuaValue.Nil;
+        var hashCapacityValue = arguments.Count >= 2 ? arguments[1] : LuaValue.Nil;
+
+        var arrayCapacity = 0;
+        if (!arrayCapacityValue.IsNil)
+        {
+            if (!LuaValueHelper.TryGetInteger(arrayCapacityValue, out var a) || a < 0 || a > int.MaxValue)
+            {
+                throw CreateArgumentTypeError("table.create", 1, "non-negative integer", arrayCapacityValue);
+            }
+
+            arrayCapacity = (int)a;
+        }
+
+        var hashCapacity = 0;
+        if (!hashCapacityValue.IsNil)
+        {
+            if (!LuaValueHelper.TryGetInteger(hashCapacityValue, out var h) || h < 0 || h > int.MaxValue)
+            {
+                throw CreateArgumentTypeError("table.create", 2, "non-negative integer", hashCapacityValue);
+            }
+
+            hashCapacity = (int)h;
+        }
+
+        return [LuaValue.FromTable(new LuaTable(arrayCapacity: arrayCapacity, hashCapacity: hashCapacity))];
     }
 
     private void RegisterMathSupport()
