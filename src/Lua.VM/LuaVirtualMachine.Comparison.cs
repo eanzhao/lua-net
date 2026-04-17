@@ -111,6 +111,12 @@ public sealed partial class LuaVirtualMachine
             return TryCompareNumbers(left, right, out var comparison) && comparison == 0;
         }
 
+        // IEEE 754: NaN != NaN for the Lua '==' operator and `~=` operator.
+        if (left.Kind == LuaValueKind.Float)
+        {
+            return left.AsFloat() == right.AsFloat();
+        }
+
         return left == right;
     }
 
@@ -119,6 +125,12 @@ public sealed partial class LuaVirtualMachine
         if (left.Kind != right.Kind)
         {
             return TryCompareNumbers(left, right, out var comparison) && comparison == 0;
+        }
+
+        // IEEE 754: NaN != NaN. Check floats first so NaN comparisons don't short-circuit.
+        if (left.Kind == LuaValueKind.Float)
+        {
+            return left.AsFloat() == right.AsFloat();
         }
 
         if (left == right)
