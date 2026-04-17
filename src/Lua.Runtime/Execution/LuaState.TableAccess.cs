@@ -13,9 +13,17 @@ public sealed partial class LuaState
         if (state.TryGetMetamethod(tableValue, "__len", out var metamethod))
         {
             var results = state.InvokeCallable(metamethod, [tableValue, tableValue]);
-            return results.Length == 0
-                ? 0
-                : RequireIntegerArgument(results, 0, "__len");
+            if (results.Length == 0)
+            {
+                return 0;
+            }
+
+            if (LuaValueHelper.TryGetInteger(results[0], out var length))
+            {
+                return length;
+            }
+
+            throw CreateRuntimeError("object length is not an integer");
         }
 
         return table.GetSequenceLength();

@@ -592,6 +592,30 @@ public class LuaStateTests
         destination.GetValue(LuaValue.FromInteger(3)).AsInteger().ShouldBe(15);
         destination.GetValue(LuaValue.FromInteger(4)).AsInteger().ShouldBe(20);
 
+        var movedToMax = InvokeBaseFunction(
+                state,
+                move,
+                LuaValue.FromTable(new LuaTable()),
+                LuaValue.FromInteger(1),
+                LuaValue.FromInteger(0),
+                LuaValue.FromInteger(long.MaxValue))
+            .ShouldHaveSingleItem()
+            .AsTable();
+        movedToMax.GetValue(LuaValue.FromInteger(long.MaxValue)).IsNil.ShouldBeTrue();
+
+        var singleValueSource = new LuaTable();
+        singleValueSource.SetValue(LuaValue.FromInteger(1), LuaValue.FromInteger(45));
+        var movedSingle = InvokeBaseFunction(
+                state,
+                move,
+                LuaValue.FromTable(singleValueSource),
+                LuaValue.FromInteger(1),
+                LuaValue.FromInteger(1),
+                LuaValue.FromInteger(long.MaxValue))
+            .ShouldHaveSingleItem()
+            .AsTable();
+        movedSingle.GetValue(LuaValue.FromInteger(long.MaxValue)).AsInteger().ShouldBe(45);
+
         var sortable = new LuaTable();
         sortable.SetValue(LuaValue.FromInteger(1), LuaValue.FromInteger(5));
         sortable.SetValue(LuaValue.FromInteger(2), LuaValue.FromInteger(2));
@@ -609,6 +633,39 @@ public class LuaStateTests
         sortable.GetValue(LuaValue.FromInteger(2)).AsInteger().ShouldBe(5);
         sortable.GetValue(LuaValue.FromInteger(3)).AsInteger().ShouldBe(2);
         sortable.GetValue(LuaValue.FromInteger(4)).AsInteger().ShouldBe(1);
+
+        var sortableRecordMetatable = new LuaTable();
+        sortableRecordMetatable.SetValue(
+            LuaValue.FromString("__lt"),
+            LuaValue.FromFunction(new LuaClosure(
+                "__lt",
+                body: new LuaNativeClosureBody(static (_, _, arguments) =>
+                [
+                    LuaValue.FromBoolean(
+                        arguments[0].AsTable().GetValue(LuaValue.FromString("val")).AsInteger() <
+                        arguments[1].AsTable().GetValue(LuaValue.FromString("val")).AsInteger())
+                ]))));
+        var sortableRecords = new LuaTable();
+        var record1 = new LuaTable();
+        record1.SetValue(LuaValue.FromString("val"), LuaValue.FromInteger(7));
+        record1.SetMetatable(sortableRecordMetatable);
+        var record2 = new LuaTable();
+        record2.SetValue(LuaValue.FromString("val"), LuaValue.FromInteger(3));
+        record2.SetMetatable(sortableRecordMetatable);
+        var record3 = new LuaTable();
+        record3.SetValue(LuaValue.FromString("val"), LuaValue.FromInteger(5));
+        record3.SetMetatable(sortableRecordMetatable);
+        sortableRecords.SetValue(LuaValue.FromInteger(1), LuaValue.FromTable(record1));
+        sortableRecords.SetValue(LuaValue.FromInteger(2), LuaValue.FromTable(record2));
+        sortableRecords.SetValue(LuaValue.FromInteger(3), LuaValue.FromTable(record3));
+
+        InvokeBaseFunction(state, sort, LuaValue.FromTable(sortableRecords));
+        sortableRecords.GetValue(LuaValue.FromInteger(1)).AsTable()
+            .GetValue(LuaValue.FromString("val")).AsInteger().ShouldBe(3);
+        sortableRecords.GetValue(LuaValue.FromInteger(2)).AsTable()
+            .GetValue(LuaValue.FromString("val")).AsInteger().ShouldBe(5);
+        sortableRecords.GetValue(LuaValue.FromInteger(3)).AsTable()
+            .GetValue(LuaValue.FromString("val")).AsInteger().ShouldBe(7);
 
         var packed = InvokeBaseFunction(
                 state,
@@ -630,6 +687,72 @@ public class LuaStateTests
         unpacked[0].AsString().ShouldBe("x");
         unpacked[1].IsNil.ShouldBeTrue();
         unpacked[2].AsString().ShouldBe("z");
+
+        Should.Throw<LuaRuntimeException>(() =>
+                InvokeBaseFunction(
+                    state,
+                    unpack,
+                    LuaValue.FromTable(new LuaTable()),
+                    LuaValue.FromInteger(1),
+                    LuaValue.FromInteger(int.MaxValue)))
+            .ErrorObject.AsString().ShouldContain("too many results");
+
+        var nonIntegerLength = new LuaTable();
+        var nonIntegerLengthMetatable = new LuaTable();
+        nonIntegerLengthMetatable.SetValue(
+            LuaValue.FromString("__len"),
+            LuaValue.FromFunction(new LuaClosure(
+                "__len",
+                body: new LuaNativeClosureBody(static (_, _, _) => [LuaValue.FromString("abc")]))));
+        nonIntegerLength.SetMetatable(nonIntegerLengthMetatable);
+
+        Should.Throw<LuaRuntimeException>(() =>
+                InvokeBaseFunction(
+                    state,
+                    insert,
+                    LuaValue.FromTable(nonIntegerLength),
+                    LuaValue.FromInteger(1)))
+            .ErrorObject.AsString().ShouldContain("object length is not an integer");
+    }
+
+    [Fact]
+    public void TableCreate_ShouldReportReservedMemoryAndLuaCompatibleErrors()
+    {
+        var state = new LuaState();
+        var create = state.TableLibrary.GetValue(LuaValue.FromString("create")).AsFunction();
+        var collectGarbage = state.GlobalEnvironment.GetValue(LuaValue.FromString("collectgarbage")).AsFunction();
+
+        var before = InvokeBaseFunction(
+                state,
+                collectGarbage,
+                LuaValue.FromString("count"))
+            .ShouldHaveSingleItem()
+            .AsFloat();
+
+        InvokeBaseFunction(state, create, LuaValue.FromInteger(10000))
+            .ShouldHaveSingleItem()
+            .AsTable();
+
+        var after = InvokeBaseFunction(
+                state,
+                collectGarbage,
+                LuaValue.FromString("count"))
+            .ShouldHaveSingleItem()
+            .AsFloat();
+
+        ((after - before) * 1024d).ShouldBeGreaterThan(10000 * 4);
+
+        Should.Throw<LuaRuntimeException>(() =>
+                InvokeBaseFunction(state, create, LuaValue.FromInteger(1L << 31)))
+            .ErrorObject.AsString().ShouldContain("out of range");
+
+        Should.Throw<LuaRuntimeException>(() =>
+                InvokeBaseFunction(state, create, LuaValue.FromInteger(0), LuaValue.FromInteger(1L << 31)))
+            .ErrorObject.AsString().ShouldContain("out of range");
+
+        Should.Throw<LuaRuntimeException>(() =>
+                InvokeBaseFunction(state, create, LuaValue.FromInteger(0), LuaValue.FromInteger(int.MaxValue)))
+            .ErrorObject.AsString().ShouldContain("table overflow");
     }
 
     [Fact]

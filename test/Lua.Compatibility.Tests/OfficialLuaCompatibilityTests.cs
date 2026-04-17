@@ -97,10 +97,23 @@ public class OfficialLuaCompatibilityTests
         result.Error.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void OfficialSort_ShouldRunSuccessfully()
+    {
+        var result = RunOfficialScript("sort.lua");
+
+        result.ExitCode.ShouldBe(0);
+        result.Output.ShouldContain("testing sort");
+        result.Output.ShouldContain("sorting 50000 random elements");
+        result.Output.ShouldContain("OK");
+        result.Error.ShouldBeEmpty();
+    }
+
     private static ScriptRunResult RunOfficialScript(string scriptPath)
     {
         return string.Equals(scriptPath, "attrib.lua", StringComparison.Ordinal) ||
-               string.Equals(scriptPath, "gc.lua", StringComparison.Ordinal)
+               string.Equals(scriptPath, "gc.lua", StringComparison.Ordinal) ||
+               string.Equals(scriptPath, "sort.lua", StringComparison.Ordinal)
             ? RunOfficialScriptViaCliProcess(scriptPath)
             : RunOfficialScriptInProcess(scriptPath);
     }

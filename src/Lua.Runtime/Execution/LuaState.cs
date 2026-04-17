@@ -364,9 +364,14 @@ public sealed partial class LuaState
         var arrayCapacity = 0;
         if (!arrayCapacityValue.IsNil)
         {
-            if (!LuaValueHelper.TryGetInteger(arrayCapacityValue, out var a) || a < 0 || a > int.MaxValue)
+            if (!LuaValueHelper.TryGetInteger(arrayCapacityValue, out var a) || a < 0)
             {
                 throw CreateArgumentTypeError("table.create", 1, "non-negative integer", arrayCapacityValue);
+            }
+
+            if (a > int.MaxValue)
+            {
+                throw CreateArgumentError("table.create", 1, "out of range");
             }
 
             arrayCapacity = (int)a;
@@ -375,12 +380,25 @@ public sealed partial class LuaState
         var hashCapacity = 0;
         if (!hashCapacityValue.IsNil)
         {
-            if (!LuaValueHelper.TryGetInteger(hashCapacityValue, out var h) || h < 0 || h > int.MaxValue)
+            if (!LuaValueHelper.TryGetInteger(hashCapacityValue, out var h) || h < 0)
             {
                 throw CreateArgumentTypeError("table.create", 2, "non-negative integer", hashCapacityValue);
             }
 
+            if (h > int.MaxValue)
+            {
+                throw CreateArgumentError("table.create", 2, "out of range");
+            }
+
             hashCapacity = (int)h;
+        }
+
+        var reservedBytes =
+            ((long)arrayCapacity * LuaTable.ApproximateReservedArraySlotSize) +
+            ((long)hashCapacity * LuaTable.ApproximateReservedHashSlotSize);
+        if (reservedBytes > int.MaxValue)
+        {
+            throw CreateRuntimeError("table overflow");
         }
 
         return [LuaValue.FromTable(new LuaTable(arrayCapacity: arrayCapacity, hashCapacity: hashCapacity))];
@@ -1452,7 +1470,7 @@ public sealed partial class LuaState
 
             try
             {
-                _ = checked(target + count - 1);
+                _ = checked(target + (count - 1));
             }
             catch (OverflowException)
             {
@@ -1517,7 +1535,14 @@ public sealed partial class LuaState
             values[index] = GetTableLibraryValue(state, table, LuaValue.FromInteger(index + 1));
         }
 
-        Array.Sort(values, (left, right) => CompareTableSortValues(state, left, right, comparator));
+        try
+        {
+            Array.Sort(values, (left, right) => CompareTableSortValues(state, left, right, comparator));
+        }
+        catch (InvalidOperationException ex) when (ex.InnerException is LuaRuntimeException luaRuntimeException)
+        {
+            throw luaRuntimeException;
+        }
 
         for (var index = 1; index < values.Length; index++)
         {
@@ -1567,7 +1592,7 @@ public sealed partial class LuaState
             throw CreateRuntimeError("too many results to unpack");
         }
 
-        if (resultCount > int.MaxValue)
+        if (resultCount >= int.MaxValue)
         {
             throw CreateRuntimeError("too many results to unpack");
         }
@@ -2364,7 +2389,7 @@ public sealed partial class LuaState
             return 0;
         }
 
-        return CompareSortableValues(left, right);
+        return CompareSortableValues(state, left, right);
     }
 
     private static LuaValue InvokeSortComparator(LuaState state, LuaValue comparator, LuaValue left, LuaValue right)
@@ -2373,7 +2398,7 @@ public sealed partial class LuaState
         return results.Length == 0 ? LuaValue.Nil : results[0];
     }
 
-    private static int CompareSortableValues(LuaValue left, LuaValue right)
+    private static int CompareSortableValues(LuaState state, LuaValue left, LuaValue right)
     {
         if (TryGetNumber(left, out var leftNumber) && TryGetNumber(right, out var rightNumber))
         {
@@ -2385,7 +2410,43 @@ public sealed partial class LuaState
             return string.CompareOrdinal(left.AsString(), right.AsString());
         }
 
+        if (TryGetSortLessThanMetamethod(state, left, right, out _))
+        {
+            if (IsTruthy(InvokeSortLessThanMetamethod(state, left, right)))
+            {
+                return -1;
+            }
+
+            if (IsTruthy(InvokeSortLessThanMetamethod(state, right, left)))
+            {
+                return 1;
+            }
+
+            return 0;
+        }
+
         throw CreateRuntimeError($"attempt to compare {GetTypeName(left)} with {GetTypeName(right)}");
+    }
+
+    private static bool TryGetSortLessThanMetamethod(
+        LuaState state,
+        LuaValue left,
+        LuaValue right,
+        out LuaValue metamethod)
+    {
+        return state.TryGetMetamethod(left, "__lt", out metamethod) ||
+               state.TryGetMetamethod(right, "__lt", out metamethod);
+    }
+
+    private static LuaValue InvokeSortLessThanMetamethod(LuaState state, LuaValue left, LuaValue right)
+    {
+        if (!TryGetSortLessThanMetamethod(state, left, right, out var metamethod))
+        {
+            return LuaValue.Nil;
+        }
+
+        var results = state.InvokeCallable(metamethod, [left, right]);
+        return results.Length == 0 ? LuaValue.Nil : results[0];
     }
 
     private static double ToDouble(LuaValue value)

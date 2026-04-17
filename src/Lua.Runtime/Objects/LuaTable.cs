@@ -5,12 +5,19 @@ namespace Lua.Runtime.Objects;
 
 public sealed class LuaTable : IMetatableOwner
 {
+    internal const int ApproximateReservedArraySlotSize = 8;
+    internal const int ApproximateReservedHashSlotSize = 16;
+    private const int ApproximateBaseSize = 80;
+    private const int ApproximateEntrySize = 40;
+    private const int MaxInitialStrongKeyCapacity = 1 << 20;
     private static readonly object RegistrySync = new();
     private static readonly List<WeakReference<LuaTable>> RegisteredTables = [];
     private static readonly List<LuaTable> PendingFinalizationTables = [];
     private readonly Dictionary<LuaValue, TableEntry> _strongKeyEntries;
     private readonly List<TableEntry> _entriesInOrder;
     private readonly Dictionary<LuaValue, LuaValue> _removedNextHints;
+    private readonly int _reservedArrayCapacity;
+    private readonly int _reservedHashCapacity;
     private WeakMode _weakMode;
     private bool _isMarkedForFinalization;
     private bool _hasFinalizerRun;
@@ -18,7 +25,12 @@ public sealed class LuaTable : IMetatableOwner
     public LuaTable(string? debugName = null, int arrayCapacity = 0, int hashCapacity = 0)
     {
         DebugName = debugName;
-        _strongKeyEntries = new Dictionary<LuaValue, TableEntry>(Math.Max(arrayCapacity, 0) + Math.Max(hashCapacity, 0));
+        _reservedArrayCapacity = Math.Max(arrayCapacity, 0);
+        _reservedHashCapacity = Math.Max(hashCapacity, 0);
+        var initialStrongKeyCapacity = (int)Math.Min(
+            (long)_reservedArrayCapacity + _reservedHashCapacity,
+            MaxInitialStrongKeyCapacity);
+        _strongKeyEntries = new Dictionary<LuaValue, TableEntry>(initialStrongKeyCapacity);
         _entriesInOrder = [];
         _removedNextHints = [];
 
@@ -344,7 +356,12 @@ public sealed class LuaTable : IMetatableOwner
     internal int GetApproximateMemorySize()
     {
         RefreshEntries();
-        return 80 + (_entriesInOrder.Count * 40);
+        var totalBytes =
+            ApproximateBaseSize +
+            ((long)_entriesInOrder.Count * ApproximateEntrySize) +
+            ((long)_reservedArrayCapacity * ApproximateReservedArraySlotSize) +
+            ((long)_reservedHashCapacity * ApproximateReservedHashSlotSize);
+        return totalBytes > int.MaxValue ? int.MaxValue : (int)totalBytes;
     }
 
     public long GetSequenceLength()
