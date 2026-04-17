@@ -73,15 +73,19 @@ public sealed partial class LuaVirtualMachine
         return Call(closure);
     }
 
-    public LuaValue[] Call(LuaClosure closure, IReadOnlyList<LuaValue>? arguments = null)
+    public LuaValue[] Call(
+        LuaClosure closure,
+        IReadOnlyList<LuaValue>? arguments = null,
+        string? invocationName = null,
+        string invocationNameWhat = "")
     {
         ArgumentNullException.ThrowIfNull(closure);
 
         var actualArguments = arguments ?? Array.Empty<LuaValue>();
         return closure.Body switch
         {
-            LuaBytecodeClosureBody body => ExecuteClosure(closure, body.Prototype, actualArguments),
-            LuaNativeClosureBody body => ExecuteNativeClosure(closure, body, actualArguments),
+            LuaBytecodeClosureBody body => ExecuteClosure(closure, body.Prototype, actualArguments, invocationName, invocationNameWhat),
+            LuaNativeClosureBody body => ExecuteNativeClosure(closure, body, actualArguments, invocationName, invocationNameWhat),
             null => throw new InvalidOperationException("The closure does not contain an executable body."),
             _ => throw new InvalidOperationException($"Unsupported closure body type '{closure.Body.GetType().Name}'.")
         };
@@ -111,13 +115,18 @@ public sealed partial class LuaVirtualMachine
             prototype.Code.Length);
     }
 
-    private LuaValue[] ExecuteClosure(LuaClosure closure, LuaPrototype prototype, IReadOnlyList<LuaValue> arguments)
+    private LuaValue[] ExecuteClosure(
+        LuaClosure closure,
+        LuaPrototype prototype,
+        IReadOnlyList<LuaValue> arguments,
+        string? invocationName = null,
+        string invocationNameWhat = "")
     {
         ArgumentNullException.ThrowIfNull(arguments);
         var hostCallId = CreateHostCallId();
         var frameDepth = State.Frames.Count;
         State.CurrentFrame?.PendingProtectedCall?.SetActiveHostCallId(hostCallId);
-        PushBytecodeFrame(closure, prototype, arguments, LuaCallReturnTarget.ForHostCall(hostCallId));
+        PushBytecodeFrame(closure, prototype, arguments, LuaCallReturnTarget.ForHostCall(hostCallId), invocationName, invocationNameWhat);
 
         try
         {
@@ -200,7 +209,12 @@ public sealed partial class LuaVirtualMachine
         return true;
     }
 
-    private LuaValue[] ExecuteNativeClosure(LuaClosure closure, LuaNativeClosureBody body, IReadOnlyList<LuaValue> arguments)
+    private LuaValue[] ExecuteNativeClosure(
+        LuaClosure closure,
+        LuaNativeClosureBody body,
+        IReadOnlyList<LuaValue> arguments,
+        string? invocationName = null,
+        string invocationNameWhat = "")
     {
         var shouldTrackBoundary =
             !string.Equals(closure.DebugName, "coroutine.yield", StringComparison.Ordinal) &&
@@ -211,8 +225,11 @@ public sealed partial class LuaVirtualMachine
         var nativeFrame = new CallFrame(
             closure,
             baseIndex: State.Stack.Count,
-            expectedResults: 0);
+            expectedResults: 0,
+            invocationName: invocationName,
+            invocationNameWhat: invocationNameWhat);
         State.PushFrame(nativeFrame);
+        ExecuteCallHook(nativeFrame);
 
         try
         {
@@ -339,6 +356,7 @@ public sealed partial class LuaVirtualMachine
 
                 var instruction = LuaInstruction.FromRaw(prototype.Code[frame.ProgramCounter]);
                 frame.Advance();
+                ExecuteLineHook(frame, prototype, instruction);
 
                 switch (instruction.Opcode)
                 {
@@ -652,7 +670,9 @@ public sealed partial class LuaVirtualMachine
         LuaClosure closure,
         LuaPrototype prototype,
         IReadOnlyList<LuaValue> arguments,
-        LuaCallReturnTarget returnTarget)
+        LuaCallReturnTarget returnTarget,
+        string? invocationName = null,
+        string invocationNameWhat = "")
     {
         ArgumentNullException.ThrowIfNull(arguments);
         EnsureCallFrameCapacity();
@@ -670,8 +690,11 @@ public sealed partial class LuaVirtualMachine
             expectedResults: 0,
             registerTop: fixedArgumentCount,
             varargs: GetVarargs(prototype, arguments, fixedArgumentCount),
-            returnTarget: returnTarget);
+            returnTarget: returnTarget,
+            invocationName: invocationName,
+            invocationNameWhat: invocationNameWhat);
         State.PushFrame(frame);
+        ExecuteCallHook(frame);
         return frame;
     }
 

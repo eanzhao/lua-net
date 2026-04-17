@@ -54,13 +54,11 @@ public sealed partial class LuaState
         {
             if (what.Contains('n'))
             {
-                var name = frameIndex >= 0 && target.DebugName is not null
-                    ? LuaValue.FromString(target.DebugName)
-                    : frameIndex < 0 && string.Equals(what, "n", StringComparison.Ordinal) && target.DebugName is not null
-                    ? LuaValue.FromString(target.DebugName)
-                    : LuaValue.Nil;
+                var (name, nameWhat) = frameIndex >= 0
+                    ? ResolveFrameName(state.CurrentThread.Frames[frameIndex])
+                    : ResolveFunctionName(target);
                 info.SetValue(LuaValue.FromString("name"), name);
-                info.SetValue(LuaValue.FromString("namewhat"), LuaValue.FromString(frameIndex >= 0 && target.DebugName is not null ? "global" : string.Empty));
+                info.SetValue(LuaValue.FromString("namewhat"), LuaValue.FromString(nameWhat));
             }
 
             if (what.Contains('S'))
@@ -113,6 +111,29 @@ public sealed partial class LuaState
 
         var programCounter = Math.Max(0, frame.ProgramCounter - 1);
         return frame.Closure.ResolveLine(programCounter);
+    }
+
+    private static (LuaValue Name, string NameWhat) ResolveFrameName(CallFrame frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+
+        if (string.IsNullOrEmpty(frame.InvocationName) && string.IsNullOrEmpty(frame.InvocationNameWhat))
+        {
+            return (LuaValue.Nil, string.Empty);
+        }
+
+        return string.IsNullOrEmpty(frame.InvocationName)
+            ? (LuaValue.Nil, frame.InvocationNameWhat)
+            : (LuaValue.FromString(frame.InvocationName), frame.InvocationNameWhat);
+    }
+
+    private static (LuaValue Name, string NameWhat) ResolveFunctionName(LuaClosure closure)
+    {
+        ArgumentNullException.ThrowIfNull(closure);
+
+        return string.IsNullOrEmpty(closure.DebugName)
+            ? (LuaValue.Nil, string.Empty)
+            : (LuaValue.FromString(closure.DebugName), string.Empty);
     }
 
     private static void ValidateGetInfoOptions(LuaValue level, string what)
@@ -427,6 +448,12 @@ public sealed partial class LuaState
         var mask = GetHookMask(arguments, argumentIndex + 1);
         var count = GetHookCount(arguments, argumentIndex + 2);
         targetThread.SetHook(hookValue.AsFunction(), mask, count);
+        if (mask.Contains('l') && ReferenceEquals(targetThread, state.CurrentThread) && targetThread.Frames.Count >= 2)
+        {
+            var callerFrame = targetThread.Frames[^2];
+            callerFrame.SetLastLineHookLine(ResolveCurrentLine(callerFrame));
+        }
+
         return [];
     }
 

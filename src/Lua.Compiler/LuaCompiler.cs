@@ -66,6 +66,8 @@ public static class LuaCompiler
         private readonly List<uint> _code = [];
         private readonly List<int> _instructionLines = [];
         private readonly List<byte> _registerTopHints = [];
+        private readonly List<string?> _callSiteNames = [];
+        private readonly List<string> _callSiteNameWhats = [];
         private readonly List<LuaConstant> _constants = [];
         private readonly Dictionary<string, int> _constantIndices = new(StringComparer.Ordinal);
         private readonly List<LuaPrototype> _nestedPrototypes = [];
@@ -95,7 +97,7 @@ public static class LuaCompiler
 
             if (!EndsWithReturn())
             {
-                EmitReturn0();
+                WithSourceLine(syntax.Range.End.Line, EmitReturn0);
             }
 
             return BuildPrototype(
@@ -137,7 +139,7 @@ public static class LuaCompiler
 
             if (!EndsWithReturn())
             {
-                EmitReturn0();
+                WithSourceLine(body.Range.End.Line, EmitReturn0);
             }
 
             PatchVarArgInstructionsForTable(flags, parameterCount);
@@ -197,7 +199,9 @@ public static class LuaCompiler
                 AbsoluteLineInfo = absoluteLineInfo,
                 LocalVariables = [],
                 ToBeClosedNames = BuildToBeClosedNames(),
-                RegisterTopHints = _registerTopHints.ToArray()
+                RegisterTopHints = _registerTopHints.ToArray(),
+                CallSiteNames = _callSiteNames.ToArray(),
+                CallSiteNameWhats = _callSiteNameWhats.ToArray()
             };
         }
 
@@ -356,11 +360,12 @@ public static class LuaCompiler
         private void CompileIf(LuaIfStatementSyntax statement)
         {
             var endJumps = new List<int>();
+            var endLine = statement.Range.End.Line;
 
-            CompileConditionalClause(statement.IfClause, endJumps);
+            CompileConditionalClause(statement.IfClause, endJumps, endLine);
             foreach (var elseIf in statement.ElseIfClauses)
             {
-                CompileConditionalClause(elseIf, endJumps);
+                CompileConditionalClause(elseIf, endJumps, endLine);
             }
 
             if (statement.ElseClause is not null)
@@ -371,15 +376,19 @@ public static class LuaCompiler
             PatchJumps(endJumps, CurrentProgramCounter);
         }
 
-        private void CompileConditionalClause(LuaConditionalClauseSyntax clause, List<int> endJumps)
+        private void CompileConditionalClause(LuaConditionalClauseSyntax clause, List<int> endJumps, int endLine)
         {
             var conditionRegister = AllocateTemp();
-            CompileExpressionInto(clause.Condition, conditionRegister);
-            EmitTest(conditionRegister, expectedTruthy: false);
-            var skipBlockJump = EmitJumpPlaceholder();
+            var skipBlockJump = -1;
+            WithSourceLine(GetExecutionLine(clause.Condition), () =>
+            {
+                CompileExpressionInto(clause.Condition, conditionRegister);
+                EmitTest(conditionRegister, expectedTruthy: false);
+                skipBlockJump = EmitJumpPlaceholder();
+            });
 
             CompileScopedBlock(clause.Block);
-            endJumps.Add(EmitJumpPlaceholder());
+            WithSourceLine(endLine, () => endJumps.Add(EmitJumpPlaceholder()));
 
             PatchJump(skipBlockJump, CurrentProgramCounter);
         }
@@ -388,9 +397,13 @@ public static class LuaCompiler
         {
             var loopStart = CurrentProgramCounter;
             var conditionRegister = AllocateTemp();
-            CompileExpressionInto(statement.Condition, conditionRegister);
-            EmitTest(conditionRegister, expectedTruthy: false);
-            var exitJump = EmitJumpPlaceholder();
+            var exitJump = -1;
+            WithSourceLine(GetExecutionLine(statement.Condition), () =>
+            {
+                CompileExpressionInto(statement.Condition, conditionRegister);
+                EmitTest(conditionRegister, expectedTruthy: false);
+                exitJump = EmitJumpPlaceholder();
+            });
 
             EnterScope();
             _loops.Add(new LoopContext(CurrentScope));
@@ -414,14 +427,18 @@ public static class LuaCompiler
             CompileBlockStatements(statement.Block.Statements);
 
             var conditionRegister = AllocateTemp();
-            CompileExpressionInto(statement.Condition, conditionRegister);
-            if (GetCurrentScopeCloseRegister() is int closeRegister)
+            var continueJump = -1;
+            WithSourceLine(GetExecutionLine(statement.Condition), () =>
             {
-                EmitClose(closeRegister);
-            }
+                CompileExpressionInto(statement.Condition, conditionRegister);
+                if (GetCurrentScopeCloseRegister() is int closeRegister)
+                {
+                    EmitClose(closeRegister);
+                }
 
-            EmitTest(conditionRegister, expectedTruthy: false);
-            var continueJump = EmitJumpPlaceholder();
+                EmitTest(conditionRegister, expectedTruthy: false);
+                continueJump = EmitJumpPlaceholder();
+            });
 
             var loop = _loops[^1];
             _loops.RemoveAt(_loops.Count - 1);
@@ -430,6 +447,20 @@ public static class LuaCompiler
 
             var loopEnd = CurrentProgramCounter;
             PatchJumps(loop.BreakJumps, loopEnd);
+        }
+
+        private static int GetExecutionLine(LuaExpressionSyntax expression)
+        {
+            return expression switch
+            {
+                LuaParenthesizedExpressionSyntax parenthesized => GetExecutionLine(parenthesized.Expression),
+                LuaUnaryExpressionSyntax unary => GetExecutionLine(unary.Operand),
+                LuaBinaryExpressionSyntax binary => GetExecutionLine(binary.Left),
+                LuaFunctionCallExpressionSyntax functionCall => GetExecutionLine(functionCall.Prefix),
+                LuaMemberAccessExpressionSyntax memberAccess => GetExecutionLine(memberAccess.Prefix),
+                LuaIndexExpressionSyntax indexExpression => GetExecutionLine(indexExpression.Prefix),
+                _ => expression.Range.Start.Line
+            };
         }
 
         private void CompileBreak(LuaBreakStatementSyntax statement)
@@ -692,7 +723,9 @@ public static class LuaCompiler
                 Position: statement.Name.Range.Start));
 
             var functionRegister = AllocateTemp();
-            CompileNestedFunction(statement.Body, injectSelf: false, functionRegister, statement.Name.Identifier);
+            WithSourceLine(
+                statement.Body.Range.End.Line,
+                () => CompileNestedFunction(statement.Body, injectSelf: false, functionRegister, statement.Name.Identifier));
             EmitGlobalInitializationCheck(statement.Name.Identifier, statement.Range);
             StoreAssignmentTarget(CreateGlobalAssignmentTarget(statement.Name.Identifier, statement.Range), functionRegister);
         }
@@ -700,14 +733,18 @@ public static class LuaCompiler
         private void CompileLocalFunction(LuaLocalFunctionStatementSyntax statement)
         {
             var register = AddLocal(statement.Name.Identifier, statement.Name.Range.Start);
-            CompileNestedFunction(statement.Body, injectSelf: false, register, statement.Name.Identifier);
+            WithSourceLine(
+                statement.Body.Range.End.Line,
+                () => CompileNestedFunction(statement.Body, injectSelf: false, register, statement.Name.Identifier));
         }
 
         private void CompileNamedFunction(LuaFunctionNameSyntax name, LuaFunctionBodySyntax body, bool injectSelf)
         {
             var target = CreateFunctionAssignmentTarget(name);
             var functionRegister = AllocateTemp();
-            CompileNestedFunction(body, injectSelf, functionRegister, GetFunctionDebugName(name));
+            WithSourceLine(
+                body.Range.End.Line,
+                () => CompileNestedFunction(body, injectSelf, functionRegister, GetFunctionDebugName(name)));
             StoreAssignmentTarget(target, functionRegister);
         }
 
@@ -1632,7 +1669,12 @@ public static class LuaCompiler
                 }
 
                 var resultOperand = openResults ? 0 : (fixedResultCount ?? 1) + 1;
-                EmitCall(functionRegister, functionAndArgumentCount, resultOperand);
+                EmitCall(
+                    functionRegister,
+                    functionAndArgumentCount,
+                    resultOperand,
+                    GetCallSiteName(expression),
+                    GetCallSiteNameWhat(expression));
             });
         }
 
@@ -2077,6 +2119,8 @@ public static class LuaCompiler
             _code.Add(instruction);
             _instructionLines.Add(Math.Max(1, _currentSourceLine));
             _registerTopHints.Add(checked((byte)_tempRegisterTop));
+            _callSiteNames.Add(null);
+            _callSiteNameWhats.Add(string.Empty);
         }
 
         private void WithSourceLine(int line, Action action)
@@ -2164,6 +2208,7 @@ public static class LuaCompiler
         {
             var programCounter = CurrentProgramCounter;
             AddInstruction(EncodeAbc(LuaOpcode.TForCall, registerIndex, 0, resultCount));
+            _callSiteNames[programCounter] = "for iterator";
             return programCounter;
         }
 
@@ -2338,9 +2383,79 @@ public static class LuaCompiler
             AddInstruction(EncodeAbc(LuaOpcode.Test, registerIndex, 0, 0, expectedTruthy ? 1 : 0));
         }
 
-        private void EmitCall(int functionRegister, int functionAndArgumentCount, int resultOperand)
+        private void EmitCall(
+            int functionRegister,
+            int functionAndArgumentCount,
+            int resultOperand,
+            string? name = null,
+            string nameWhat = "")
         {
+            var programCounter = CurrentProgramCounter;
             AddInstruction(EncodeAbc(LuaOpcode.Call, functionRegister, functionAndArgumentCount, resultOperand));
+            _callSiteNames[programCounter] = name;
+            _callSiteNameWhats[programCounter] = nameWhat;
+        }
+
+        private string? GetCallSiteName(LuaFunctionCallExpressionSyntax expression)
+        {
+            if (expression.MethodName is not null)
+            {
+                return expression.MethodName.Identifier;
+            }
+
+            return GetCallSiteName(expression.Prefix);
+        }
+
+        private string? GetCallSiteName(LuaExpressionSyntax expression)
+        {
+            return expression switch
+            {
+                LuaNameExpressionSyntax nameExpression => GetNameCallSiteName(nameExpression),
+                LuaMemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier,
+                LuaIndexExpressionSyntax { Index: LuaStringLiteralExpressionSyntax stringLiteral } => stringLiteral.Value,
+                _ => null
+            };
+        }
+
+        private string GetCallSiteNameWhat(LuaFunctionCallExpressionSyntax expression)
+        {
+            if (expression.MethodName is not null)
+            {
+                return "method";
+            }
+
+            return GetCallSiteNameWhat(expression.Prefix);
+        }
+
+        private string GetCallSiteNameWhat(LuaExpressionSyntax expression)
+        {
+            return expression switch
+            {
+                LuaNameExpressionSyntax nameExpression => GetNameCallSiteNameWhat(nameExpression),
+                LuaMemberAccessExpressionSyntax => "field",
+                LuaIndexExpressionSyntax { Index: LuaStringLiteralExpressionSyntax } => "field",
+                _ => string.Empty
+            };
+        }
+
+        private string? GetNameCallSiteName(LuaNameExpressionSyntax expression)
+        {
+            return expression.Name.Identifier;
+        }
+
+        private string GetNameCallSiteNameWhat(LuaNameExpressionSyntax expression)
+        {
+            if (TryResolveLexicalName(expression.Name.Identifier, out var reference))
+            {
+                return reference.Kind == ReferenceKind.Local ? "local" : "upvalue";
+            }
+
+            if (TryResolveExplicitGlobal(expression.Name.Identifier, out _) || !HasActiveExplicitGlobalDeclarations)
+            {
+                return "global";
+            }
+
+            return string.Empty;
         }
 
         private void EmitClose(int registerIndex)

@@ -33,4 +33,8 @@ public sealed class LuaPrototype
     public string?[]? ToBeClosedNames { get; init; }
 
     public byte[]? RegisterTopHints { get; init; }
+
+    public string?[]? CallSiteNames { get; init; }
+
+    public string[]? CallSiteNameWhats { get; init; }
 }

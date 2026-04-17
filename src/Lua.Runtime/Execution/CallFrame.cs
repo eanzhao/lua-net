@@ -15,7 +15,9 @@ public sealed class CallFrame
         int programCounter = 0,
         int registerTop = 0,
         IReadOnlyList<LuaValue>? varargs = null,
-        LuaCallReturnTarget? returnTarget = null)
+        LuaCallReturnTarget? returnTarget = null,
+        string? invocationName = null,
+        string invocationNameWhat = "")
     {
         ArgumentNullException.ThrowIfNull(closure);
         ArgumentOutOfRangeException.ThrowIfNegative(baseIndex);
@@ -30,6 +32,8 @@ public sealed class CallFrame
         RegisterTop = registerTop;
         Varargs = varargs ?? Array.Empty<LuaValue>();
         ReturnTarget = returnTarget ?? LuaCallReturnTarget.None;
+        InvocationName = invocationName;
+        InvocationNameWhat = invocationNameWhat;
     }
 
     public LuaClosure Closure { get; }
@@ -48,11 +52,17 @@ public sealed class CallFrame
 
     public LuaCallReturnTarget ReturnTarget { get; }
 
+    public string? InvocationName { get; }
+
+    public string InvocationNameWhat { get; }
+
     public LuaPendingCall? PendingCall { get; private set; }
 
     public LuaPendingClose? PendingClose { get; private set; }
 
     public LuaPendingProtectedCall? PendingProtectedCall { get; private set; }
+
+    public int LastLineHookLine { get; private set; } = -1;
 
     public void SetPendingCall(int registerIndex, int resultCount)
     {
@@ -101,6 +111,11 @@ public sealed class CallFrame
     {
         ArgumentOutOfRangeException.ThrowIfNegative(registerTop);
         LiveRegisterTop = registerTop;
+    }
+
+    public void SetLastLineHookLine(int line)
+    {
+        LastLineHookLine = line;
     }
 
     public void RegisterToBeClosed(int registerIndex)

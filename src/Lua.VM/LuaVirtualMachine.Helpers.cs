@@ -266,6 +266,19 @@ public sealed partial class LuaVirtualMachine
         return $"function@{prototype.LineDefined}";
     }
 
+    private static (string? Name, string NameWhat) GetCallSiteDebugInfo(LuaPrototype prototype, int instructionIndex)
+    {
+        if (prototype.CallSiteNames is null ||
+            prototype.CallSiteNameWhats is null ||
+            (uint)instructionIndex >= (uint)prototype.CallSiteNames.Length ||
+            (uint)instructionIndex >= (uint)prototype.CallSiteNameWhats.Length)
+        {
+            return (null, string.Empty);
+        }
+
+        return (prototype.CallSiteNames[instructionIndex], prototype.CallSiteNameWhats[instructionIndex]);
+    }
+
     private static bool IsVarArgFunction(LuaPrototype prototype)
     {
         return (prototype.Flags & VarArgFlagMask) != 0;
@@ -655,11 +668,11 @@ public sealed partial class LuaVirtualMachine
         var closeClosure = GetCloseCallable(closeMethod.AsFunction());
         if (pendingException is null)
         {
-            Call(closeClosure, [value]);
+            Call(closeClosure, [value], invocationName: "close");
             return;
         }
 
-        Call(closeClosure, [value, GetErrorObject(pendingException)]);
+        Call(closeClosure, [value, GetErrorObject(pendingException)], invocationName: "close");
     }
 
     private static LuaClosure GetCloseCallable(LuaClosure closeClosure)
@@ -771,7 +784,69 @@ public sealed partial class LuaVirtualMachine
 
         try
         {
-            Call(thread.HookFunction, [LuaValue.FromString("return")]);
+            Call(thread.HookFunction, [LuaValue.FromString("return")], invocationName: "hook", invocationNameWhat: "hook");
+        }
+        finally
+        {
+            thread.ExitHookInvocation();
+        }
+    }
+
+    private void ExecuteCallHook(CallFrame frame)
+    {
+        var thread = State.CurrentThread;
+        if (thread.IsExecutingHook || !thread.HasHookEvent('c') || thread.HookFunction is null)
+        {
+            return;
+        }
+
+        thread.EnterHookInvocation();
+
+        try
+        {
+            Call(thread.HookFunction, [LuaValue.FromString("call")], invocationName: "hook", invocationNameWhat: "hook");
+        }
+        finally
+        {
+            thread.ExitHookInvocation();
+        }
+    }
+
+    private void ExecuteLineHook(CallFrame frame, LuaPrototype prototype, LuaInstruction instruction)
+    {
+        var thread = State.CurrentThread;
+        if (thread.IsExecutingHook || !thread.HasHookEvent('l') || thread.HookFunction is null)
+        {
+            return;
+        }
+
+        if (instruction.Opcode is LuaOpcode.VarArgPrep)
+        {
+            return;
+        }
+
+        var instructionIndex = frame.ProgramCounter - 1;
+        if ((uint)instructionIndex >= (uint)prototype.Code.Length)
+        {
+            return;
+        }
+
+        var line = frame.Closure.ResolveLine(instructionIndex);
+        if (line <= 0 || frame.LastLineHookLine == line)
+        {
+            return;
+        }
+
+        frame.SetLastLineHookLine(line);
+        thread.EnterHookInvocation();
+
+        try
+        {
+            Call(
+                thread.HookFunction,
+                [LuaValue.FromString("line"), LuaValue.FromInteger(line)],
+                invocationName: "hook",
+                invocationNameWhat: "hook");
         }
         finally
         {

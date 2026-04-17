@@ -13,10 +13,12 @@ public sealed partial class LuaVirtualMachine
 {
     private void ExecuteCall(CallFrame frame, LuaInstruction instruction)
     {
+        var prototype = GetCurrentPrototype(frame);
         var callable = GetRegister(frame, instruction.A);
         var arguments = ReadArguments(frame, instruction.A, instruction.B);
         var resolved = ResolveCallable(callable, arguments);
         var resultCount = instruction.C == 0 ? -1 : instruction.C - 1;
+        var (invocationName, invocationNameWhat) = GetCallSiteDebugInfo(prototype, frame.ProgramCounter - 1);
 
         switch (resolved.Closure.Body)
         {
@@ -25,13 +27,15 @@ public sealed partial class LuaVirtualMachine
                     resolved.Closure,
                     body.Prototype,
                     resolved.Arguments,
-                    LuaCallReturnTarget.ForRegisters(frame, instruction.A, resultCount));
+                    LuaCallReturnTarget.ForRegisters(frame, instruction.A, resultCount),
+                    invocationName,
+                    invocationNameWhat);
                 return;
             case LuaNativeClosureBody body:
                 frame.SetPendingCall(instruction.A, resultCount);
                 try
                 {
-                    var results = ExecuteNativeClosure(resolved.Closure, body, resolved.Arguments);
+                    var results = ExecuteNativeClosure(resolved.Closure, body, resolved.Arguments, invocationName, invocationNameWhat);
                     WriteCallResults(frame, instruction.A, resultCount, results);
                     frame.ClearPendingCall();
                     return;
@@ -60,9 +64,11 @@ public sealed partial class LuaVirtualMachine
     {
         completedResults = [];
 
+        var prototype = GetCurrentPrototype(frame);
         var callable = GetRegister(frame, instruction.A);
         var arguments = ReadArguments(frame, instruction.A, instruction.B);
         var resolved = ResolveCallable(callable, arguments);
+        var (invocationName, invocationNameWhat) = GetCallSiteDebugInfo(prototype, frame.ProgramCounter - 1);
 
         switch (resolved.Closure.Body)
         {
@@ -76,13 +82,13 @@ public sealed partial class LuaVirtualMachine
 
                 State.PopFrame();
                 State.Stack.SetTop(frame.BaseIndex);
-                PushBytecodeFrame(resolved.Closure, body.Prototype, resolved.Arguments, returnTarget);
+                PushBytecodeFrame(resolved.Closure, body.Prototype, resolved.Arguments, returnTarget, invocationName, invocationNameWhat);
                 return false;
             case LuaNativeClosureBody nativeBody:
                 frame.SetPendingTailReturn();
                 try
                 {
-                    var results = ExecuteNativeClosure(resolved.Closure, nativeBody, resolved.Arguments);
+                    var results = ExecuteNativeClosure(resolved.Closure, nativeBody, resolved.Arguments, invocationName, invocationNameWhat);
                     frame.ClearPendingCall();
                     return TryCompleteFrame(frame, results, hostCallId, out completedResults);
                 }
@@ -320,6 +326,7 @@ public sealed partial class LuaVirtualMachine
 
     private void ExecuteTForCall(CallFrame frame, LuaInstruction instruction)
     {
+        var prototype = GetCurrentPrototype(frame);
         SetRegister(frame, instruction.A + 5, GetRegister(frame, instruction.A + 3));
         SetRegister(frame, instruction.A + 4, GetRegister(frame, instruction.A + 1));
         SetRegister(frame, instruction.A + 3, GetRegister(frame, instruction.A));
@@ -339,10 +346,17 @@ public sealed partial class LuaVirtualMachine
                     resolved.Closure,
                     body.Prototype,
                     resolved.Arguments,
-                    LuaCallReturnTarget.ForRegisters(frame, instruction.A + 3, instruction.C));
+                    LuaCallReturnTarget.ForRegisters(frame, instruction.A + 3, instruction.C),
+                    GetCallSiteDebugInfo(prototype, frame.ProgramCounter - 1).Name ?? "for iterator",
+                    GetCallSiteDebugInfo(prototype, frame.ProgramCounter - 1).NameWhat);
                 return;
             case LuaNativeClosureBody nativeBody:
-                var results = ExecuteNativeClosure(resolved.Closure, nativeBody, resolved.Arguments);
+                var results = ExecuteNativeClosure(
+                    resolved.Closure,
+                    nativeBody,
+                    resolved.Arguments,
+                    invocationName: "for iterator",
+                    invocationNameWhat: string.Empty);
                 WriteResults(frame, instruction.A + 3, instruction.C, results);
                 return;
             case null:
