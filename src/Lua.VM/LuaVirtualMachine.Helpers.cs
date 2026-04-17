@@ -789,6 +789,11 @@ public sealed partial class LuaVirtualMachine
         return new LuaRuntimeException(LuaValue.FromString(message));
     }
 
+    private static LuaRuntimeException CreateIntegerRepresentationError()
+    {
+        return CreateRuntimeException("number has no integer representation");
+    }
+
     private static int ToSignedB(int value)
     {
         return value - LuaInstructionLayout.OffsetSC;

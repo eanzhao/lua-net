@@ -278,6 +278,26 @@ public class LuaVirtualMachineTests
     }
 
     [Fact]
+    public void Execute_ShouldTreatNaNOrderedComparisonsAsFalse()
+    {
+        var vm = new LuaVirtualMachine();
+        var target = LoadTextFunction(vm, """
+return function()
+    local nan = 0/0
+    return nan < 0, nan <= 0, 0 < nan, 0 <= nan
+end
+""");
+
+        var results = vm.Call(target);
+
+        results.Length.ShouldBe(4);
+        results[0].AsBoolean().ShouldBeFalse();
+        results[1].AsBoolean().ShouldBeFalse();
+        results[2].AsBoolean().ShouldBeFalse();
+        results[3].AsBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
     public void Execute_ShouldHandleTestSetChunkFixture()
     {
         var reader = new LuaChunkReader();

@@ -152,6 +152,11 @@ public sealed partial class LuaVirtualMachine
         return eventIndex >= AddMetamethodEvent && eventIndex <= ShiftRightMetamethodEvent;
     }
 
+    private static bool IsBitwiseMetamethodEvent(int eventIndex)
+    {
+        return eventIndex >= BitwiseAndMetamethodEvent && eventIndex <= ShiftRightMetamethodEvent;
+    }
+
     private static bool IsArithmeticOperandCompatible(LuaValue value)
     {
         return TryGetNumber(value, out _) ||

@@ -28,6 +28,12 @@ public sealed partial class LuaVirtualMachine
         var (success, result) = operation(left, right);
         if (!success)
         {
+            if (IsBitwiseMetamethodEvent(metamethodEvent) &&
+                (IsNumericWithoutIntegerRepresentation(left) || IsNumericWithoutIntegerRepresentation(right)))
+            {
+                throw CreateIntegerRepresentationError();
+            }
+
             if (HasFollowingMetamethodInstruction(frame, prototype))
             {
                 return;
@@ -51,6 +57,11 @@ public sealed partial class LuaVirtualMachine
         var (success, result) = operation(operand);
         if (!success)
         {
+            if (IsBitwiseMetamethodEvent(metamethodEvent) && IsNumericWithoutIntegerRepresentation(operand))
+            {
+                throw CreateIntegerRepresentationError();
+            }
+
             result = CallBinaryMetamethodResult(operand, operand, metamethodEvent);
         }
 
@@ -162,6 +173,11 @@ public sealed partial class LuaVirtualMachine
         }
 
         return (true, LuaValue.FromInteger(operation(leftInteger, rightInteger)));
+    }
+
+    private static bool IsNumericWithoutIntegerRepresentation(LuaValue value)
+    {
+        return value.Kind == LuaValueKind.Float && !TryGetInteger(value, out _);
     }
 
     private static long LuaShiftLeft(long value, long shift)

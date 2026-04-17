@@ -22,6 +22,12 @@ public sealed partial class LuaVirtualMachine
     {
         if (!TryCompareOrdered(left, right, out var comparison))
         {
+            if (TryGetNumber(left, out _) && TryGetNumber(right, out _))
+            {
+                ExecuteConditionalJump(frame, false, expected);
+                return;
+            }
+
             ExecuteConditionalJump(frame, CallBinaryMetamethodBoolean(left, right, metamethodEvent), expected);
             return;
         }
