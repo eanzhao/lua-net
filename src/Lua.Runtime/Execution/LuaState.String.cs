@@ -141,6 +141,12 @@ public sealed partial class LuaState
         var startIndex = ResolvePatternSearchStart(arguments, 2, subject.Length, "string.find");
         var plain = arguments.Count > 3 && IsTruthy(arguments[3]);
 
+        // Lua 5.5: init > #s + 1 → no match.
+        if (startIndex > subject.Length)
+        {
+            return [LuaValue.Nil];
+        }
+
         if (plain)
         {
             var needle = GetLuaStringBytes(patternText);
@@ -163,6 +169,13 @@ public sealed partial class LuaState
         var patternText = RequireStringArgument(arguments, 1, "string.match");
         var subject = GetLuaStringBytes(text);
         var startIndex = ResolvePatternSearchStart(arguments, 2, subject.Length, "string.match");
+
+        // Lua 5.5: init > #s + 1 → no match.
+        if (startIndex > subject.Length)
+        {
+            return [LuaValue.Nil];
+        }
+
         var pattern = CompilePattern(patternText);
         var match = pattern.Find(subject, startIndex);
         return match is null
@@ -478,11 +491,18 @@ public sealed partial class LuaState
         int length,
         string functionName)
     {
-        var position = ResolveRelativePosition(
-            arguments.Count > argumentIndex && !arguments[argumentIndex].IsNil
-                ? RequireIntegerArgument(arguments, argumentIndex, functionName)
-                : 1L,
-            length);
+        var rawPosition = arguments.Count > argumentIndex && !arguments[argumentIndex].IsNil
+            ? RequireIntegerArgument(arguments, argumentIndex, functionName)
+            : 1L;
+
+        // Lua 5.5: if init > #s + 1, the function returns no match.
+        // Signal this with a sentinel (length + 2 as 0-based = length + 1 absolute).
+        if (rawPosition > (long)length + 1)
+        {
+            return length + 1;
+        }
+
+        var position = ResolveRelativePosition(rawPosition, length);
         position = Math.Clamp(position, 1, length + 1);
         return (int)(position - 1);
     }
