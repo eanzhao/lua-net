@@ -6,6 +6,14 @@ namespace Lua.Runtime.Execution;
 
 public sealed partial class LuaState
 {
+    private static LuaValue[] DebugGetMetatable(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireArgument(arguments, 0, "debug.getmetatable");
+        return state.TryGetRawMetatable(value, out var metatable) && metatable is not null
+            ? [LuaValue.FromTable(metatable)]
+            : [LuaValue.Nil];
+    }
+
     private static LuaValue[] DebugGetInfo(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
     {
         var level = RequireArgument(arguments, 0, "debug.getinfo");
@@ -117,6 +125,26 @@ public sealed partial class LuaState
         }
 
         return [LuaValue.FromString(sb.ToString())];
+    }
+
+    private static LuaValue[] DebugSetMetatable(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)
+    {
+        var value = RequireArgument(arguments, 0, "debug.setmetatable");
+        var metatableValue = RequireArgument(arguments, 1, "debug.setmetatable");
+
+        if (metatableValue.IsNil)
+        {
+            state.SetRawMetatable(value, metatable: null);
+            return [value];
+        }
+
+        if (metatableValue.Kind != LuaValueKind.Table)
+        {
+            throw CreateArgumentTypeError("debug.setmetatable", 2, "nil or table", metatableValue);
+        }
+
+        state.SetRawMetatable(value, metatableValue.AsTable());
+        return [value];
     }
 
     private static LuaValue[] DebugGetLocal(LuaState state, LuaClosure closure, IReadOnlyList<LuaValue> arguments)

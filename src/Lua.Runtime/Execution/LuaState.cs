@@ -261,8 +261,10 @@ public sealed partial class LuaState
     private void RegisterDebugSupport()
     {
         RegisterLibraryFunction(DebugLibrary, "getinfo", DebugGetInfo, "getinfo");
+        RegisterLibraryFunction(DebugLibrary, "getmetatable", DebugGetMetatable, "getmetatable");
         RegisterLibraryFunction(DebugLibrary, "traceback", DebugTraceback, "traceback");
         RegisterLibraryFunction(DebugLibrary, "getlocal", DebugGetLocal, "getlocal");
+        RegisterLibraryFunction(DebugLibrary, "setmetatable", DebugSetMetatable, "setmetatable");
         RegisterLibraryFunction(DebugLibrary, "setlocal", DebugSetLocal, "setlocal");
         RegisterLibraryFunction(DebugLibrary, "getupvalue", DebugGetUpvalue, "getupvalue");
         RegisterLibraryFunction(DebugLibrary, "setupvalue", DebugSetUpvalue, "setupvalue");
@@ -536,6 +538,10 @@ public sealed partial class LuaState
             case LuaValueKind.UserData:
                 metatable = value.AsUserData().Metatable;
                 return metatable is not null;
+            case LuaValueKind.Integer:
+            case LuaValueKind.Float:
+                return _typeMetatables.TryGetValue(LuaValueKind.Integer, out metatable) ||
+                       _typeMetatables.TryGetValue(LuaValueKind.Float, out metatable);
             default:
                 return _typeMetatables.TryGetValue(value.Kind, out metatable);
         }
@@ -550,6 +556,44 @@ public sealed partial class LuaState
 
         metamethod = LuaValue.Nil;
         return false;
+    }
+
+    private void SetRawMetatable(LuaValue value, LuaTable? metatable)
+    {
+        switch (value.Kind)
+        {
+            case LuaValueKind.Table:
+                value.AsTable().SetMetatable(metatable);
+                break;
+            case LuaValueKind.UserData:
+                value.AsUserData().SetMetatable(metatable);
+                break;
+            case LuaValueKind.Integer:
+            case LuaValueKind.Float:
+                if (metatable is null)
+                {
+                    _typeMetatables.Remove(LuaValueKind.Integer);
+                    _typeMetatables.Remove(LuaValueKind.Float);
+                }
+                else
+                {
+                    _typeMetatables[LuaValueKind.Integer] = metatable;
+                    _typeMetatables[LuaValueKind.Float] = metatable;
+                }
+
+                break;
+            default:
+                if (metatable is null)
+                {
+                    _typeMetatables.Remove(value.Kind);
+                }
+                else
+                {
+                    _typeMetatables[value.Kind] = metatable;
+                }
+
+                break;
+        }
     }
 
     private void SetTypeMetatable(LuaValueKind kind, LuaTable metatable)

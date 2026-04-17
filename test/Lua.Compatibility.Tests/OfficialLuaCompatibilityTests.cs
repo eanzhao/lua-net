@@ -73,6 +73,17 @@ public class OfficialLuaCompatibilityTests
         result.Error.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void OfficialEvents_ShouldRunSuccessfully()
+    {
+        var result = RunOfficialScript("events.lua");
+
+        result.ExitCode.ShouldBe(0);
+        result.Output.ShouldContain("testing metatables");
+        result.Output.ShouldContain("OK");
+        result.Error.ShouldBeEmpty();
+    }
+
     private static ScriptRunResult RunOfficialScript(string scriptPath)
     {
         return string.Equals(scriptPath, "attrib.lua", StringComparison.Ordinal)

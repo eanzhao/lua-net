@@ -1980,6 +1980,8 @@ public class LuaStateTests
     {
         var state = new LuaState();
         var debugGetInfo = GetLibraryFunction(state.DebugLibrary, "getinfo");
+        var debugGetMetatable = GetLibraryFunction(state.DebugLibrary, "getmetatable");
+        var debugSetMetatable = GetLibraryFunction(state.DebugLibrary, "setmetatable");
         var debugTraceback = GetLibraryFunction(state.DebugLibrary, "traceback");
         var debugGetUpvalue = GetLibraryFunction(state.DebugLibrary, "getupvalue");
         var debugSetUpvalue = GetLibraryFunction(state.DebugLibrary, "setupvalue");
@@ -1995,6 +1997,22 @@ public class LuaStateTests
         var info = infoResult[0].AsTable();
         info.GetValue(LuaValue.FromString("what")).AsString().ShouldBe("C");
         info.GetValue(LuaValue.FromString("nups")).AsInteger().ShouldBe(1);
+
+        var typeMetatable = new LuaTable("number-debug-metatable");
+        InvokeBaseFunction(state, debugSetMetatable, LuaValue.FromInteger(10), LuaValue.FromTable(typeMetatable))
+            .ShouldHaveSingleItem().ShouldBe(LuaValue.FromInteger(10));
+        InvokeBaseFunction(state, debugGetMetatable, LuaValue.FromFloat(2.5d))
+            .ShouldHaveSingleItem().AsTable().ShouldBeSameAs(typeMetatable);
+        InvokeBaseFunction(state, debugSetMetatable, LuaValue.FromBoolean(true), LuaValue.FromTable(typeMetatable));
+        InvokeBaseFunction(state, debugGetMetatable, LuaValue.FromBoolean(false))
+            .ShouldHaveSingleItem().AsTable().ShouldBeSameAs(typeMetatable);
+        InvokeBaseFunction(state, debugSetMetatable, LuaValue.Nil, LuaValue.FromTable(typeMetatable));
+        InvokeBaseFunction(state, debugGetMetatable, LuaValue.Nil)
+            .ShouldHaveSingleItem().AsTable().ShouldBeSameAs(typeMetatable);
+        InvokeBaseFunction(state, debugSetMetatable, LuaValue.Nil, LuaValue.Nil)
+            .ShouldHaveSingleItem().IsNil.ShouldBeTrue();
+        InvokeBaseFunction(state, debugGetMetatable, LuaValue.Nil)
+            .ShouldHaveSingleItem().IsNil.ShouldBeTrue();
 
         var tracebackResult = InvokeBaseFunction(state, debugTraceback, LuaValue.FromString("test error"), LuaValue.FromInteger(0));
         tracebackResult.ShouldHaveSingleItem().AsString().ShouldContain("test error");
