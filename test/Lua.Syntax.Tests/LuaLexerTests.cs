@@ -70,7 +70,8 @@ public class LuaLexerTests
 
         var token = new LuaLexer(source).Tokenize().Single(token => token.Kind == LuaTokenKind.String);
 
-        token.StringValue.ShouldBe("a\nAπztrim");
+        // Lua strings are byte sequences. \u{03C0} = π encodes to UTF-8 bytes 0xCF 0x80.
+        token.StringValue.ShouldBe("a\nA\u00CF\u0080ztrim");
     }
 
     [Fact]

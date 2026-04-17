@@ -636,21 +636,19 @@ public sealed class LuaLexer
     }
 
     /// <summary>
-    /// Encode a Unicode code point (or any value up to 0x7FFFFFFF) as extended UTF-8.
+    /// Encode a Unicode code point (or any value up to 0x7FFFFFFF) as UTF-8 bytes.
     /// Matches Lua 5.5 luaO_utf8esc behavior: produces up to 6 bytes for values above U+10FFFF.
-    /// For valid Unicode code points, returns a normal UTF-16 string. For extended values
-    /// or surrogate halves, returns one C# char per raw byte (Latin1 mapping).
+    /// Lua strings are byte sequences, so \u{80} must produce 2 bytes (0xC2, 0x80) rather than
+    /// a single UTF-16 char. Each produced byte is returned as one C# char (Latin1-style).
     /// </summary>
     private static string EncodeExtendedUtf8(uint x)
     {
-        // Standard Unicode range, no surrogate halves: use proper UTF-16 encoding.
-        if (x <= 0x10FFFFu && (x < 0xD800u || x > 0xDFFFu))
+        if (x < 0x80)
         {
-            return char.ConvertFromUtf32((int)x);
+            // ASCII: single byte.
+            return ((char)x).ToString();
         }
 
-        // Extended Lua 5.5 UTF-8 (5- or 6-byte sequence) or surrogate half:
-        // emit raw bytes as Latin1 chars so the lexer caller preserves them losslessly.
         Span<byte> buffer = stackalloc byte[6];
         var n = 0;
         uint mfb = 0x3f;
