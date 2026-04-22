@@ -595,6 +595,94 @@ end
     }
 
     [Fact]
+    public void Compile_ShouldAllowAssigningNonControlVariablesInGenericFor()
+    {
+        Should.NotThrow(() => LuaCompiler.Compile("""
+for _, value in pairs({ 1, 2, 3 }) do
+    value = value + 1
+end
+"""));
+    }
+
+    [Fact]
+    public void Compile_ShouldReportActiveLineForSingleLineEmptyFunction()
+    {
+        var results = Execute("""
+local info = debug.getinfo(function () end, "SL")
+return info.activelines[info.linedefined] == true
+""");
+
+        results.ShouldHaveSingleItem();
+        results[0].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldNotReportDefinitionLineForMultiLineFunction()
+    {
+        var results = Execute("""
+local function sample()
+    local value = 1
+    return value
+end
+
+local info = debug.getinfo(sample, "SL")
+return info.activelines[info.linedefined] == nil,
+       info.activelines[info.linedefined + 1] == true,
+       info.activelines[info.linedefined + 2] == true
+""");
+
+        results.Length.ShouldBe(3);
+        results[0].AsBoolean().ShouldBeTrue();
+        results[1].AsBoolean().ShouldBeTrue();
+        results[2].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldNotReportNameForFunctionObjectInDebugGetInfo()
+    {
+        var results = Execute("""
+local function sample()
+    return 1
+end
+
+local info = debug.getinfo(sample, "n")
+return info.name == nil, info.namewhat == ""
+""");
+
+        results.Length.ShouldBe(2);
+        results[0].AsBoolean().ShouldBeTrue();
+        results[1].AsBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Compile_ShouldNotLeakPairsHelperLinesIntoDebugHooks()
+    {
+        var results = Execute("""
+local trace = {}
+
+local function test (s)
+  collectgarbage()
+  local function hook (event, line)
+    assert(event == 'line')
+    trace[#trace + 1] = line
+  end
+
+  debug.sethook(hook, 'l'); load(s)(); debug.sethook()
+end
+
+test([[for i,v in pairs{'a','b'} do
+  a=tostring(i) .. v
+end
+]])
+
+return table.concat(trace, ",")
+""");
+
+        results.ShouldHaveSingleItem();
+        results[0].AsString().ShouldBe("1,2,1,2,1,3");
+    }
+
+    [Fact]
     public void Compile_ShouldCloseToBeClosedLocalsAtScopeExit()
     {
         const string source = """
@@ -1224,8 +1312,7 @@ return foo
             .ShouldHaveSingleItem()
             .AsTable()
             .GetValue(LuaValue.FromString("name"))
-            .AsString()
-            .ShouldBe("foo");
+            .IsNil.ShouldBeTrue();
 
         var getResult = InvokeClosure(vm.State, debugGetUpvalue, functionValue, LuaValue.FromInteger(1));
         getResult[0].AsString().ShouldBe("env");

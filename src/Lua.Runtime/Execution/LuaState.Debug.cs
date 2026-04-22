@@ -56,7 +56,7 @@ public sealed partial class LuaState
             {
                 var (name, nameWhat) = frameIndex >= 0
                     ? ResolveFrameName(state.CurrentThread.Frames[frameIndex])
-                    : ResolveFunctionName(target);
+                    : (LuaValue.Nil, string.Empty);
                 info.SetValue(LuaValue.FromString("name"), name);
                 info.SetValue(LuaValue.FromString("namewhat"), LuaValue.FromString(nameWhat));
             }
@@ -125,15 +125,6 @@ public sealed partial class LuaState
         return string.IsNullOrEmpty(frame.InvocationName)
             ? (LuaValue.Nil, frame.InvocationNameWhat)
             : (LuaValue.FromString(frame.InvocationName), frame.InvocationNameWhat);
-    }
-
-    private static (LuaValue Name, string NameWhat) ResolveFunctionName(LuaClosure closure)
-    {
-        ArgumentNullException.ThrowIfNull(closure);
-
-        return string.IsNullOrEmpty(closure.DebugName)
-            ? (LuaValue.Nil, string.Empty)
-            : (LuaValue.FromString(closure.DebugName), string.Empty);
     }
 
     private static void ValidateGetInfoOptions(LuaValue level, string what)
@@ -218,23 +209,20 @@ public sealed partial class LuaState
     private static LuaTable CreateActiveLinesTable(LuaClosure closure)
     {
         var activeLines = new LuaTable("debug.getinfo.activelines");
+        var hasOtherActiveLine = false;
         for (var programCounter = 0; programCounter < closure.InstructionCount; programCounter++)
         {
             var line = closure.ResolveLine(programCounter);
             if (line > 0)
             {
                 activeLines.SetValue(LuaValue.FromInteger(line), LuaValue.FromBoolean(true));
+                hasOtherActiveLine |= line != closure.LineDefined;
             }
         }
 
-        if (closure.LineDefined > 0)
+        if (hasOtherActiveLine && closure.LineDefined > 0)
         {
             activeLines.SetValue(LuaValue.FromInteger(closure.LineDefined), LuaValue.Nil);
-        }
-
-        if (closure.LastLineDefined > closure.LineDefined)
-        {
-            activeLines.SetValue(LuaValue.FromInteger(closure.LastLineDefined), LuaValue.FromBoolean(true));
         }
 
         return activeLines;

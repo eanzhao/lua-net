@@ -277,12 +277,27 @@ public static class LuaCompiler
         {
             foreach (var statement in statements)
             {
+                ResetTemps(GetTempResetSourceLine(statement));
                 WithSourceLine(statement.Range.Start.Line, () =>
                 {
-                    ResetTemps();
                     CompileStatement(statement);
                 });
             }
+        }
+
+        private int GetTempResetSourceLine(LuaStatementSyntax statement)
+        {
+            return statement switch
+            {
+                LuaDoStatementSyntax or
+                LuaIfStatementSyntax or
+                LuaWhileStatementSyntax or
+                LuaRepeatStatementSyntax or
+                LuaNumericForStatementSyntax or
+                LuaGenericForStatementSyntax
+                    => _instructionLines.Count > 0 ? _instructionLines[^1] : _currentSourceLine,
+                _ => statement.Range.Start.Line
+            };
         }
 
         private void CompileStatement(LuaStatementSyntax statement)
@@ -557,7 +572,7 @@ public static class LuaCompiler
                     statement.Names[index].Identifier,
                     firstLoopVariableRegister + index,
                     statement.Names[index].Range.Start,
-                    isReadOnly: true);
+                    isReadOnly: index == 0);
             }
 
             _loops.Add(new LoopContext(CurrentScope, iteratorRegister));
@@ -1765,11 +1780,24 @@ public static class LuaCompiler
             return _scopes.Count == 0 ? null : _scopes[^1].FirstCloseRegister;
         }
 
-        private void ResetTemps()
+        private void ResetTemps(int sourceLine)
         {
             if (_tempRegisterTop > _persistentRegisterCount)
             {
-                EmitLoadNilRange(_persistentRegisterCount, _tempRegisterTop - _persistentRegisterCount);
+                var previousLine = _currentSourceLine;
+                if (sourceLine > 0)
+                {
+                    _currentSourceLine = sourceLine;
+                }
+
+                try
+                {
+                    EmitLoadNilRange(_persistentRegisterCount, _tempRegisterTop - _persistentRegisterCount);
+                }
+                finally
+                {
+                    _currentSourceLine = previousLine;
+                }
             }
 
             _tempRegisterTop = _persistentRegisterCount;

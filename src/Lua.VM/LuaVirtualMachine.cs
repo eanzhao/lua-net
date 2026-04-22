@@ -114,10 +114,28 @@ end
 """;
 
         var result = Execute(LuaCompiler.Compile(pairsSource, "=(pairs helper)"));
-        if (result.Length != 0 && result[0].Kind == LuaValueKind.Function)
+        if (result.Length == 0 || result[0].Kind != LuaValueKind.Function)
         {
-            State.GlobalEnvironment.SetValue(LuaValue.FromString("pairs"), result[0]);
+            return;
         }
+
+        var helper = result[0].AsFunction();
+        var strippedHelper = new LuaClosure(
+            helper.DebugName,
+            helper.UpvalueCount,
+            helper.Body,
+            helper.Upvalues,
+            helper.UpvalueNames,
+            helper.SourceName,
+            helper.LineDefined,
+            _ => -1,
+            helper.LastLineDefined,
+            helper.ParameterCount,
+            helper.IsVarArg,
+            helper.InstructionCount);
+        State.GlobalEnvironment.SetValue(
+            LuaValue.FromString("pairs"),
+            LuaValue.FromFunction(strippedHelper));
     }
 
     private LuaClosure CreateRootClosure(LuaPrototype prototype, string? debugName, LuaValue? environment)
