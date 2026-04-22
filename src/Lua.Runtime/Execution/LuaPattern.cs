@@ -32,7 +32,7 @@ internal sealed class LuaPattern
         var parsedEnd = ParseTokens(position, end, inCapture: false, ref captureIndex);
         if (parsedEnd != end)
         {
-            throw LuaPatternException.Malformed("unexpected ')'");
+            throw LuaPatternException.Malformed("invalid pattern capture");
         }
 
         _captureCount = captureIndex;
@@ -287,6 +287,21 @@ internal sealed class LuaPattern
                 }
 
                 return false;
+            case PatternAtomKind.Frontier:
+                if (atom.Set is null)
+                {
+                    return false;
+                }
+
+                var previous = position == 0 ? (byte)0 : subject[position - 1];
+                var current = position < subject.Length ? subject[position] : (byte)0;
+                if (!atom.Set.Contains(previous) && atom.Set.Contains(current))
+                {
+                    nextPosition = position;
+                    return true;
+                }
+
+                return false;
             case PatternAtomKind.Balanced:
                 return TryMatchBalanced(subject, position, atom.Value, atom.Value2, out nextPosition);
             case PatternAtomKind.BackReference:
@@ -305,7 +320,7 @@ internal sealed class LuaPattern
             {
                 if (!inCapture)
                 {
-                    throw LuaPatternException.Malformed("unexpected ')'");
+                    throw LuaPatternException.Malformed("invalid pattern capture");
                 }
 
                 return position + 1;
@@ -396,6 +411,22 @@ internal sealed class LuaPattern
             var close = _pattern[position + 1];
             position += 2;
             return new PatternAtom(PatternAtomKind.Balanced, open, close, null);
+        }
+
+        if (code == (byte)'f')
+        {
+            if (position >= end || _pattern[position] != (byte)'[')
+            {
+                throw LuaPatternException.Malformed("missing '[' after '%f' in pattern");
+            }
+
+            var set = ParseSet(ref position, end);
+            return new PatternAtom(PatternAtomKind.Frontier, 0, 0, set.Set);
+        }
+
+        if (code == (byte)'0')
+        {
+            throw LuaPatternException.Malformed("invalid capture index %0");
         }
 
         if (code is >= (byte)'1' and <= (byte)'9')
@@ -529,6 +560,20 @@ internal sealed class LuaPattern
             return false;
         }
 
+        if (open == close)
+        {
+            for (var index = position + 1; index < subject.Length; index++)
+            {
+                if (subject[index] == close)
+                {
+                    nextPosition = index + 1;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         var depth = 1;
         for (var index = position + 1; index < subject.Length; index++)
         {
@@ -555,13 +600,13 @@ internal sealed class LuaPattern
         nextPosition = default;
         if (captureIndex >= captures.Length)
         {
-            throw LuaPatternException.Malformed("invalid capture index");
+            throw LuaPatternException.Malformed($"invalid capture index %{captureIndex + 1}");
         }
 
         var capture = captures[captureIndex];
         if (capture.Start < 0 || capture.End < capture.Start || capture.IsPosition)
         {
-            throw LuaPatternException.Malformed("invalid capture index");
+            throw LuaPatternException.Malformed($"invalid capture index %{captureIndex + 1}");
         }
 
         var length = capture.End - capture.Start;
@@ -696,6 +741,7 @@ internal sealed class LuaPattern
         Any,
         Class,
         Set,
+        Frontier,
         Balanced,
         BackReference
     }

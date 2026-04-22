@@ -1,6 +1,7 @@
 using System.Text;
 using Lua.Bytecode.Chunks;
 using Lua.Bytecode.Instructions;
+using Lua.Runtime.Execution;
 using Lua.Runtime.Values;
 using Lua.Syntax.Ast;
 using Lua.Syntax.Lexing;
@@ -1067,7 +1068,7 @@ public static class LuaCompiler
                         EmitLoadConstant(targetRegister, ParseNumberConstant(numberLiteral));
                         return;
                     case LuaStringLiteralExpressionSyntax stringLiteral:
-                        EmitLoadConstant(targetRegister, LuaConstant.FromString(stringLiteral.Value));
+                        EmitLoadConstant(targetRegister, LuaConstant.FromString(CreateSourceStringLiteral(stringLiteral.Value)));
                         return;
                     case LuaNameExpressionSyntax nameExpression:
                         CompileNameRead(nameExpression.Name.Identifier, nameExpression.Range, targetRegister);
@@ -1736,6 +1737,11 @@ public static class LuaCompiler
                 LuaValueKind.Float => LuaConstant.FromFloat(value.AsFloat()),
                 _ => throw CreateError(expression.Range, $"unsupported numeric literal '{expression.Text}'")
             };
+        }
+
+        private static string CreateSourceStringLiteral(string value)
+        {
+            return LuaStringBytes.FromBytes(Encoding.Latin1.GetBytes(value));
         }
 
         private bool HasActiveExplicitGlobalDeclarations =>

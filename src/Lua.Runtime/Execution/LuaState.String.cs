@@ -189,7 +189,8 @@ public sealed partial class LuaState
         var patternText = RequireStringArgument(arguments, 1, "string.gmatch");
         var subject = GetLuaStringBytes(text);
         var pattern = CompilePattern(patternText);
-        var nextIndex = 0;
+        var nextIndex = ResolvePatternSearchStart(arguments, 2, subject.Length, "string.gmatch");
+        int? lastMatchEnd = null;
 
         var iterator = new LuaClosure(
             "string.gmatch.iter",
@@ -203,7 +204,21 @@ public sealed partial class LuaState
                         return [];
                     }
 
+                    if (match.Value.Start == nextIndex &&
+                        match.Value.End == nextIndex &&
+                        lastMatchEnd == nextIndex)
+                    {
+                        if (nextIndex >= subject.Length)
+                        {
+                            return [];
+                        }
+
+                        nextIndex++;
+                        continue;
+                    }
+
                     var result = BuildPatternResults(subject, match.Value, includeIndices: false, wholeMatchWhenNoCapture: true);
+                    lastMatchEnd = match.Value.End;
                     nextIndex = GetNextPatternSearchIndex(match.Value, subject.Length);
                     return result;
                 }
@@ -229,6 +244,8 @@ public sealed partial class LuaState
         var copiedUntil = 0;
         var searchIndex = 0;
         long substitutions = 0;
+        int? lastMatchEnd = null;
+        var performedReplacement = false;
 
         while (searchIndex <= subject.Length && substitutions < limit)
         {
@@ -238,11 +255,29 @@ public sealed partial class LuaState
                 break;
             }
 
+            if (match.Value.Start == searchIndex &&
+                match.Value.End == searchIndex &&
+                lastMatchEnd == searchIndex)
+            {
+                if (searchIndex >= subject.Length)
+                {
+                    break;
+                }
+
+                output.AddRange(subject.AsSpan(copiedUntil, searchIndex - copiedUntil).ToArray());
+                output.Add(subject[searchIndex]);
+                copiedUntil = searchIndex + 1;
+                searchIndex = copiedUntil;
+                continue;
+            }
+
             output.AddRange(subject.AsSpan(copiedUntil, match.Value.Start - copiedUntil).ToArray());
 
-            var replacementBytes = ResolveGSubReplacement(state, replacement, subject, match.Value);
-            output.AddRange(replacementBytes);
+            var replacementResult = ResolveGSubReplacement(state, replacement, subject, match.Value);
+            output.AddRange(replacementResult.Bytes);
             substitutions++;
+            lastMatchEnd = match.Value.End;
+            performedReplacement |= replacementResult.PerformedReplacement;
 
             if (match.Value.End == match.Value.Start)
             {
@@ -268,10 +303,13 @@ public sealed partial class LuaState
             output.AddRange(subject.AsSpan(copiedUntil).ToArray());
         }
 
-        return [LuaValue.FromString(CreateLuaString(CollectionsMarshal.AsSpan(output))), LuaValue.FromInteger(substitutions)];
+        var resultText = performedReplacement
+            ? CreateLuaString(CollectionsMarshal.AsSpan(output))
+            : text;
+        return [LuaValue.FromString(resultText), LuaValue.FromInteger(substitutions)];
     }
 
-    private static byte[] ResolveGSubReplacement(
+    private static (byte[] Bytes, bool PerformedReplacement) ResolveGSubReplacement(
         LuaState state,
         LuaValue replacement,
         byte[] subject,
@@ -279,14 +317,14 @@ public sealed partial class LuaState
     {
         if (replacement.Kind == LuaValueKind.String)
         {
-            return ExpandGSubReplacementString(replacement.AsString(), subject, match);
+            return (ExpandGSubReplacementString(replacement.AsString(), subject, match), true);
         }
 
         if (replacement.Kind == LuaValueKind.Table)
         {
             var key = GetGSubLookupKey(subject, match);
-            var value = replacement.AsTable().GetValue(key);
-            return ConvertReplacementResult(subject, match, value, "table");
+            var value = GetTableLibraryValue(state, replacement.AsTable(), key);
+            return ConvertReplacementResult(subject, match, value);
         }
 
         if (replacement.Kind == LuaValueKind.Function)
@@ -294,29 +332,44 @@ public sealed partial class LuaState
             var callArguments = BuildReplacementCallArguments(subject, match);
             var results = state.InvokeCallable(replacement, callArguments);
             var value = results.Length == 0 ? LuaValue.Nil : results[0];
-            return ConvertReplacementResult(subject, match, value, "function");
+            return ConvertReplacementResult(subject, match, value);
         }
 
         throw CreateArgumentTypeError("string.gsub", 3, "string/table/function", replacement);
     }
 
-    private static byte[] ConvertReplacementResult(
+    private static (byte[] Bytes, bool PerformedReplacement) ConvertReplacementResult(
         byte[] subject,
         LuaPattern.LuaPatternMatch match,
-        LuaValue value,
-        string sourceKind)
+        LuaValue value)
     {
         if (value.IsNil || (value.Kind == LuaValueKind.Boolean && !value.AsBoolean()))
         {
-            return match.GetWholeMatchBytes(subject).ToArray();
+            return (match.GetWholeMatchBytes(subject).ToArray(), false);
         }
 
         if (TryConvertToStringArgument(value, out var text))
         {
-            return GetLuaStringBytes(text);
+            return (GetLuaStringBytes(text), true);
         }
 
-        throw CreateRuntimeError($"invalid replacement value ({GetTypeName(value)}) from {sourceKind}");
+        throw CreateRuntimeError($"invalid replacement value ({DescribeValueType(value)})");
+    }
+
+    private static string DescribeValueType(LuaValue value)
+    {
+        return value.Kind switch
+        {
+            LuaValueKind.Boolean => "a boolean",
+            LuaValueKind.Integer => "an integer",
+            LuaValueKind.Float => "a float",
+            LuaValueKind.String => "a string",
+            LuaValueKind.Table => "a table",
+            LuaValueKind.Function => "a function",
+            LuaValueKind.Thread => "a thread",
+            LuaValueKind.UserData => "a userdata",
+            _ => GetTypeName(value)
+        };
     }
 
     private static LuaValue GetGSubLookupKey(byte[] subject, LuaPattern.LuaPatternMatch match)
@@ -373,10 +426,21 @@ public sealed partial class LuaState
 
             if (code is >= (byte)'1' and <= (byte)'9')
             {
+                if (match.Captures.Length == 0)
+                {
+                    if (code != (byte)'1')
+                    {
+                        throw CreateRuntimeError($"invalid capture index %{(char)code}");
+                    }
+
+                    output.AddRange(match.GetWholeMatchBytes(subject).ToArray());
+                    continue;
+                }
+
                 var captureIndex = code - (byte)'1';
                 if (captureIndex >= match.Captures.Length)
                 {
-                    throw CreateRuntimeError("invalid capture index in replacement string");
+                    throw CreateRuntimeError($"invalid capture index %{(char)code}");
                 }
 
                 var capture = match.Captures[captureIndex];
@@ -392,7 +456,7 @@ public sealed partial class LuaState
                 continue;
             }
 
-            output.Add(code);
+            throw CreateRuntimeError("invalid use of '%' in replacement string");
         }
 
         return CollectionsMarshal.AsSpan(output).ToArray();

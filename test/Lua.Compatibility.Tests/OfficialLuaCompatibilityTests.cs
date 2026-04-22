@@ -109,6 +109,18 @@ public class OfficialLuaCompatibilityTests
         result.Error.ShouldBeEmpty();
     }
 
+    [Fact]
+    public void OfficialPm_ShouldRunSuccessfully()
+    {
+        var result = RunOfficialScript("pm.lua");
+
+        result.ExitCode.ShouldBe(0);
+        result.Output.ShouldContain("testing pattern matching");
+        result.Output.ShouldContain("big strings");
+        result.Output.ShouldContain("OK");
+        result.Error.ShouldBeEmpty();
+    }
+
     private static ScriptRunResult RunOfficialScript(string scriptPath)
     {
         return string.Equals(scriptPath, "attrib.lua", StringComparison.Ordinal) ||
